@@ -4,7 +4,19 @@
 /// The decoder only follows HPACK rules, without performing any additional
 /// (semantic) checks on the header name/value pairs, i.e. it considers the
 /// headers as opaque octets.
-
+///
+/// # Example
+///
+/// A simple example of using the decoder that demonstrates its API:
+///
+/// ```rust
+/// use solicit::hpack::Decoder;
+/// let mut decoder = Decoder::new();
+///
+/// let header_list = decoder.decode(&[0x82]);
+///
+/// assert_eq!([(b":method".to_vec(), b"GET".to_vec())], header_list);
+/// ```
 use std::fmt;
 use std::collections::RingBuf;
 
