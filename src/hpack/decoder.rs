@@ -242,11 +242,36 @@ impl fmt::Show for DynamicTable {
     }
 }
 
+/// Decodes an octet string under HPACK rules of encoding found in the given
+/// buffer `buf`.
+///
+/// It is assumed that the first byte in the buffer represents the start of the
+/// encoded octet string.
+///
+/// Returns the decoded string in a newly allocated `Vec` and the number of
+/// bytes consumed from the given buffer.
+fn decode_string(buf: &[u8]) -> (Vec<u8>, usize) {
+    let (len, consumed) = decode_integer(buf, 7);
+    debug!("decode_string: Consumed = {}, len = {}", consumed, len);
+    let raw_string = &buf[consumed..consumed + len];
+    if buf[0] & 128 == 128 {
+        debug!("decode_string: Using the Huffman code");
+        // Huffman coding used: pass the raw octets to the Huffman decoder
+        // and return its result.
+        (vec![], len)
+    } else {
+        // The octets were transmitted raw
+        debug!("decode_string: Raw octet string received");
+        (raw_string.to_vec(), consumed + len)
+    }
+}
+
 
 mod tests {
     use super::{decode_integer};
     use super::{encode_integer};
     use super::DynamicTable;
+    use super::decode_string;
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
@@ -355,5 +380,36 @@ mod tests {
         assert_eq!(encode_integer(10, 5), [10]);
         assert_eq!(encode_integer(1337, 5), [31, 154, 10]);
         assert_eq!(encode_integer(127, 7), [127, 0]);
+    }
+
+    #[test]
+    fn test_decode_string_no_huffman() {
+        assert_eq!((b"abc".to_vec(), 4), decode_string(&[3, b'a', b'b', b'c']));
+        assert_eq!((b"a".to_vec(), 2), decode_string(&[1, b'a']));
+        assert_eq!((b"".to_vec(), 1), decode_string(&[0, b'a']));
+    }
+
+    /// Tests that an octet string is correctly decoded when it's length
+    /// is longer than what can fit into the 7-bit prefix.
+    #[test]
+    fn test_decode_string_no_huffman_long() {
+        {
+            let full_string: Vec<u8> = (0u8..200).collect();
+            let mut encoded = encode_integer(full_string.len(), 7);
+            encoded.push_all(full_string.as_slice());
+
+            assert_eq!(
+                (full_string, encoded.len()),
+                decode_string(encoded.as_slice()));
+        }
+        {
+            let full_string: Vec<u8> = (0u8..127).collect();
+            let mut encoded = encode_integer(full_string.len(), 7);
+            encoded.push_all(full_string.as_slice());
+
+            assert_eq!(
+                (full_string, encoded.len()),
+                decode_string(encoded.as_slice()));
+        }
     }
 }
