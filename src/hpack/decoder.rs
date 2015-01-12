@@ -242,6 +242,41 @@ impl fmt::Show for DynamicTable {
     }
 }
 
+/// Different variants of how a particular header field can be represented in
+/// an HPACK encoding.
+enum FieldRepresentation {
+    Indexed,
+    LiteralWithIncrementalIndexing,
+    SizeUpdate,
+    LiteralNeverIndexed,
+    LiteralWithoutIndexing,
+}
+
+impl FieldRepresentation {
+    /// Based on the given octet, returns the type of the field representation.
+    ///
+    /// The given octet should be the top-order byte of the header field that
+    /// is about to be decoded.
+    fn new(octet: u8) -> FieldRepresentation {
+        if octet & 128 == 128 {
+            // High-order bit set
+            FieldRepresentation::Indexed
+        } else if octet & 64 == 64 {
+            // Bit pattern `01`
+            FieldRepresentation::LiteralWithIncrementalIndexing
+        } else if octet & 32 == 32 {
+            // Bit pattern `001`
+            FieldRepresentation::SizeUpdate
+        } else if octet & 16 == 16 {
+            // Bit pattern `0001`
+            FieldRepresentation::LiteralNeverIndexed
+        } else {
+            // None of the top 4 bits is set => bit pattern `0000xxxx`
+            FieldRepresentation::LiteralWithoutIndexing
+        }
+    }
+}
+
 /// Decodes an octet string under HPACK rules of encoding found in the given
 /// buffer `buf`.
 ///
@@ -271,6 +306,7 @@ mod tests {
     use super::{decode_integer};
     use super::{encode_integer};
     use super::DynamicTable;
+    use super::FieldRepresentation;
     use super::decode_string;
 
     #[test]
@@ -380,6 +416,90 @@ mod tests {
         assert_eq!(encode_integer(10, 5), [10]);
         assert_eq!(encode_integer(1337, 5), [31, 154, 10]);
         assert_eq!(encode_integer(127, 7), [127, 0]);
+    }
+
+    #[test]
+    fn test_detect_literal_without_indexing() {
+        assert!(match FieldRepresentation::new(0) {
+            FieldRepresentation::LiteralWithoutIndexing => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 4) - 1) {
+            FieldRepresentation::LiteralWithoutIndexing => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new(2) {
+            FieldRepresentation::LiteralWithoutIndexing => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn test_detect_literal_never_indexed() {
+        assert!(match FieldRepresentation::new(1 << 4) {
+            FieldRepresentation::LiteralNeverIndexed => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 4) + 15) {
+            FieldRepresentation::LiteralNeverIndexed => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn test_detect_literal_incremental_indexing() {
+        assert!(match FieldRepresentation::new(1 << 6) {
+            FieldRepresentation::LiteralWithIncrementalIndexing => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 6) + (1 << 4)) {
+            FieldRepresentation::LiteralWithIncrementalIndexing => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 7) - 1) {
+            FieldRepresentation::LiteralWithIncrementalIndexing => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn test_detect_indexed() {
+        assert!(match FieldRepresentation::new(1 << 7) {
+            FieldRepresentation::Indexed => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 7) + (1 << 4)) {
+            FieldRepresentation::Indexed => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 7) + (1 << 5)) {
+            FieldRepresentation::Indexed => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 7) + (1 << 6)) {
+            FieldRepresentation::Indexed => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new(255) {
+            FieldRepresentation::Indexed => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn test_detect_dynamic_table_size_update() {
+        assert!(match FieldRepresentation::new(1 << 5) {
+            FieldRepresentation::SizeUpdate => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 5) + (1 << 4)) {
+            FieldRepresentation::SizeUpdate => true,
+            _ => false,
+        });
+        assert!(match FieldRepresentation::new((1 << 6) - 1) {
+            FieldRepresentation::SizeUpdate => true,
+            _ => false,
+        });
     }
 
     #[test]
