@@ -135,17 +135,24 @@ struct DynamicTable {
 }
 
 impl DynamicTable {
-    /// Creates a new empty dynamic table with default size.
+    /// Creates a new empty dynamic table with a default size.
     fn new() -> DynamicTable {
+        // The default maximum size corresponds to the default HTTP/2
+        // setting
+        DynamicTable::with_size(4096)
+    }
+
+    /// Creates a new empty dynamic table with the given maximum size.
+    fn with_size(max_size: usize) -> DynamicTable {
         DynamicTable {
             table: RingBuf::new(),
             size: 0,
-            // The default maximum size corresponds to the default HTTP/2
-            // setting
-            max_size: 4096,
+            max_size: max_size,
         }
     }
 
+    /// Returns the current size of the table in octets, as defined by the IETF
+    /// HPACK spec.
     fn get_size(&self) -> usize {
         self.size
     }
