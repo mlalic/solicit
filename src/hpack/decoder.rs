@@ -20,6 +20,8 @@
 use std::fmt;
 use std::collections::RingBuf;
 
+use super::huffman::HuffmanDecoder;
+
 /// Decodes an integer encoded with a given prefix size (in bits).
 /// Assumes that the buffer `buf` contains the integer to be decoded,
 /// with the first byte representing the octet that contains the
@@ -322,7 +324,8 @@ fn decode_string(buf: &[u8]) -> (Vec<u8>, usize) {
         debug!("decode_string: Using the Huffman code");
         // Huffman coding used: pass the raw octets to the Huffman decoder
         // and return its result.
-        (vec![], len)
+        let mut decoder = HuffmanDecoder::new();
+        (decoder.decode(raw_string), consumed + len)
     } else {
         // The octets were transmitted raw
         debug!("decode_string: Raw octet string received");
@@ -1049,6 +1052,191 @@ mod tests {
             ];
             let actual = decoder.dynamic_table.get_table_as_list();
             // assert_eq!(actual, expected_table);
+        }
+    }
+    /// Tests that a each header list from a sequence of requests is correctly
+    /// decoded, when Huffman coding is used
+    /// (example from: HPACK-draft-10, C.4.*)
+    #[test]
+    fn request_sequence_huffman() {
+        let mut decoder = Decoder::new();
+        {
+            // First Request (B.4.1.)
+            let hex_dump = [
+                0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2,
+                0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            assert_eq!(header_list, [
+                (b":method".to_vec(), b"GET".to_vec()),
+                (b":scheme".to_vec(), b"http".to_vec()),
+                (b":path".to_vec(), b"/".to_vec()),
+                (b":authority".to_vec(), b"www.example.com".to_vec()),
+            ]);
+            // Only one entry got added to the dynamic table?
+            assert_eq!(decoder.dynamic_table.len(), 1);
+            let mut expected_table = vec![
+                (b":authority".to_vec(), b"www.example.com".to_vec())
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+        }
+        {
+            // Second Request (C.4.2.)
+            let hex_dump = [
+                0x82, 0x86, 0x84, 0xbe, 0x58, 0x86, 0xa8, 0xeb, 0x10, 0x64,
+                0x9c, 0xbf,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            assert_eq!(header_list, [
+                (b":method".to_vec(), b"GET".to_vec()),
+                (b":scheme".to_vec(), b"http".to_vec()),
+                (b":path".to_vec(), b"/".to_vec()),
+                (b":authority".to_vec(), b"www.example.com".to_vec()),
+                (b"cache-control".to_vec(), b"no-cache".to_vec()),
+            ]);
+            // One entry got added to the dynamic table, so we have two?
+            let mut expected_table = vec![
+                (b"cache-control".to_vec(), b"no-cache".to_vec()),
+                (b":authority".to_vec(), b"www.example.com".to_vec()),
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+        }
+        {
+            // Third Request (C.4.3.)
+            let hex_dump = [
+                0x82, 0x87, 0x85, 0xbf, 0x40, 0x88, 0x25, 0xa8, 0x49, 0xe9,
+                0x5b, 0xa9, 0x7d, 0x7f, 0x89, 0x25, 0xa8, 0x49, 0xe9, 0x5b,
+                0xb8, 0xe8, 0xb4, 0xbf,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            assert_eq!(header_list, [
+                (b":method".to_vec(), b"GET".to_vec()),
+                (b":scheme".to_vec(), b"https".to_vec()),
+                (b":path".to_vec(), b"/index.html".to_vec()),
+                (b":authority".to_vec(), b"www.example.com".to_vec()),
+                (b"custom-key".to_vec(), b"custom-value".to_vec()),
+            ]);
+            // One entry got added to the dynamic table, so we have three at
+            // this point...?
+            let mut expected_table = vec![
+                (b"custom-key".to_vec(), b"custom-value".to_vec()),
+                (b"cache-control".to_vec(), b"no-cache".to_vec()),
+                (b":authority".to_vec(), b"www.example.com".to_vec()),
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+        }
+    }
+
+    /// Tests that a each header list from a sequence of responses is correctly
+    /// decoded, when Huffman encoding is used
+    /// (example from: HPACK-draft-10, C.6.*)
+    #[test]
+    fn response_sequence_huffman() {
+        let mut decoder = Decoder::new();
+        // The example sets the max table size to 256 octets.
+        decoder.set_max_table_size(256);
+        {
+            // First Response (C.6.1.)
+            let hex_dump = [
+                0x48, 0x82, 0x64, 0x02, 0x58, 0x85, 0xae, 0xc3, 0x77, 0x1a,
+                0x4b, 0x61, 0x96, 0xd0, 0x7a, 0xbe, 0x94, 0x10, 0x54, 0xd4,
+                0x44, 0xa8, 0x20, 0x05, 0x95, 0x04, 0x0b, 0x81, 0x66, 0xe0,
+                0x82, 0xa6, 0x2d, 0x1b, 0xff, 0x6e, 0x91, 0x9d, 0x29, 0xad,
+                0x17, 0x18, 0x63, 0xc7, 0x8f, 0x0b, 0x97, 0xc8, 0xe9, 0xae,
+                0x82, 0xae, 0x43, 0xd3,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            assert_eq!(header_list, [
+                (b":status".to_vec(), b"302".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+            ]);
+            // All entries in the dynamic table too?
+            let mut expected_table = vec![
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b":status".to_vec(), b"302".to_vec()),
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+        }
+        {
+            // Second Response (C.6.2.)
+            let hex_dump = [
+                0x48, 0x83, 0x64, 0x0e, 0xff, 0xc1, 0xc0, 0xbf,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            assert_eq!(header_list, [
+                (b":status".to_vec(), b"307".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+            ]);
+            // The new status replaces the old status in the table, since it
+            // cannot fit without evicting something from the table.
+            let mut expected_table = vec![
+                (b":status".to_vec(), b"307".to_vec()),
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+        }
+        {
+            // Third Response (C.6.3.)
+            let hex_dump = [
+                0x88, 0xc1, 0x61, 0x96, 0xd0, 0x7a, 0xbe, 0x94, 0x10, 0x54,
+                0xd4, 0x44, 0xa8, 0x20, 0x05, 0x95, 0x04, 0x0b, 0x81, 0x66,
+                0xe0, 0x84, 0xa6, 0x2d, 0x1b, 0xff, 0xc0, 0x5a, 0x83, 0x9b,
+                0xd9, 0xab, 0x77, 0xad, 0x94, 0xe7, 0x82, 0x1d, 0xd7, 0xf2,
+                0xe6, 0xc7, 0xb3, 0x35, 0xdf, 0xdf, 0xcd, 0x5b, 0x39, 0x60,
+                0xd5, 0xaf, 0x27, 0x08, 0x7f, 0x36, 0x72, 0xc1, 0xab, 0x27,
+                0x0f, 0xb5, 0x29, 0x1f, 0x95, 0x87, 0x31, 0x60, 0x65, 0xc0,
+                0x03, 0xed, 0x4e, 0xe5, 0xb1, 0x06, 0x3d, 0x50, 0x07,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            let expected_header_list = [
+                (b":status".to_vec(), b"200".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:22 GMT".to_vec()),
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+                (b"content-encoding".to_vec(), b"gzip".to_vec()),
+                (
+                    b"set-cookie".to_vec(),
+                    b"foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1".to_vec()
+                ),
+            ];
+            assert_eq!(header_list, expected_header_list);
+            // The new status replaces the old status in the table, since it
+            // cannot fit without evicting something from the table.
+            let mut expected_table = vec![
+                (
+                    b"set-cookie".to_vec(),
+                    b"foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1".to_vec()
+                ),
+                (b"content-encoding".to_vec(), b"gzip".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:22 GMT".to_vec()),
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
         }
     }
 }
