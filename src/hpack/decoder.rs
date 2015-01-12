@@ -157,6 +157,22 @@ impl DynamicTable {
         self.size
     }
 
+    /// Sets the new maximum table size.
+    ///
+    /// If the current size of the table is larger than the new maximum size,
+    /// existing headers are evicted in a FIFO fashion until the size drops
+    /// below the new maximum.
+    fn set_max_table_size(&mut self, new_max_size: usize) {
+        self.max_size = new_max_size;
+        // Make the table size fit within the new constraints.
+        self.consolidate_table();
+    }
+
+    /// Returns the maximum size of the table in octets.
+    fn get_max_table_size(&self) -> usize {
+        self.max_size
+    }
+
     /// Add a new header to the dynamic table.
     ///
     /// The table automatically gets resized, if necessary.
@@ -284,6 +300,42 @@ mod tests {
         // Resized and empty?
         assert_eq!(0, table.get_size());
         assert_eq!(0, table.get_table_as_list().len());
+    }
+
+    /// Tests that when changing the maximum size of the `DynamicTable`, the
+    /// headers are correctly evicted in order to keep its size below the new
+    /// max.
+    #[test]
+    fn test_dynamic_table_change_max_size() {
+        let mut table = DynamicTable::new();
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+        table.add_header(b"123".to_vec(), b"456".to_vec());
+        table.add_header(b"c".to_vec(), b"d".to_vec());
+        assert_eq!(3 * 32 + 2 + 6 + 2, table.get_size());
+
+        table.set_max_table_size(38);
+
+        assert_eq!(32 + 2, table.get_size());
+        assert_eq!(table.get_table_as_list(), vec![
+            (b"c".to_vec(), b"d".to_vec())]);
+    }
+
+    /// Tests that setting the maximum table size to 0 clears the dynamic
+    /// table.
+    #[test]
+    fn test_dynamic_table_clear() {
+        let mut table = DynamicTable::new();
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+        table.add_header(b"123".to_vec(), b"456".to_vec());
+        table.add_header(b"c".to_vec(), b"d".to_vec());
+        assert_eq!(3 * 32 + 2 + 6 + 2, table.get_size());
+
+        table.set_max_table_size(0);
+
+        assert_eq!(0, table.len());
+        assert_eq!(0, table.get_table_as_list().len());
+        assert_eq!(0, table.get_size());
+        assert_eq!(0, table.get_max_table_size());
     }
 
     #[test]
