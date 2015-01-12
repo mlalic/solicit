@@ -173,6 +173,27 @@ impl DynamicTable {
         debug!("New dynamic table size {}", self.size);
         // Now add it to the internal buffer
         self.table.push_front((name, value));
+        // ...and make sure we're not over the maximum size.
+        self.consolidate_table();
+        debug!("After consolidation dynamic table size {}", self.size);
+    }
+
+    fn consolidate_table(&mut self) {
+        while self.size > self.max_size {
+            {
+                let last_header = match self.table.back() {
+                    Some(x) => x,
+                    None => {
+                        // Can never happen as the size of the table must reach 0,
+                        // by the time we've exhausted all elements.
+                        // Only time it *could* happen is if max_size were 0 too.
+                        panic!("Somehow managed to have size != 0, with no headers");
+                    }
+                };
+                self.size -= last_header.0.len() + last_header.1.len() + 32;
+            }
+            self.table.pop_back();
+        }
     }
 
     /// Returns the number of headers in the dynamic table.
@@ -231,6 +252,38 @@ mod tests {
         table.add_header(b"a".to_vec(), b"b".to_vec());
 
         assert_eq!(3 * 32 + 2 + 6 + 2, table.get_size());
+    }
+
+    /// Tests that the `DynamicTable` gets correctly resized (by evicting old
+    /// headers) if it exceeds the maximum size on an insertion.
+    #[test]
+    fn test_dynamic_table_auto_resize() {
+        let mut table = DynamicTable::with_size(38);
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+        assert_eq!(32 + 2, table.get_size());
+
+        table.add_header(b"123".to_vec(), b"456".to_vec());
+
+        // Resized?
+        assert_eq!(32 + 6, table.get_size());
+        // Only has the second header?
+        assert_eq!(table.get_table_as_list(), vec![
+            (b"123".to_vec(), b"456".to_vec())]);
+    }
+
+    /// Tests that when inserting a new header whose size is larger than the
+    /// size of the entire table, the table is fully emptied.
+    #[test]
+    fn test_dynamic_table_auto_resize_into_empty() {
+        let mut table = DynamicTable::with_size(38);
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+        assert_eq!(32 + 2, table.get_size());
+
+        table.add_header(b"123".to_vec(), b"4567".to_vec());
+
+        // Resized and empty?
+        assert_eq!(0, table.get_size());
+        assert_eq!(0, table.get_table_as_list().len());
     }
 
     #[test]
