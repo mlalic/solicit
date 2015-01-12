@@ -2,3 +2,4 @@
 pub use self::decoder::Decoder;
 
 pub mod decoder;
+pub mod huffman;
