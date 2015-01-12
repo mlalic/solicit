@@ -4,6 +4,27 @@
 
 use std::collections::HashMap;
 
+/// Represents a symbol that can be inserted into a Huffman-encoded octet
+/// string.
+enum HuffmanCodeSymbol {
+    /// Any octet is a valid symbol
+    Symbol(u8),
+    /// A special symbol represents the end of the string
+    EndOfString,
+}
+
+impl HuffmanCodeSymbol {
+    pub fn new(symbol: usize) -> HuffmanCodeSymbol {
+        if symbol == 256 {
+            HuffmanCodeSymbol::EndOfString
+        } else {
+            // It is safe to downcast since now we know that the value
+            // is in the half-open interval [0, 256)
+            HuffmanCodeSymbol::Symbol(symbol as u8)
+        }
+    }
+}
+
 /// A helper struct that represents an iterator over individual bits of all
 /// bytes found in a wrapped Iterator over bytes.
 /// Bits are represented as `bool`s, where `true` corresponds to a set bit and
