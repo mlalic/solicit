@@ -1,3 +1,6 @@
+use std::fmt;
+use std::collections::RingBuf;
+
 /// Decodes an integer encoded with a given prefix size (in bits).
 /// Assumes that the buffer `buf` contains the integer to be decoded,
 /// with the first byte representing the octet that contains the
@@ -122,6 +125,48 @@ static STATIC_TABLE: &'static [(&'static [u8], &'static [u8])] = &[
   (b"via", b""),
   (b"www-authenticate", b""),
 ];
+
+/// A struct representing the dynamic table that needs to be maintained by the
+/// coder.
+struct DynamicTable {
+    table: RingBuf<(Vec<u8>, Vec<u8>)>,
+    size: usize,
+    max_size: usize,
+}
+
+impl DynamicTable {
+    /// Creates a new empty dynamic table with default size.
+    fn new() -> DynamicTable {
+        DynamicTable {
+            table: RingBuf::new(),
+            size: 0,
+            // The default maximum size corresponds to the default HTTP/2
+            // setting
+            max_size: 4096,
+        }
+    }
+
+    fn get_size(&self) -> usize {
+        self.size
+    }
+
+    /// Converts the current state of the table to a `Vec`
+    fn get_table_as_list(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut ret: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        for elem in self.table.iter() {
+            ret.push(elem.clone());
+        }
+
+        ret
+    }
+
+}
+
+impl fmt::Show for DynamicTable {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{:?}", self.table)
+    }
+}
 
 
 mod tests {
