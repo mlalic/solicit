@@ -97,9 +97,9 @@ impl HuffmanDecoder {
                     let decoded_symbol = match length_table.get(&current).unwrap() {
                         &HuffmanCodeSymbol::Symbol(symbol) => symbol,
                         &HuffmanCodeSymbol::EndOfString => {
-                            // TODO Check what kind of padding requirements there are, but for now,
-                            // just consider the end of string here!
-                            break;
+                            // If the EOS symbol is detected within the stream,
+                            // we need to consider it an error.
+                            return Err(HuffmanDecoderError::EOSInString);
                         },
                     };
                     result.push(decoded_symbol);
@@ -432,6 +432,7 @@ static HUFFMAN_CODE_TABLE: &'static [(u32, u8)] = &[
 mod tests {
     use super::BitIterator;
     use super::HuffmanDecoder;
+    use super::HuffmanDecoderError;
 
     /// A helper function that converts the given slice containing values `1`
     /// and `0` to a `Vec` of `bool`s, according to the number.
@@ -553,6 +554,35 @@ mod tests {
             let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
+        }
+    }
+
+    /// Tests that if we find the EOS symbol in the stream, we consider it an
+    /// error.
+    #[test]
+    fn test_eos_is_error() {
+        let mut decoder = HuffmanDecoder::new();
+        {
+            // The EOS is an all-ones pattern of length 30
+            let hex_buffer = [0xFF, 0xFF, 0xFF, 0xFF];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(HuffmanDecoderError::EOSInString, match result {
+                Err(e) => e,
+                _ => panic!("Expected error due to EOS symbol in string"),
+            });
+        }
+        {
+            // Full EOS after a valid character.
+            let hex_buffer = [0x3F, 0xFF, 0xFF, 0xFF, 0xFF];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(HuffmanDecoderError::EOSInString, match result {
+                Err(e) => e,
+                _ => panic!("Expected error due to EOS symbol in string"),
+            });
         }
     }
 }
