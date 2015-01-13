@@ -150,6 +150,31 @@ impl DynamicTable {
         self.size
     }
 
+    /// Add a new header to the dynamic table.
+    ///
+    /// The table automatically gets resized, if necessary.
+    ///
+    /// Do note that, under the HPACK rules, it is possible the given header
+    /// is not found in the dynamic table after this operation finishes, in
+    /// case the total size of the given header exceeds the maximum size of the
+    /// dynamic table.
+    fn add_header(&mut self, name: Vec<u8>, value: Vec<u8>) {
+        // This is how the HPACK spec makes us calculate the size.  The 32 is
+        // a magic number determined by them (under reasonable assumptions of
+        // how the table is stored).
+        self.size += name.len() + value.len() + 32;
+        debug!("New dynamic table size {}", self.size);
+        // Now add it to the internal buffer
+        self.table.push_front((name, value));
+    }
+
+    /// Returns the number of headers in the dynamic table.
+    ///
+    /// This is different than the size of the dynamic table.
+    fn len(&self) -> usize {
+        self.table.len()
+    }
+
     /// Converts the current state of the table to a `Vec`
     fn get_table_as_list(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut ret: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
@@ -160,6 +185,11 @@ impl DynamicTable {
         ret
     }
 
+    /// Returns a reference to the header at the given index, if found in the
+    /// dynamic table.
+    fn get(&self, index: usize) -> Option<&(Vec<u8>, Vec<u8>)> {
+        self.table.get(index)
+    }
 }
 
 impl fmt::Show for DynamicTable {
@@ -172,6 +202,29 @@ impl fmt::Show for DynamicTable {
 mod tests {
     use super::{decode_integer};
     use super::{encode_integer};
+    use super::DynamicTable;
+
+    #[test]
+    fn test_dynamic_table_size_calculation_simple() {
+        let mut table = DynamicTable::new();
+        // Sanity check
+        assert_eq!(0, table.get_size());
+
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+
+        assert_eq!(32 + 2, table.get_size());
+    }
+
+    #[test]
+    fn test_dynamic_table_size_calculation() {
+        let mut table = DynamicTable::new();
+
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+        table.add_header(b"123".to_vec(), b"456".to_vec());
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+
+        assert_eq!(3 * 32 + 2 + 6 + 2, table.get_size());
+    }
 
     #[test]
     fn test_decode_integer() {
