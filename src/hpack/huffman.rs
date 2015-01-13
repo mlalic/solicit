@@ -126,6 +126,33 @@ impl HuffmanDecoder {
             }
         }
 
+        // Now we need to verify that the padding is correct.
+        // The spec mandates that the padding must not be strictly longer than
+        // 7 bits and that it must represent the most significant bits of the
+        // EOS symbol's code.
+
+        // First: the check for the length of the padding
+        if current_len > 7 {
+            return Err(HuffmanDecoderError::PaddingTooLarge)
+        }
+
+        // Second: the padding corresponds to the most-significant bits of the
+        // EOS symbol.
+        // Align both of them to have their most significant bit as the most
+        // significant bit of a u32.
+        let right_align_current = (current << (32 - current_len));
+        let right_align_eos = self.eos_codepoint.0 << (32 - self.eos_codepoint.1);
+        // Now take only the necessary amount of most significant bit of EOS.
+        // The mask defines a bit pattern of `current_len` leading set bits,
+        // followed by the rest of the bits 0.
+        let mask = (((1 << current_len) - 1) << (32 - current_len));
+        // The mask is now used to strip the unwanted bits of the EOS
+        let eos_mask = right_align_eos & mask;
+
+        if eos_mask != right_align_current {
+            return Err(HuffmanDecoderError::InvalidPadding);
+        }
+
         Ok(result)
     }
 }
@@ -446,6 +473,7 @@ static HUFFMAN_CODE_TABLE: &'static [(u32, u8)] = &[
     (0x3fffffff, 30),
 ];
 
+#[cfg(test)]
 mod tests {
     use super::BitIterator;
     use super::HuffmanDecoder;
@@ -557,7 +585,7 @@ mod tests {
     fn test_huffman_code_multiple_chars() {
         let mut decoder = HuffmanDecoder::new();
         {
-            let hex_buffer = [254, 0];
+            let hex_buffer = [254, 1];
             let expected_result = vec![b'!', b'0'];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
@@ -599,6 +627,59 @@ mod tests {
             assert_eq!(HuffmanDecoderError::EOSInString, match result {
                 Err(e) => e,
                 _ => panic!("Expected error due to EOS symbol in string"),
+            });
+        }
+    }
+
+    /// Tests that when there are 7 or less padding bits, the string is
+    /// correctly decoded.
+    #[test]
+    fn test_short_padding_okay() {
+        let mut decoder = HuffmanDecoder::new();
+        let hex_buffer = [0x3F];
+
+        let result = decoder.decode(&hex_buffer);
+
+        assert_eq!(b"o", result.ok().unwrap());
+    }
+
+    /// Tests that when there are more than 7 padding bits, we get an error.
+    #[test]
+    fn test_padding_too_long() {
+        let mut decoder = HuffmanDecoder::new();
+        let hex_buffer = [0x3F, 0xFF];
+
+        let result = decoder.decode(&hex_buffer);
+
+        assert_eq!(HuffmanDecoderError::PaddingTooLarge, match result {
+            Err(e) => e,
+            _ => panic!("Expected `PaddingTooLarge` error"),
+        });
+    }
+
+    /// Tests that when there is a certain number of padding bits that deviate
+    /// from the most significant bits of the EOS symbol, we get an error.
+    #[test]
+    fn test_padding_invalid() {
+        let mut decoder = HuffmanDecoder::new();
+        {
+            let hex_buffer = [0x3E];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(HuffmanDecoderError::InvalidPadding, match result {
+                Err(e) => e,
+                _ => panic!("Expected `InvalidPadding` error"),
+            });
+        }
+        {
+            let hex_buffer = [254, 0];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(HuffmanDecoderError::InvalidPadding, match result {
+                Err(e) => e,
+                _ => panic!("Expected `InvalidPadding` error"),
             });
         }
     }

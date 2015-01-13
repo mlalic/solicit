@@ -634,6 +634,7 @@ impl Decoder {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::{decode_integer};
     use super::{encode_integer};
@@ -643,6 +644,7 @@ mod tests {
     use super::Decoder;
     use super::{DecoderError, DecoderResult};
     use super::{IntegerDecodingError, StringDecodingError};
+    use super::super::huffman::HuffmanDecoderError;
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
@@ -1522,4 +1524,23 @@ mod tests {
         }
     }
 
+    /// Tests that if a header encoded using a literal string representation
+    /// (using Huffman encoding) contains an invalid string encoding, an error
+    /// is returned.
+    #[test]
+    fn test_invalid_literal_huffman_string() {
+        let mut decoder = Decoder::new();
+        // Invalid padding introduced into the message
+        let hex_dump = [
+            0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2,
+            0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xfe,
+        ];
+
+        assert!(match decoder.decode(&hex_dump) {
+            Err(DecoderError::StringDecodingError(
+                    StringDecodingError::HuffmanDecoderError(
+                        HuffmanDecoderError::InvalidPadding))) => true,
+            _ => false,
+        });
+    }
 }
