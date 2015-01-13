@@ -340,7 +340,11 @@ impl Decoder {
             let initial_octet = buf[current_octet_index];
             let consumed = match FieldRepresentation::new(initial_octet) {
                 FieldRepresentation::Indexed => {
-                    panic!("NYI");
+                    let ((name, value), consumed) =
+                        self.decode_indexed(&buf[current_octet_index..]);
+                    header_list.push((name, value));
+
+                    consumed
                 },
                 FieldRepresentation::LiteralWithIncrementalIndexing => {
                     panic!("NYI");
@@ -361,6 +365,19 @@ impl Decoder {
         }
 
         header_list
+    }
+
+    /// Decodes an indexed header representation.
+    fn decode_indexed(&self, buf: &[u8]) -> ((Vec<u8>, Vec<u8>), usize) {
+        let (index, consumed) = decode_integer(buf, 7);
+        debug!("Decoding indexed: index = {}, consumed = {}", index, consumed);
+
+        let (name, value) = match self.get_from_table(index) {
+            Some((name, value)) => (name.to_vec(), value.to_vec()),
+            None => panic!("Error handling not yet implemented, table index out of bounds"),
+        };
+
+        ((name, value), consumed)
     }
 
     /// Gets the header (name, value) pair with the given index from the table.
@@ -624,4 +641,30 @@ mod tests {
                 decode_string(encoded.as_slice()));
         }
     }
+
+    /// Tests that a header list with only a single header found fully in the
+    /// static header table is correctly decoded.
+    /// (example from: HPACK-draft-10, C.2.4.)
+    #[test]
+    fn test_decode_fully_in_static_table() {
+        let mut decoder = Decoder::new();
+
+        let header_list = decoder.decode(&[0x82]);
+
+        assert_eq!([(b":method".to_vec(), b"GET".to_vec())], header_list);
+    }
+
+    #[test]
+    fn test_decode_multiple_fully_in_static_table() {
+        let mut decoder = Decoder::new();
+
+        let header_list = decoder.decode(&[0x82, 0x86, 0x84]);
+
+        assert_eq!(header_list, [
+            (b":method".to_vec(), b"GET".to_vec()),
+            (b":scheme".to_vec(), b"http".to_vec()),
+            (b":path".to_vec(), b"/".to_vec()),
+        ]);
+    }
+
 }
