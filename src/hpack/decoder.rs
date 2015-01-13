@@ -149,6 +149,29 @@ static STATIC_TABLE: &'static [(&'static [u8], &'static [u8])] = &[
 
 /// A struct representing the dynamic table that needs to be maintained by the
 /// coder.
+///
+/// The dynamic table contains a number of recently used headers. The size of
+/// the table is constrained to a certain number of octets. If on insertion of
+/// a new header into the table, the table would exceed the maximum size,
+/// headers are evicted in a FIFO fashion until there is enough room for the
+/// new header to be inserted. (Therefore, it is possible that though all
+/// elements end up being evicted, there is still not enough space for the new
+/// header: when the size of this individual header exceeds the maximum size of
+/// the table.)
+///
+/// The current size of the table is calculated, based on the IETF definition,
+/// as the sum of sizes of each header stored within the table, where the size
+/// of an individual header is
+/// `len_in_octets(header_name) + len_in_octets(header_value) + 32`.
+///
+/// Note: the maximum size of the dynamic table does not have to be equal to
+/// the maximum header table size as defined by a "higher level" protocol
+/// (such as the `SETTINGS_HEADER_TABLE_SIZE` setting in HTTP/2), since HPACK
+/// can choose to modify the dynamic table size on the fly (as long as it keeps
+/// it below the maximum value set by the protocol). So, the `DynamicTable`
+/// only cares about the maximum size as set by the HPACK {en,de}coder and lets
+/// *it* worry about making certain that the changes are valid according to
+/// the (current) constraints of the protocol.
 struct DynamicTable {
     table: RingBuf<(Vec<u8>, Vec<u8>)>,
     size: usize,
@@ -215,6 +238,9 @@ impl DynamicTable {
         debug!("After consolidation dynamic table size {}", self.size);
     }
 
+    /// Consolidates the table entries so that the table size is below the
+    /// maximum allowed size, by evicting headers from the table in a FIFO
+    /// fashion.
     fn consolidate_table(&mut self) {
         while self.size > self.max_size {
             {
