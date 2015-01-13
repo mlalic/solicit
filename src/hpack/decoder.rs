@@ -1543,4 +1543,45 @@ mod tests {
             _ => false,
         });
     }
+
+    /// Tests that if the message cuts short before the header key is decoded,
+    /// we get an appropriate error.
+    #[test]
+    fn test_literal_header_key_incomplete() {
+        let mut decoder = Decoder::new();
+        // The message does not have the length specifier of the header value
+        // (cuts short after the header key is complete)
+        let hex_dump = [
+            0x40, 0x0a, b'c', b'u', b's', b't', b'o', b'm', b'-', b'k', b'e',
+        ];
+
+        let result = decoder.decode(&hex_dump);
+
+        assert!(match result {
+            Err(DecoderError::StringDecodingError(
+                    StringDecodingError::NotEnoughOctets)) => true,
+            _ => false,
+        });
+    }
+
+    /// Tests that when a header is encoded as a literal with both a name and
+    /// a value, if the value is missing, we get an error.
+    #[test]
+    fn test_literal_header_missing_value() {
+        let mut decoder = Decoder::new();
+        // The message does not have the length specifier of the header value
+        // (cuts short after the header key is complete)
+        let hex_dump = [
+            0x40, 0x0a, b'c', b'u', b's', b't', b'o', b'm', b'-', b'k', b'e',
+            b'y',
+        ];
+
+        let result = decoder.decode(&hex_dump);
+
+        assert!(match result {
+            Err(DecoderError::IntegerDecodingError(
+                    IntegerDecodingError::NotEnoughOctets)) => true,
+            _ => false,
+        });
+    }
 }
