@@ -29,30 +29,58 @@ use super::huffman::HuffmanDecoder;
 ///
 /// Returns a tuple representing the decoded integer and the number
 /// of bytes from the buffer that were used.
-fn decode_integer(buf: &[u8], prefix_size: u8) -> (usize, usize) {
-    assert!(prefix_size >= 1 && prefix_size <= 8);
-    assert!(buf.len() >= 1);
-    let mask = (1u8 << prefix_size) - 1;
-    let mut value: usize = (buf[0] & mask) as usize;
-    if value < (mask as usize) {
-        return (value, 1);
+fn decode_integer(buf: &[u8], prefix_size: u8)
+        -> Result<(usize, usize), DecoderError> {
+    if prefix_size < 1 || prefix_size > 8 {
+        return Err(
+            DecoderError::IntegerDecodingError(
+                IntegerDecodingError::InvalidPrefix));
+    }
+    if buf.len() < 1 {
+        return Err(
+            DecoderError::IntegerDecodingError(
+                IntegerDecodingError::NotEnoughOctets));
     }
 
+    let mask = (1u8 << prefix_size) - 1;
+    let mut value = (buf[0] & mask) as usize;
+    if value < (mask as usize) {
+        // Value fits in the prefix bits.
+        return Ok((value, 1));
+    }
+
+    // The value does not fit into the prefix bits, so we read as many following
+    // bytes as necessary to decode the integer.
     // Already one byte used (the prefix)
     let mut total = 1;
     let mut m = 0;
+    let ARBITRARY_OCTET_LIMIT = 10;
+
     for &b in buf[1..].iter() {
         total += 1;
         value += ((b & 127) as usize) * (1us << m);
         m += 7;
+
         if b & 128 != 128 {
-            break;
+            // Most significant bit is not set => no more continuation bytes
+            return Ok((value, total));
+        }
+
+        if total == ARBITRARY_OCTET_LIMIT {
+            // The spec tells us that we MUST treat situations where the
+            // encoded representation is too long (in octets) as an error. It
+            // says nothing about *exactly* how big too big is, so for now
+            // we're using an arbitrary limit.
+            return Err(
+                DecoderError::IntegerDecodingError(
+                    IntegerDecodingError::TooManyOctets))
         }
     }
 
-    // TODO Error situation -- what happens if we reach here w/o having
-    //      `b` byte-sized...
-    (value, total)
+    // If we have reached here, it means the buffer has been exhausted without
+    // hitting the termination condition.
+    Err(DecoderError::IntegerDecodingError(
+            IntegerDecodingError::NotEnoughOctets))
 }
 
 /// Encode an integer to the representation defined by HPACK.
@@ -343,7 +371,7 @@ impl FieldRepresentation {
 /// Returns the decoded string in a newly allocated `Vec` and the number of
 /// bytes consumed from the given buffer.
 fn decode_string(buf: &[u8]) -> (Vec<u8>, usize) {
-    let (len, consumed) = decode_integer(buf, 7);
+    let (len, consumed) = decode_integer(buf, 7).ok().unwrap();
     debug!("decode_string: Consumed = {}, len = {}", consumed, len);
     let raw_string = &buf[consumed..consumed + len];
     if buf[0] & 128 == 128 {
@@ -476,7 +504,7 @@ impl Decoder {
     /// Decodes an indexed header representation.
     fn decode_indexed(&self, buf: &[u8])
             -> Result<((Vec<u8>, Vec<u8>), usize), DecoderError> {
-        let (index, consumed) = decode_integer(buf, 7);
+        let (index, consumed) = try!(decode_integer(buf, 7));
         debug!("Decoding indexed: index = {}, consumed = {}", index, consumed);
 
         let (name, value) = try!(self.get_from_table(index));
@@ -533,7 +561,7 @@ impl Decoder {
         } else {
             4
         };
-        let (table_index, mut consumed) = decode_integer(buf, prefix);
+        let (table_index, mut consumed) = try!(decode_integer(buf, prefix));
 
         // First read the name appropriately
         let name = if table_index == 0 {
@@ -576,7 +604,7 @@ impl Decoder {
     ///
     /// Returns the number of octets consumed from the given buffer.
     fn update_max_dynamic_size(&mut self, buf: &[u8]) -> usize {
-        let (new_size, consumed) = decode_integer(buf, 5);
+        let (new_size, consumed) = decode_integer(buf, 5).ok().unwrap();
         self.dynamic_table.set_max_table_size(new_size);
 
         info!("Decoder changed max table size from {} to {}",
@@ -600,6 +628,7 @@ mod tests {
     use super::decode_string;
     use super::Decoder;
     use super::{DecoderError, DecoderResult};
+    use super::IntegerDecodingError;
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
@@ -691,16 +720,45 @@ mod tests {
         assert_eq!(0, table.get_max_table_size());
     }
 
+    /// Tests that valid integer encodings are properly decoded.
     #[test]
     fn test_decode_integer() {
-        assert_eq!((10us, 1), decode_integer(&[10], 5));
-        assert_eq!((1337us, 3), decode_integer(&[31, 154, 10], 5));
-        assert_eq!((1337us, 3), decode_integer(&[31 + 32, 154, 10], 5));
-        assert_eq!((1337us, 3), decode_integer(&[31 + 64, 154, 10], 5));
-        assert_eq!((1337us, 3), decode_integer(&[31, 154, 10, 342, 22], 5));
+        assert_eq!((10us, 1), decode_integer(&[10], 5).ok().unwrap());
+        assert_eq!((1337us, 3), decode_integer(&[31, 154, 10], 5).ok().unwrap());
+        assert_eq!((1337us, 3), decode_integer(&[31 + 32, 154, 10], 5).ok().unwrap());
+        assert_eq!((1337us, 3), decode_integer(&[31 + 64, 154, 10], 5).ok().unwrap());
+        assert_eq!((1337us, 3), decode_integer(&[31, 154, 10, 342, 22], 5).ok().unwrap());
 
-        assert_eq!((127us, 2), decode_integer(&[255, 0], 7));
-        assert_eq!((127us, 2), decode_integer(&[127, 0], 7));
+        assert_eq!((127us, 2), decode_integer(&[255, 0], 7).ok().unwrap());
+        assert_eq!((127us, 2), decode_integer(&[127, 0], 7).ok().unwrap());
+    }
+
+    /// A helper macro that asserts that a given `DecoderResult` represents
+    /// the given `IntegerDecodingError`.
+    macro_rules! assert_integer_err (
+        ($err_type:expr, $decoder_result:expr) => (
+            assert_eq!($err_type, match $decoder_result {
+                Err(DecoderError::IntegerDecodingError(e)) => e,
+                _ => panic!("Expected a decoding error"),
+            });
+        );
+    );
+
+    /// Tests that some invalid integer encodings are detected and signalled as
+    /// errors.
+    #[test]
+    fn test_decode_integer_errors() {
+        assert_integer_err!(IntegerDecodingError::NotEnoughOctets,
+                            decode_integer(&[], 5));
+        assert_integer_err!(IntegerDecodingError::NotEnoughOctets,
+                            decode_integer(&[0xFF, 0xFF], 5));
+        assert_integer_err!(IntegerDecodingError::TooManyOctets,
+                            decode_integer(&[0xFF, 0x80, 0x80, 0x80, 0x80,
+                                             0x80, 0x80, 0x80, 0x80, 0x80], 1));
+        assert_integer_err!(IntegerDecodingError::InvalidPrefix,
+                            decode_integer(&[10], 0));
+        assert_integer_err!(IntegerDecodingError::InvalidPrefix,
+                            decode_integer(&[10], 9));
     }
 
     #[test]
