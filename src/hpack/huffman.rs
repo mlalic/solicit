@@ -25,6 +25,23 @@ impl HuffmanCodeSymbol {
     }
 }
 
+/// Represents the error variants that the `HuffmanDecoder` can return.
+#[derive(PartialEq)]
+#[derive(Show)]
+pub enum HuffmanDecoderError {
+    /// Any padding strictly larger than 7 bits MUST be interpreted as an error
+    PaddingTooLarge,
+    /// Any padding that does not correspond to the most significant bits of
+    /// EOS MUST be interpreted as an error.
+    InvalidPadding,
+    /// If EOS is ever found in the string, it causes an error.
+    EOSInString,
+}
+
+/// The type that represents the result of the `decode` method of the
+/// `HuffmanDecoder`.
+pub type HuffmanDecoderResult = Result<Vec<u8>, HuffmanDecoderError>;
+
 /// A simple implementation of a Huffman code decoder.
 pub struct HuffmanDecoder {
     table: HashMap<u8, HashMap<u32, HuffmanCodeSymbol>>,
