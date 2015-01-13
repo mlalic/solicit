@@ -327,6 +327,41 @@ impl Decoder {
             dynamic_table: DynamicTable::new(),
         }
     }
+    /// Decode the header block found in the given buffer.
+    ///
+    /// The buffer should represent the entire block that should be decoded.
+    /// For example, in HTTP/2, all continuation frames need to be concatenated
+    /// to a single buffer before passing them to the decoder.
+    pub fn decode(&mut self, buf: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut current_octet_index = 0;
+        let mut header_list = Vec::new();
+
+        while current_octet_index < buf.len() {
+            let initial_octet = buf[current_octet_index];
+            let consumed = match FieldRepresentation::new(initial_octet) {
+                FieldRepresentation::Indexed => {
+                    panic!("NYI");
+                },
+                FieldRepresentation::LiteralWithIncrementalIndexing => {
+                    panic!("NYI");
+                },
+                FieldRepresentation::LiteralWithoutIndexing => {
+                    panic!("NYI");
+                },
+                FieldRepresentation::LiteralNeverIndexed => {
+                    panic!("NYI");
+                },
+                FieldRepresentation::SizeUpdate => {
+                    // Handle the dynamic table size update...
+                    panic!("NYI: SizeUpdate field types");
+                }
+            };
+
+            current_octet_index += consumed;
+        }
+
+        header_list
+    }
 
     /// Gets the header (name, value) pair with the given index from the table.
     ///
