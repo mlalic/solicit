@@ -370,20 +370,25 @@ impl FieldRepresentation {
 ///
 /// Returns the decoded string in a newly allocated `Vec` and the number of
 /// bytes consumed from the given buffer.
-fn decode_string(buf: &[u8]) -> (Vec<u8>, usize) {
-    let (len, consumed) = decode_integer(buf, 7).ok().unwrap();
+fn decode_string(buf: &[u8]) -> Result<(Vec<u8>, usize), DecoderError> {
+    let (len, consumed) = try!(decode_integer(buf, 7));
     debug!("decode_string: Consumed = {}, len = {}", consumed, len);
+    if consumed + len > buf.len() {
+        return Err(
+            DecoderError::StringDecodingError(
+                StringDecodingError::NotEnoughOctets));
+    }
     let raw_string = &buf[consumed..consumed + len];
     if buf[0] & 128 == 128 {
         debug!("decode_string: Using the Huffman code");
         // Huffman coding used: pass the raw octets to the Huffman decoder
         // and return its result.
         let mut decoder = HuffmanDecoder::new();
-        (decoder.decode(raw_string), consumed + len)
+        Ok((decoder.decode(raw_string), consumed + len))
     } else {
         // The octets were transmitted raw
         debug!("decode_string: Raw octet string received");
-        (raw_string.to_vec(), consumed + len)
+        Ok((raw_string.to_vec(), consumed + len))
     }
 }
 
@@ -566,7 +571,7 @@ impl Decoder {
         // First read the name appropriately
         let name = if table_index == 0 {
             // Read name string as literal
-            let (name, name_len) = decode_string(&buf[consumed..]);
+            let (name, name_len) = try!(decode_string(&buf[consumed..]));
             consumed += name_len;
             name
         } else {
@@ -576,7 +581,7 @@ impl Decoder {
         };
 
         // Now read the value as a literal...
-        let (value, value_len) = decode_string(&buf[consumed..]);
+        let (value, value_len) = try!(decode_string(&buf[consumed..]));
         consumed += value_len;
 
         if index {
@@ -628,7 +633,7 @@ mod tests {
     use super::decode_string;
     use super::Decoder;
     use super::{DecoderError, DecoderResult};
-    use super::IntegerDecodingError;
+    use super::{IntegerDecodingError, StringDecodingError};
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
@@ -854,9 +859,19 @@ mod tests {
 
     #[test]
     fn test_decode_string_no_huffman() {
-        assert_eq!((b"abc".to_vec(), 4), decode_string(&[3, b'a', b'b', b'c']));
-        assert_eq!((b"a".to_vec(), 2), decode_string(&[1, b'a']));
-        assert_eq!((b"".to_vec(), 1), decode_string(&[0, b'a']));
+        assert_eq!((b"abc".to_vec(), 4),
+                   decode_string(&[3, b'a', b'b', b'c']).ok().unwrap());
+        assert_eq!((b"a".to_vec(), 2),
+                   decode_string(&[1, b'a']).ok().unwrap());
+        assert_eq!((b"".to_vec(), 1),
+                   decode_string(&[0, b'a']).ok().unwrap());
+        // Buffer smaller than advertised string length
+        assert_eq!(StringDecodingError::NotEnoughOctets,
+                   match decode_string(&[3, b'a', b'b']) {
+                       Err(DecoderError::StringDecodingError(e)) => e,
+                       _ => panic!("Expected NotEnoughOctets error!"),
+                    }
+        );
     }
 
     /// Tests that an octet string is correctly decoded when it's length
@@ -870,7 +885,7 @@ mod tests {
 
             assert_eq!(
                 (full_string, encoded.len()),
-                decode_string(encoded.as_slice()));
+                decode_string(encoded.as_slice()).ok().unwrap());
         }
         {
             let full_string: Vec<u8> = (0u8..127).collect();
@@ -879,7 +894,7 @@ mod tests {
 
             assert_eq!(
                 (full_string, encoded.len()),
-                decode_string(encoded.as_slice()));
+                decode_string(encoded.as_slice()).ok().unwrap());
         }
     }
 
