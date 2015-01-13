@@ -359,6 +359,51 @@ fn decode_string(buf: &[u8]) -> (Vec<u8>, usize) {
     }
 }
 
+/// Represents all errors that can be encountered while decoding an
+/// integer.
+#[derive(PartialEq)]
+#[derive(Show)]
+pub enum IntegerDecodingError {
+    /// 5.1. specifies that "excessively large integer decodings" MUST be
+    /// considered an error (whether the size is the number of octets or
+    /// value). This variant corresponds to the encoding containing too many
+    /// octets.
+    TooManyOctets,
+    /// The variant corresponds to the case where the value of the integer
+    /// being decoded exceeds a certain threshold.
+    ValueTooLarge,
+    /// When a buffer from which an integer was supposed to be encoded does
+    /// not contain enough octets to complete the decoding.
+    NotEnoughOctets,
+    /// Only valid prefixes are [1, 8]
+    InvalidPrefix,
+}
+
+/// Represents all errors that can be encountered while decoding an octet
+/// string.
+#[derive(PartialEq)]
+#[derive(Show)]
+pub enum StringDecodingError {
+    NotEnoughOctets,
+}
+
+/// Represents all errors that can be encountered while performing the decoding
+/// of an HPACK header set.
+#[derive(PartialEq)]
+#[derive(Show)]
+pub enum DecoderError {
+    HeaderIndexOutOfBounds,
+    IntegerDecodingError(IntegerDecodingError),
+    StringDecodingError(StringDecodingError),
+    /// The size of the dynamic table can never be allowed to exceed the max
+    /// size mandated to the decoder by the protocol. (by perfroming changes
+    /// made by SizeUpdate blocks).
+    InvalidMaxDynamicSize,
+}
+
+/// The result returned by the `decode` method of the `Decoder`.
+pub type DecoderResult = Result<Vec<(Vec<u8>, Vec<u8>)>, DecoderError>;
+
 /// Represents a decoder of HPACK encoded headers. Maintains the state
 /// necessary to correctly decode subsequent HPACK blocks.
 impl Decoder {
