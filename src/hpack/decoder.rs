@@ -13,7 +13,7 @@
 /// use solicit::hpack::Decoder;
 /// let mut decoder = Decoder::new();
 ///
-/// let header_list = decoder.decode(&[0x82]);
+/// let header_list = decoder.decode(&[0x82]).ok().unwrap();
 ///
 /// assert_eq!([(b":method".to_vec(), b"GET".to_vec())], header_list);
 /// ```
@@ -418,7 +418,7 @@ impl Decoder {
     /// The buffer should represent the entire block that should be decoded.
     /// For example, in HTTP/2, all continuation frames need to be concatenated
     /// to a single buffer before passing them to the decoder.
-    pub fn decode(&mut self, buf: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    pub fn decode(&mut self, buf: &[u8]) -> DecoderResult {
         let mut current_octet_index = 0;
         let mut header_list = Vec::new();
 
@@ -466,7 +466,7 @@ impl Decoder {
             current_octet_index += consumed;
         }
 
-        header_list
+        Ok(header_list)
     }
 
     /// Decodes an indexed header representation.
@@ -823,7 +823,7 @@ mod tests {
     fn test_decode_fully_in_static_table() {
         let mut decoder = Decoder::new();
 
-        let header_list = decoder.decode(&[0x82]);
+        let header_list = decoder.decode(&[0x82]).ok().unwrap();
 
         assert_eq!([(b":method".to_vec(), b"GET".to_vec())], header_list);
     }
@@ -832,7 +832,7 @@ mod tests {
     fn test_decode_multiple_fully_in_static_table() {
         let mut decoder = Decoder::new();
 
-        let header_list = decoder.decode(&[0x82, 0x86, 0x84]);
+        let header_list = decoder.decode(&[0x82, 0x86, 0x84]).ok().unwrap();
 
         assert_eq!(header_list, [
             (b":method".to_vec(), b"GET".to_vec()),
@@ -852,7 +852,7 @@ mod tests {
             0x6c, 0x65, 0x2f, 0x70, 0x61, 0x74, 0x68,
         ];
 
-        let header_list = decoder.decode(&hex_dump);
+        let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
         assert_eq!(header_list, [
             (b":path".to_vec(), b"/sample/path".to_vec()),
@@ -873,7 +873,7 @@ mod tests {
             0x61, 0x64, 0x65, 0x72,
         ];
 
-        let header_list = decoder.decode(&hex_dump);
+        let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
         assert_eq!(header_list, [
             (b"custom-key".to_vec(), b"custom-header".to_vec()),
@@ -900,7 +900,7 @@ mod tests {
                 0x61, 0x64, 0x65, 0x72,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b"custom-key".to_vec(), b"custom-header".to_vec()),
@@ -920,7 +920,7 @@ mod tests {
                 0x61, 0x64, 0x65, 0x72, 0x2d,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b"custom-key".to_vec(), b"custom-header-".to_vec()),
@@ -947,7 +947,7 @@ mod tests {
             0x73, 0x65, 0x63, 0x72, 0x65, 0x74,
         ];
 
-        let header_list = decoder.decode(&hex_dump);
+        let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
         assert_eq!(header_list, [
             (b"password".to_vec(), b"secret".to_vec()),
@@ -969,7 +969,7 @@ mod tests {
                 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":method".to_vec(), b"GET".to_vec()),
@@ -992,7 +992,7 @@ mod tests {
                 0x61, 0x63, 0x68, 0x65,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":method".to_vec(), b"GET".to_vec()),
@@ -1017,7 +1017,7 @@ mod tests {
                 0x74, 0x6f, 0x6d, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":method".to_vec(), b"GET".to_vec()),
@@ -1058,7 +1058,7 @@ mod tests {
                 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":status".to_vec(), b"302".to_vec()),
@@ -1082,7 +1082,7 @@ mod tests {
                 0x48, 0x03, 0x33, 0x30, 0x37, 0xc1, 0xc0, 0xbf,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":status".to_vec(), b"307".to_vec()),
@@ -1116,7 +1116,7 @@ mod tests {
                 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x3d, 0x31,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             let expected_header_list = [
                 (b":status".to_vec(), b"200".to_vec()),
@@ -1161,7 +1161,7 @@ mod tests {
                 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":status".to_vec(), b"302".to_vec()),
@@ -1188,7 +1188,7 @@ mod tests {
                 0x20,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             // Headers have been correctly decoded...
             assert_eq!(header_list, [
@@ -1218,7 +1218,7 @@ mod tests {
                 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":method".to_vec(), b"GET".to_vec()),
@@ -1241,7 +1241,7 @@ mod tests {
                 0x9c, 0xbf,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":method".to_vec(), b"GET".to_vec()),
@@ -1266,7 +1266,7 @@ mod tests {
                 0xb8, 0xe8, 0xb4, 0xbf,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":method".to_vec(), b"GET".to_vec()),
@@ -1306,7 +1306,7 @@ mod tests {
                 0x82, 0xae, 0x43, 0xd3,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":status".to_vec(), b"302".to_vec()),
@@ -1330,7 +1330,7 @@ mod tests {
                 0x48, 0x83, 0x64, 0x0e, 0xff, 0xc1, 0xc0, 0xbf,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             assert_eq!(header_list, [
                 (b":status".to_vec(), b"307".to_vec()),
@@ -1362,7 +1362,7 @@ mod tests {
                 0x03, 0xed, 0x4e, 0xe5, 0xb1, 0x06, 0x3d, 0x50, 0x07,
             ];
 
-            let header_list = decoder.decode(&hex_dump);
+            let header_list = decoder.decode(&hex_dump).ok().unwrap();
 
             let expected_header_list = [
                 (b":status".to_vec(), b"200".to_vec()),
