@@ -79,7 +79,7 @@ impl HuffmanDecoder {
     /// It assumes that the entire buffer should be considered as the Huffman
     /// encoding of an octet string and handles the padding rules
     /// accordingly.
-    pub fn decode(&mut self, buf: &[u8]) -> Vec<u8> {
+    pub fn decode(&mut self, buf: &[u8]) -> HuffmanDecoderResult {
         let mut current: u32 = 0;
         let mut current_len: u8 = 0;
         let mut result: Vec<u8> = Vec::new();
@@ -109,7 +109,7 @@ impl HuffmanDecoder {
             }
         }
 
-        result
+        Ok(result)
     }
 }
 
@@ -482,7 +482,7 @@ mod tests {
             let hex_buffer = [0x7 << 3];
             let expected_result = vec![b'o'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -490,7 +490,7 @@ mod tests {
             let hex_buffer = [0x0];
             let expected_result = vec![b'0'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -499,7 +499,7 @@ mod tests {
             let hex_buffer = [0x21 << 2];
             let expected_result = vec![b'A'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -513,7 +513,7 @@ mod tests {
             let hex_buffer = [255, 160];
             let expected_result = vec![b'#'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -521,7 +521,7 @@ mod tests {
             let hex_buffer = [255, 200];
             let expected_result = vec![b'$'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -529,7 +529,7 @@ mod tests {
             let hex_buffer = [255, 255, 255, 240];
             let expected_result = vec![10];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -542,7 +542,7 @@ mod tests {
             let hex_buffer = [254, 0];
             let expected_result = vec![b'!', b'0'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }
@@ -550,7 +550,7 @@ mod tests {
             let hex_buffer = [(0x14 << 2) | 0x3, 248];
             let expected_result = vec![b' ', b'!'];
 
-            let result = decoder.decode(&hex_buffer);
+            let result = decoder.decode(&hex_buffer).ok().unwrap();
 
             assert_eq!(result, expected_result);
         }

@@ -384,7 +384,7 @@ fn decode_string(buf: &[u8]) -> Result<(Vec<u8>, usize), DecoderError> {
         // Huffman coding used: pass the raw octets to the Huffman decoder
         // and return its result.
         let mut decoder = HuffmanDecoder::new();
-        Ok((decoder.decode(raw_string), consumed + len))
+        Ok((decoder.decode(raw_string).ok().unwrap(), consumed + len))
     } else {
         // The octets were transmitted raw
         debug!("decode_string: Raw octet string received");
