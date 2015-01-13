@@ -327,6 +327,35 @@ impl Decoder {
             dynamic_table: DynamicTable::new(),
         }
     }
+
+    /// Gets the header (name, value) pair with the given index from the table.
+    ///
+    /// In this context, the "table" references the definition of the table
+    /// where the static table is concatenated with the dynamic table and is
+    /// 1-indexed.
+    fn get_from_table(&self, index: usize) -> Option<(&[u8], &[u8])> {
+        // The IETF defined table indexing as 1-based
+        let real_index = index - 1;
+
+        if real_index < STATIC_TABLE.len() {
+            // It is in the static table so just return that...
+            Some(STATIC_TABLE[real_index])
+        } else {
+            // It is in the dynamic table ...
+            let dynamic_index = real_index - STATIC_TABLE.len();
+            if dynamic_index < self.dynamic_table.len() {
+                match self.dynamic_table.get(dynamic_index) {
+                    Some(&(ref name, ref value)) => {
+                        Some((name.as_slice(), value.as_slice()))
+                    },
+                    None => None,
+                }
+            } else {
+                // Index out of bounds!
+                None
+            }
+        }
+    }
 }
 
 mod tests {
