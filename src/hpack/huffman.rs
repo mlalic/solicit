@@ -45,6 +45,9 @@ pub type HuffmanDecoderResult = Result<Vec<u8>, HuffmanDecoderError>;
 /// A simple implementation of a Huffman code decoder.
 pub struct HuffmanDecoder {
     table: HashMap<u8, HashMap<u32, HuffmanCodeSymbol>>,
+    // The representation of the EOS: the left-aligned code representation and
+    // the actual length of the codepoint, as a tuple.
+    eos_codepoint: (u32, u8),
 }
 
 impl HuffmanDecoder {
@@ -54,18 +57,32 @@ impl HuffmanDecoder {
         if table.len() != 257 {
             panic!("Invalid Huffman code table. It must define exactly 257 symbols.");
         }
-        let mut decoder = HuffmanDecoder {
-            table: HashMap::new(),
-        };
+
+        let mut decoder_table: HashMap<u8, HashMap<u32, HuffmanCodeSymbol>> =
+            HashMap::new();
+        let mut eos_codepoint: Option<(u32, u8)> = None;
+
         for (symbol, &(code, code_len)) in table.iter().enumerate() {
-            if !decoder.table.contains_key(&code_len) {
-                decoder.table.insert(code_len, HashMap::new());
+            if !decoder_table.contains_key(&code_len) {
+                decoder_table.insert(code_len, HashMap::new());
             }
-            let subtable = decoder.table.get_mut(&code_len).unwrap();
-            subtable.insert(code, HuffmanCodeSymbol::new(symbol));
+            let subtable = decoder_table.get_mut(&code_len).unwrap();
+            let huff_symbol = HuffmanCodeSymbol::new(symbol);
+            match huff_symbol {
+                HuffmanCodeSymbol::EndOfString => {
+                    // We also remember the code point of the EOS for easier
+                    // reference later on.
+                    eos_codepoint = Some((code, code_len));
+                },
+                _ => {}
+            };
+            subtable.insert(code, huff_symbol);
         }
 
-        decoder
+        HuffmanDecoder {
+            table: decoder_table,
+            eos_codepoint: eos_codepoint.unwrap(),
+        }
     }
 
     /// Constructs a new HuffmanDecoder with the default Huffman code table, as
