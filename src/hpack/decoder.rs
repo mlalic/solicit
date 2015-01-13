@@ -423,25 +423,29 @@ impl Decoder {
         let mut header_list = Vec::new();
 
         while current_octet_index < buf.len() {
+            // At this point we are always at the beginning of the next block
+            // within the HPACK data.
+            // The type of the block can always be determined from the first
+            // byte.
             let initial_octet = buf[current_octet_index];
             let consumed = match FieldRepresentation::new(initial_octet) {
                 FieldRepresentation::Indexed => {
                     let ((name, value), consumed) =
-                        self.decode_indexed(&buf[current_octet_index..]);
+                        try!(self.decode_indexed(&buf[current_octet_index..]));
                     header_list.push((name, value));
 
                     consumed
                 },
                 FieldRepresentation::LiteralWithIncrementalIndexing => {
                     let ((name, value), consumed) =
-                        self.decode_literal(&buf[current_octet_index..], true);
+                        try!(self.decode_literal(&buf[current_octet_index..], true));
                     header_list.push((name, value));
 
                     consumed
                 },
                 FieldRepresentation::LiteralWithoutIndexing => {
                     let ((name, value), consumed) =
-                        self.decode_literal(&buf[current_octet_index..], false);
+                        try!(self.decode_literal(&buf[current_octet_index..], false));
                     header_list.push((name, value));
 
                     consumed
@@ -452,7 +456,7 @@ impl Decoder {
                     // representation received here. We don't care about this
                     // for now.
                     let ((name, value), consumed) =
-                        self.decode_literal(&buf[current_octet_index..], false);
+                        try!(self.decode_literal(&buf[current_octet_index..], false));
                     header_list.push((name, value));
 
                     consumed
@@ -470,16 +474,14 @@ impl Decoder {
     }
 
     /// Decodes an indexed header representation.
-    fn decode_indexed(&self, buf: &[u8]) -> ((Vec<u8>, Vec<u8>), usize) {
+    fn decode_indexed(&self, buf: &[u8])
+            -> Result<((Vec<u8>, Vec<u8>), usize), DecoderError> {
         let (index, consumed) = decode_integer(buf, 7);
         debug!("Decoding indexed: index = {}, consumed = {}", index, consumed);
 
-        let (name, value) = match self.get_from_table(index) {
-            Some((name, value)) => (name.to_vec(), value.to_vec()),
-            None => panic!("Error handling not yet implemented, table index out of bounds"),
-        };
+        let (name, value) = try!(self.get_from_table(index));
 
-        ((name, value), consumed)
+        Ok(((name.to_vec(), value.to_vec()), consumed))
     }
 
     /// Gets the header (name, value) pair with the given index from the table.
@@ -487,26 +489,33 @@ impl Decoder {
     /// In this context, the "table" references the definition of the table
     /// where the static table is concatenated with the dynamic table and is
     /// 1-indexed.
-    fn get_from_table(&self, index: usize) -> Option<(&[u8], &[u8])> {
-        // The IETF defined table indexing as 1-based
-        let real_index = index - 1;
+    fn get_from_table(&self, index: usize)
+            -> Result<(&[u8], &[u8]), DecoderError> {
+        // The IETF defined table indexing as 1-based.
+        // So, before starting, make sure the given index is within the proper
+        // bounds.
+        let real_index = if index > 0 {
+            index - 1
+        } else {
+            return Err(DecoderError::HeaderIndexOutOfBounds);
+        };
 
         if real_index < STATIC_TABLE.len() {
             // It is in the static table so just return that...
-            Some(STATIC_TABLE[real_index])
+            Ok(STATIC_TABLE[real_index])
         } else {
-            // It is in the dynamic table ...
+            // Maybe it's in the dynamic table then?
             let dynamic_index = real_index - STATIC_TABLE.len();
             if dynamic_index < self.dynamic_table.len() {
                 match self.dynamic_table.get(dynamic_index) {
                     Some(&(ref name, ref value)) => {
-                        Some((name.as_slice(), value.as_slice()))
+                        Ok((name.as_slice(), value.as_slice()))
                     },
-                    None => None,
+                    None => Err(DecoderError::HeaderIndexOutOfBounds),
                 }
             } else {
                 // Index out of bounds!
-                None
+                Err(DecoderError::HeaderIndexOutOfBounds)
             }
         }
     }
@@ -517,7 +526,8 @@ impl Decoder {
     ///
     /// - index: whether or not the decoded value should be indexed (i.e.
     ///   included in the dynamic table).
-    fn decode_literal(&mut self, buf: &[u8], index: bool) -> ((Vec<u8>, Vec<u8>), usize) {
+    fn decode_literal(&mut self, buf: &[u8], index: bool)
+            -> Result<((Vec<u8>, Vec<u8>), usize), DecoderError> {
         let prefix = if index {
             6
         } else {
@@ -533,9 +543,7 @@ impl Decoder {
             name
         } else {
             // Read name indexed from the table
-            // TODO Gracefully handle an index out of bounds!
-            // (i.e. a failed unwrap)
-            let (name, _) = self.get_from_table(table_index).unwrap();
+            let (name, _) = try!(self.get_from_table(table_index));
             name.to_vec()
         };
 
@@ -550,7 +558,7 @@ impl Decoder {
             // for decoding the next blocks.
             self.add_to_dynamic_table(name.clone(), value.clone());
         }
-        ((name, value), consumed)
+        Ok(((name, value), consumed))
     }
 
     /// Internal helper function for adding elements to the dynamic table.
@@ -591,6 +599,7 @@ mod tests {
     use super::FieldRepresentation;
     use super::decode_string;
     use super::Decoder;
+    use super::{DecoderError, DecoderResult};
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
@@ -1390,4 +1399,45 @@ mod tests {
             assert_eq!(actual, expected_table);
         }
     }
+
+    /// Helper function that verifies whether the given `DecoderResult`
+    /// indicates the given `DecoderError`
+    fn is_decoder_error(err: &DecoderError, result: &DecoderResult) -> bool {
+        match *result {
+            Err(ref e) => e == err,
+            _ => false
+        }
+    }
+
+    /// Tests that when a header representation indicates an indexed header
+    /// encoding, but the index is out of valid bounds, the appropriate error
+    /// is returned by the decoder.
+    #[test]
+    fn test_index_out_of_bounds() {
+        let mut decoder = Decoder::new();
+        // Some fixtures of raw messages which definitely need to cause an
+        // index out of bounds error.
+        let raw_messages = [
+            // This indicates that the index of the header is 0, which is
+            // invalid...
+            vec![0x80],
+            // This indicates that the index of the header is 62, which is out
+            // of the bounds of the header table, given that there are no
+            // entries in the dynamic table and the static table contains 61
+            // elements.
+            vec![0xbe],
+            // Literal encoded with an indexed name where the index is out of
+            // bounds.
+            vec![126, 1, 65],
+        ];
+
+        // Check them all...
+        for raw_message in raw_messages.iter() {
+            assert!(
+                is_decoder_error(&DecoderError::HeaderIndexOutOfBounds,
+                                 &decoder.decode(raw_message.as_slice())),
+                "Expected index out of bounds");
+        }
+    }
+
 }
