@@ -1,3 +1,10 @@
+/// Exposes the struct `Decoder` that allows for HPACK-encoded header blocks to
+/// be decoded into a header list.
+///
+/// The decoder only follows HPACK rules, without performing any additional
+/// (semantic) checks on the header name/value pairs, i.e. it considers the
+/// headers as opaque octets.
+
 use std::fmt;
 use std::collections::RingBuf;
 
@@ -242,6 +249,16 @@ impl fmt::Show for DynamicTable {
     }
 }
 
+/// Decodes headers encoded using HPACK.
+///
+/// For now, incremental decoding is not supported, i.e. it is necessary
+/// to pass in the entire encoded representation of all headers to the
+/// decoder, rather than processing it piece-by-piece.
+pub struct Decoder {
+    // The dynamic table will own its own copy of headers
+    dynamic_table: DynamicTable,
+}
+
 /// Different variants of how a particular header field can be represented in
 /// an HPACK encoding.
 enum FieldRepresentation {
@@ -301,6 +318,16 @@ fn decode_string(buf: &[u8]) -> (Vec<u8>, usize) {
     }
 }
 
+/// Represents a decoder of HPACK encoded headers. Maintains the state
+/// necessary to correctly decode subsequent HPACK blocks.
+impl Decoder {
+    /// Creates a new `Decoder` with all settings set to default values.
+    pub fn new() -> Decoder {
+        Decoder {
+            dynamic_table: DynamicTable::new(),
+        }
+    }
+}
 
 mod tests {
     use super::{decode_integer};
@@ -308,6 +335,7 @@ mod tests {
     use super::DynamicTable;
     use super::FieldRepresentation;
     use super::decode_string;
+    use super::Decoder;
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
