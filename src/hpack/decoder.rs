@@ -388,7 +388,7 @@ impl Decoder {
                 },
                 FieldRepresentation::SizeUpdate => {
                     // Handle the dynamic table size update...
-                    panic!("NYI: SizeUpdate field types");
+                    self.update_max_dynamic_size(&buf[current_octet_index..])
                 }
             };
 
@@ -486,6 +486,25 @@ impl Decoder {
     /// Simply proxies it to the internal `dynamic_table` member.
     fn add_to_dynamic_table(&mut self, name: Vec<u8>, value: Vec<u8>) {
         self.dynamic_table.add_header(name, value);
+    }
+
+    /// Handles processing the `SizeUpdate` HPACK block: updates the maximum
+    /// size of the underlying dynamic table, possibly causing a number of
+    /// headers to be evicted from it.
+    ///
+    /// Assumes that the first byte in the given buffer `buf` is the first
+    /// octet in the `SizeUpdate` block.
+    ///
+    /// Returns the number of octets consumed from the given buffer.
+    fn update_max_dynamic_size(&mut self, buf: &[u8]) -> usize {
+        let (new_size, consumed) = decode_integer(buf, 5);
+        self.dynamic_table.set_max_table_size(new_size);
+
+        info!("Decoder changed max table size from {} to {}",
+              self.dynamic_table.get_size(),
+              new_size);
+
+        consumed
     }
 
     /// Sets a new maximum dynamic table size for the decoder.
@@ -1054,6 +1073,67 @@ mod tests {
             // assert_eq!(actual, expected_table);
         }
     }
+
+    /// Tests that when the decoder receives an update of the max dynamic table
+    /// size as 0, all entries are cleared from the dynamic table.
+    #[test]
+    fn test_decoder_clear_dynamic_table() {
+        let mut decoder = Decoder::new();
+        {
+            let hex_dump = [
+                0x48, 0x03, 0x33, 0x30, 0x32, 0x58, 0x07, 0x70, 0x72, 0x69,
+                0x76, 0x61, 0x74, 0x65, 0x61, 0x1d, 0x4d, 0x6f, 0x6e, 0x2c,
+                0x20, 0x32, 0x31, 0x20, 0x4f, 0x63, 0x74, 0x20, 0x32, 0x30,
+                0x31, 0x33, 0x20, 0x32, 0x30, 0x3a, 0x31, 0x33, 0x3a, 0x32,
+                0x31, 0x20, 0x47, 0x4d, 0x54, 0x6e, 0x17, 0x68, 0x74, 0x74,
+                0x70, 0x73, 0x3a, 0x2f, 0x2f, 0x77, 0x77, 0x77, 0x2e, 0x65,
+                0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            assert_eq!(header_list, [
+                (b":status".to_vec(), b"302".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+            ]);
+            // All entries in the dynamic table too?
+            let mut expected_table = vec![
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b":status".to_vec(), b"302".to_vec()),
+            ];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+        }
+        {
+            let hex_dump = [
+                0x48, 0x03, 0x33, 0x30, 0x37, 0xc1, 0xc0, 0xbf,
+                // This instructs the decoder to clear the list
+                // (it's doubtful that it would ever be found there in a real
+                // response, though...)
+                0x20,
+            ];
+
+            let header_list = decoder.decode(&hex_dump);
+
+            // Headers have been correctly decoded...
+            assert_eq!(header_list, [
+                (b":status".to_vec(), b"307".to_vec()),
+                (b"cache-control".to_vec(), b"private".to_vec()),
+                (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
+                (b"location".to_vec(), b"https://www.example.com".to_vec()),
+            ]);
+            // Expect an empty table!
+            let mut expected_table = vec![];
+            let actual = decoder.dynamic_table.get_table_as_list();
+            assert_eq!(actual, expected_table);
+            assert_eq!(0, decoder.dynamic_table.get_max_table_size());
+        }
+    }
+
     /// Tests that a each header list from a sequence of requests is correctly
     /// decoded, when Huffman coding is used
     /// (example from: HPACK-draft-10, C.4.*)
