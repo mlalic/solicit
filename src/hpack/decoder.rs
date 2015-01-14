@@ -1644,16 +1644,9 @@ mod interop_tests {
                 wire_bytes: try!(d.read_struct_field("wire", 0, |d| {
                     // Read the `wire` field...
                     Decodable::decode(d).and_then(|res: String| {
-                        // If valid, parse out the octets by taking chunks of
-                        // two characters, interpreting it as a hex encoded
-                        // integer and adding to the return `Vec`
-                        let mut bytes: Vec<u8> = Vec::new();
-                        for octet in res.as_bytes().chunks(2) {
-                            let x = from_utf8(octet).unwrap().from_hex().unwrap();
-                            bytes.push(x[0]);
-                        }
-
-                        Ok(bytes)
+                        // If valid, parse out the octets from the String by
+                        // considering it a hex encoded byte sequence.
+                        Ok(res[0..].from_hex().unwrap())
                     })
                 })),
                 headers: try!(d.read_struct_field("headers", 0, |d| {
