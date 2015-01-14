@@ -11,4 +11,5 @@ authors = ["Marko Lalic <marko.lalic@gmail.com>"]
 interop_tests = []
 
 [dependencies]
+rustc-serialize = "0.2"
 log = "^0.1"

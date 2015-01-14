@@ -1597,4 +1597,142 @@ mod tests {
 #[cfg(feature="interop_tests")]
 #[cfg(test)]
 mod interop_tests {
+    use std::str::from_utf8;
+    use std::io::{File, fs};
+    use std::collections::HashMap;
+
+    use rustc_serialize::Decoder as JsonDecoder;
+    use rustc_serialize::{Decodable, json};
+    use rustc_serialize::hex::FromHex;
+
+    /// Defines the structure of a single part of a story file. We only care
+    /// about the bytes and corresponding headers and ignore the rest.
+    struct TestFixture {
+        wire_bytes: Vec<u8>,
+        headers: Vec<(Vec<u8>, Vec<u8>)>,
+    }
+
+    /// Defines the structure corresponding to a full story file. We only
+    /// care about the cases for now.
+    #[derive(RustcDecodable)]
+    struct TestStory {
+        cases: Vec<TestFixture>,
+    }
+
+    /// A custom implementation of the `rustc_serialize::Decodable` trait for
+    /// `TestFixture`s. This is necessary for two reasons:
+    ///
+    ///  - The original story files store the raw bytes as a hex-encoded
+    ///    *string*, so we convert it to a `Vec<u8>` at parse time
+    ///  - The original story files store the list of headers as an array of
+    ///    objects, where each object has a single key. We convert this to a
+    ///    more natural representation of a `Vec` of two-tuples.
+    ///
+    /// For an example of the test story JSON structure check the
+    /// `test_story_parser_sanity_check` test function or one of the fixtures
+    /// in the directory `fixtures/hpack/interop`.
+    impl Decodable for TestFixture {
+        fn decode<D: JsonDecoder>(d: &mut D) -> Result<Self, D::Error> {
+            d.read_struct("root", 0, |d| Ok(TestFixture {
+                wire_bytes: try!(d.read_struct_field("wire", 0, |d| {
+                    // Read the `wire` field...
+                    Decodable::decode(d).and_then(|res: String| {
+                        // If valid, parse out the octets by taking chunks of
+                        // two characters, interpreting it as a hex encoded
+                        // integer and adding to the return `Vec`
+                        let mut bytes: Vec<u8> = Vec::new();
+                        for octet in res.as_bytes().chunks(2) {
+                            let x = from_utf8(octet).unwrap().from_hex().unwrap();
+                            bytes.push(x[0]);
+                        }
+
+                        Ok(bytes)
+                    })
+                })),
+                headers: try!(d.read_struct_field("headers", 0, |d| {
+                    // Read the `headers` field...
+                    d.read_seq(|d, len| {
+                        // ...since it's an array, we step into the sequence
+                        // and read each element.
+                        let mut ret: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+                        for i in (0..len) {
+                            // Individual elements are encoded as a simple
+                            // JSON object with one key: value pair.
+                            let header: HashMap<String, String> = try!(
+                                d.read_seq_elt(i, |d| Decodable::decode(d)));
+                            // We convert it to a tuple, which is a more
+                            // natural representation of headers.
+                            for (name, value) in header.into_iter() {
+                                ret.push((name.as_bytes().to_vec(), value.as_bytes().to_vec()));
+                            }
+                        }
+                        Ok(ret)
+                    })
+                })),
+            }))
+        }
+    }
+
+    /// Tests that the `TestStory` can be properly read out of a JSON encoded
+    /// string. Sanity check for the `Decodable` implementation.
+    #[test]
+    fn test_story_parser_sanity_check() {
+        let raw_json = stringify!(
+            {
+              "cases": [
+                {
+                  "seqno": 0,
+                  "wire": "82864188f439ce75c875fa5784",
+                  "headers": [
+                    {
+                      ":method": "GET"
+                    },
+                    {
+                      ":scheme": "http"
+                    },
+                    {
+                      ":authority": "yahoo.co.jp"
+                    },
+                    {
+                      ":path": "/"
+                    }
+                  ]
+                },
+                {
+                  "seqno": 1,
+                  "wire": "8286418cf1e3c2fe8739ceb90ebf4aff84",
+                  "headers": [
+                    {
+                      ":method": "GET"
+                    },
+                    {
+                      ":scheme": "http"
+                    },
+                    {
+                      ":authority": "www.yahoo.co.jp"
+                    },
+                    {
+                      ":path": "/"
+                    }
+                  ]
+                }
+              ],
+              "draft": 9
+            }
+        );
+
+        let decoded: TestStory = json::decode(raw_json).unwrap();
+
+        assert_eq!(decoded.cases.len(), 2);
+        assert_eq!(decoded.cases[0].wire_bytes, vec![
+            0x82, 0x86, 0x41, 0x88, 0xf4, 0x39, 0xce, 0x75, 0xc8, 0x75, 0xfa,
+            0x57, 0x84
+        ]);
+        assert_eq!(decoded.cases[0].headers, vec![
+            (b":method".to_vec(), b"GET".to_vec()),
+            (b":scheme".to_vec(), b"http".to_vec()),
+            (b":authority".to_vec(), b"yahoo.co.jp".to_vec()),
+            (b":path".to_vec(), b"/".to_vec()),
+        ]);
+    }
 }
