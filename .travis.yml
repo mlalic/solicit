@@ -1,2 +1,3 @@
 language: rust
 sudo: false
+script: cargo test --features "interop_tests"
