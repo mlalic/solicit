@@ -25,6 +25,39 @@ impl HuffmanCodeSymbol {
     }
 }
 
+/// A simple implementation of a Huffman code decoder.
+pub struct HuffmanDecoder {
+    table: HashMap<u8, HashMap<u32, HuffmanCodeSymbol>>,
+}
+
+impl HuffmanDecoder {
+    /// Constructs a new `HuffmanDecoder` using the given table of
+    /// (code point, code length) tuples to represent the Huffman code.
+    fn from_table(table: &[(u32, u8)]) -> HuffmanDecoder {
+        if table.len() != 257 {
+            panic!("Invalid Huffman code table. It must define exactly 257 symbols.");
+        }
+        let mut decoder = HuffmanDecoder {
+            table: HashMap::new(),
+        };
+        for (symbol, &(code, code_len)) in table.iter().enumerate() {
+            if !decoder.table.contains_key(&code_len) {
+                decoder.table.insert(code_len, HashMap::new());
+            }
+            let subtable = decoder.table.get_mut(&code_len).unwrap();
+            subtable.insert(code, HuffmanCodeSymbol::new(symbol));
+        }
+
+        decoder
+    }
+
+    /// Constructs a new HuffmanDecoder with the default Huffman code table, as
+    /// defined in the HPACK-draft-10, Appendix B.
+    pub fn new() -> HuffmanDecoder {
+        HuffmanDecoder::from_table(HUFFMAN_CODE_TABLE)
+    }
+}
+
 /// A helper struct that represents an iterator over individual bits of all
 /// bytes found in a wrapped Iterator over bytes.
 /// Bits are represented as `bool`s, where `true` corresponds to a set bit and
