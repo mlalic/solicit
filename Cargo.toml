@@ -3,3 +3,6 @@
 name = "solicit"
 version = "0.0.1"
 authors = ["Marko Lalic <marko.lalic@gmail.com>"]
+
+[dependencies]
+log = "^0.1"
