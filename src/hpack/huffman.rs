@@ -521,12 +521,15 @@ mod tests {
 
     /// Simple tests for the Huffman decoder -- whether it can decode a single
     /// character code represented additionally with only a single byte.
+    #[test]
     fn test_huffman_code_single_byte() {
         let mut decoder = HuffmanDecoder::new();
+        // (The + (2^n - 1) at the final byte is to add the correct expected
+        // padding: 1s)
         {
             // We need to shift it by 3, since we need the top-order bytes to
             // start the code point.
-            let hex_buffer = [0x7 << 3];
+            let hex_buffer = [(0x7 << 3) + 7];
             let expected_result = vec![b'o'];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
@@ -534,7 +537,7 @@ mod tests {
             assert_eq!(result, expected_result);
         }
         {
-            let hex_buffer = [0x0];
+            let hex_buffer = [0x0 + 7];
             let expected_result = vec![b'0'];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
@@ -543,7 +546,7 @@ mod tests {
         }
         {
             // The length of the codepoint is 6, so we shift by two
-            let hex_buffer = [0x21 << 2];
+            let hex_buffer = [(0x21 << 2) + 3];
             let expected_result = vec![b'A'];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
@@ -554,10 +557,13 @@ mod tests {
 
     /// Tests that the Huffman decoder can decode a single character made of
     /// multiple bytes.
+    #[test]
     fn test_huffman_code_single_char_multiple_byte() {
         let mut decoder = HuffmanDecoder::new();
+        // (The + (2^n - 1) at the final byte is to add the correct expected
+        // padding: 1s)
         {
-            let hex_buffer = [255, 160];
+            let hex_buffer = [255, 160 + 15];
             let expected_result = vec![b'#'];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
@@ -565,7 +571,7 @@ mod tests {
             assert_eq!(result, expected_result);
         }
         {
-            let hex_buffer = [255, 200];
+            let hex_buffer = [255, 200 + 7];
             let expected_result = vec![b'$'];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
@@ -573,7 +579,7 @@ mod tests {
             assert_eq!(result, expected_result);
         }
         {
-            let hex_buffer = [255, 255, 255, 240];
+            let hex_buffer = [255, 255, 255, 240 + 3];
             let expected_result = vec![10];
 
             let result = decoder.decode(&hex_buffer).ok().unwrap();
