@@ -141,12 +141,12 @@ impl HuffmanDecoder {
         // EOS symbol.
         // Align both of them to have their most significant bit as the most
         // significant bit of a u32.
-        let right_align_current = (current << (32 - current_len));
+        let right_align_current = current << (32 - current_len);
         let right_align_eos = self.eos_codepoint.0 << (32 - self.eos_codepoint.1);
         // Now take only the necessary amount of most significant bit of EOS.
         // The mask defines a bit pattern of `current_len` leading set bits,
         // followed by the rest of the bits 0.
-        let mask = (((1 << current_len) - 1) << (32 - current_len));
+        let mask = ((1 << current_len) - 1) << (32 - current_len);
         // The mask is now used to strip the unwanted bits of the EOS
         let eos_mask = right_align_eos & mask;
 

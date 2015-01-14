@@ -977,7 +977,7 @@ mod tests {
         ]);
         // The entry got added to the dynamic table?
         assert_eq!(decoder.dynamic_table.len(), 1);
-        let mut expected_table = vec![
+        let expected_table = vec![
             (b"custom-key".to_vec(), b"custom-header".to_vec())
         ];
         let actual = decoder.dynamic_table.get_table_as_list();
@@ -1004,7 +1004,7 @@ mod tests {
             ]);
             // The entry got added to the dynamic table?
             assert_eq!(decoder.dynamic_table.len(), 1);
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"custom-key".to_vec(), b"custom-header".to_vec())
             ];
             let actual = decoder.dynamic_table.get_table_as_list();
@@ -1024,7 +1024,7 @@ mod tests {
             ]);
             // The entry got added to the dynamic table, so now we have two?
             assert_eq!(decoder.dynamic_table.len(), 2);
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"custom-key".to_vec(), b"custom-header-".to_vec()),
                 (b"custom-key".to_vec(), b"custom-header".to_vec()),
             ];
@@ -1076,7 +1076,7 @@ mod tests {
             ]);
             // Only one entry got added to the dynamic table?
             assert_eq!(decoder.dynamic_table.len(), 1);
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b":authority".to_vec(), b"www.example.com".to_vec())
             ];
             let actual = decoder.dynamic_table.get_table_as_list();
@@ -1099,7 +1099,7 @@ mod tests {
                 (b"cache-control".to_vec(), b"no-cache".to_vec()),
             ]);
             // One entry got added to the dynamic table, so we have two?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"cache-control".to_vec(), b"no-cache".to_vec()),
                 (b":authority".to_vec(), b"www.example.com".to_vec()),
             ];
@@ -1125,7 +1125,7 @@ mod tests {
             ]);
             // One entry got added to the dynamic table, so we have three at
             // this point...?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"custom-key".to_vec(), b"custom-value".to_vec()),
                 (b"cache-control".to_vec(), b"no-cache".to_vec()),
                 (b":authority".to_vec(), b"www.example.com".to_vec()),
@@ -1164,7 +1164,7 @@ mod tests {
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
             ]);
             // All entries in the dynamic table too?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
                 (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
                 (b"cache-control".to_vec(), b"private".to_vec()),
@@ -1189,7 +1189,7 @@ mod tests {
             ]);
             // The new status replaces the old status in the table, since it
             // cannot fit without evicting something from the table.
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b":status".to_vec(), b"307".to_vec()),
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
                 (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
@@ -1229,7 +1229,7 @@ mod tests {
             assert_eq!(header_list, expected_header_list);
             // The new status replaces the old status in the table, since it
             // cannot fit without evicting something from the table.
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (
                     b"set-cookie".to_vec(),
                     b"foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1".to_vec()
@@ -1267,7 +1267,7 @@ mod tests {
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
             ]);
             // All entries in the dynamic table too?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
                 (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
                 (b"cache-control".to_vec(), b"private".to_vec()),
@@ -1295,7 +1295,7 @@ mod tests {
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
             ]);
             // Expect an empty table!
-            let mut expected_table = vec![];
+            let expected_table = vec![];
             let actual = decoder.dynamic_table.get_table_as_list();
             assert_eq!(actual, expected_table);
             assert_eq!(0, decoder.dynamic_table.get_max_table_size());
@@ -1325,7 +1325,7 @@ mod tests {
             ]);
             // Only one entry got added to the dynamic table?
             assert_eq!(decoder.dynamic_table.len(), 1);
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b":authority".to_vec(), b"www.example.com".to_vec())
             ];
             let actual = decoder.dynamic_table.get_table_as_list();
@@ -1348,7 +1348,7 @@ mod tests {
                 (b"cache-control".to_vec(), b"no-cache".to_vec()),
             ]);
             // One entry got added to the dynamic table, so we have two?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"cache-control".to_vec(), b"no-cache".to_vec()),
                 (b":authority".to_vec(), b"www.example.com".to_vec()),
             ];
@@ -1374,7 +1374,7 @@ mod tests {
             ]);
             // One entry got added to the dynamic table, so we have three at
             // this point...?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"custom-key".to_vec(), b"custom-value".to_vec()),
                 (b"cache-control".to_vec(), b"no-cache".to_vec()),
                 (b":authority".to_vec(), b"www.example.com".to_vec()),
@@ -1412,7 +1412,7 @@ mod tests {
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
             ]);
             // All entries in the dynamic table too?
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
                 (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
                 (b"cache-control".to_vec(), b"private".to_vec()),
@@ -1437,7 +1437,7 @@ mod tests {
             ]);
             // The new status replaces the old status in the table, since it
             // cannot fit without evicting something from the table.
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (b":status".to_vec(), b"307".to_vec()),
                 (b"location".to_vec(), b"https://www.example.com".to_vec()),
                 (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:21 GMT".to_vec()),
@@ -1475,7 +1475,7 @@ mod tests {
             assert_eq!(header_list, expected_header_list);
             // The new status replaces the old status in the table, since it
             // cannot fit without evicting something from the table.
-            let mut expected_table = vec![
+            let expected_table = vec![
                 (
                     b"set-cookie".to_vec(),
                     b"foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1".to_vec()
