@@ -21,6 +21,7 @@ use std::fmt;
 use std::collections::RingBuf;
 
 use super::huffman::HuffmanDecoder;
+use super::huffman::HuffmanDecoderError;
 
 /// Decodes an integer encoded with a given prefix size (in bits).
 /// Assumes that the buffer `buf` contains the integer to be decoded,
@@ -384,7 +385,14 @@ fn decode_string(buf: &[u8]) -> Result<(Vec<u8>, usize), DecoderError> {
         // Huffman coding used: pass the raw octets to the Huffman decoder
         // and return its result.
         let mut decoder = HuffmanDecoder::new();
-        Ok((decoder.decode(raw_string).ok().unwrap(), consumed + len))
+        let decoded = match decoder.decode(raw_string) {
+            Err(e) => {
+                return Err(DecoderError::StringDecodingError(
+                    StringDecodingError::HuffmanDecoderError(e)));
+            },
+            Ok(res) => res,
+        };
+        Ok((decoded, consumed + len))
     } else {
         // The octets were transmitted raw
         debug!("decode_string: Raw octet string received");
@@ -418,6 +426,7 @@ pub enum IntegerDecodingError {
 #[derive(Show)]
 pub enum StringDecodingError {
     NotEnoughOctets,
+    HuffmanDecoderError(HuffmanDecoderError),
 }
 
 /// Represents all errors that can be encountered while performing the decoding
