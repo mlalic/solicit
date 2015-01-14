@@ -455,6 +455,12 @@ impl Decoder {
             dynamic_table: DynamicTable::new(),
         }
     }
+
+    /// Sets a new maximum dynamic table size for the decoder.
+    pub fn set_max_table_size(&mut self, new_max_size: usize) {
+        self.dynamic_table.set_max_table_size(new_max_size);
+    }
+
     /// Decode the header block found in the given buffer.
     ///
     /// The buffer should represent the entire block that should be decoded.
@@ -626,11 +632,6 @@ impl Decoder {
               new_size);
 
         consumed
-    }
-
-    /// Sets a new maximum dynamic table size for the decoder.
-    fn set_max_table_size(&mut self, new_max_size: usize) {
-        self.dynamic_table.set_max_table_size(new_max_size);
     }
 }
 
