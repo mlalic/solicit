@@ -56,6 +56,44 @@ impl HuffmanDecoder {
     pub fn new() -> HuffmanDecoder {
         HuffmanDecoder::from_table(HUFFMAN_CODE_TABLE)
     }
+
+    /// Decodes the buffer `buf` into a newly allocated `Vec`.
+    ///
+    /// It assumes that the entire buffer should be considered as the Huffman
+    /// encoding of an octet string and handles the padding rules
+    /// accordingly.
+    pub fn decode(&mut self, buf: &[u8]) -> Vec<u8> {
+        let mut current: u32 = 0;
+        let mut current_len: u8 = 0;
+        let mut result: Vec<u8> = Vec::new();
+
+        for b in BitIterator::new(buf.iter()) {
+            current_len += 1;
+            current <<= 1;
+            if b {
+                current |= 1;
+            }
+
+            if self.table.contains_key(&current_len) {
+                let length_table = self.table.get(&current_len).unwrap();
+                if length_table.contains_key(&current) {
+                    let decoded_symbol = match length_table.get(&current).unwrap() {
+                        &HuffmanCodeSymbol::Symbol(symbol) => symbol,
+                        &HuffmanCodeSymbol::EndOfString => {
+                            // TODO Check what kind of padding requirements there are, but for now,
+                            // just consider the end of string here!
+                            break;
+                        },
+                    };
+                    result.push(decoded_symbol);
+                    current = 0;
+                    current_len = 0;
+                }
+            }
+        }
+
+        result
+    }
 }
 
 /// A helper struct that represents an iterator over individual bits of all
@@ -376,6 +414,7 @@ static HUFFMAN_CODE_TABLE: &'static [(u32, u8)] = &[
 
 mod tests {
     use super::BitIterator;
+    use super::HuffmanDecoder;
 
     /// A helper function that converts the given slice containing values `1`
     /// and `0` to a `Vec` of `bool`s, according to the number.
@@ -414,5 +453,89 @@ mod tests {
         }
 
         assert_eq!(res, expected_result);
+    }
+
+    /// Simple tests for the Huffman decoder -- whether it can decode a single
+    /// character code represented additionally with only a single byte.
+    fn test_huffman_code_single_byte() {
+        let mut decoder = HuffmanDecoder::new();
+        {
+            // We need to shift it by 3, since we need the top-order bytes to
+            // start the code point.
+            let hex_buffer = [0x7 << 3];
+            let expected_result = vec![b'o'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+        {
+            let hex_buffer = [0x0];
+            let expected_result = vec![b'0'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+        {
+            // The length of the codepoint is 6, so we shift by two
+            let hex_buffer = [0x21 << 2];
+            let expected_result = vec![b'A'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+    }
+
+    /// Tests that the Huffman decoder can decode a single character made of
+    /// multiple bytes.
+    fn test_huffman_code_single_char_multiple_byte() {
+        let mut decoder = HuffmanDecoder::new();
+        {
+            let hex_buffer = [255, 160];
+            let expected_result = vec![b'#'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+        {
+            let hex_buffer = [255, 200];
+            let expected_result = vec![b'$'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+        {
+            let hex_buffer = [255, 255, 255, 240];
+            let expected_result = vec![10];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+    }
+
+    #[test]
+    fn test_huffman_code_multiple_chars() {
+        let mut decoder = HuffmanDecoder::new();
+        {
+            let hex_buffer = [254, 0];
+            let expected_result = vec![b'!', b'0'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
+        {
+            let hex_buffer = [(0x14 << 2) | 0x3, 248];
+            let expected_result = vec![b' ', b'!'];
+
+            let result = decoder.decode(&hex_buffer);
+
+            assert_eq!(result, expected_result);
+        }
     }
 }
