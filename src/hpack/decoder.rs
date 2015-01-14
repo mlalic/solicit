@@ -560,7 +560,7 @@ impl Decoder {
             if dynamic_index < self.dynamic_table.len() {
                 match self.dynamic_table.get(dynamic_index) {
                     Some(&(ref name, ref value)) => {
-                        Ok((name.as_slice(), value.as_slice()))
+                        Ok((&name[0..], &value[0..]))
                     },
                     None => Err(DecoderError::HeaderIndexOutOfBounds),
                 }
@@ -896,20 +896,20 @@ mod tests {
         {
             let full_string: Vec<u8> = (0u8..200).collect();
             let mut encoded = encode_integer(full_string.len(), 7);
-            encoded.push_all(full_string.as_slice());
+            encoded.push_all(&full_string[0..]);
 
             assert_eq!(
                 (full_string, encoded.len()),
-                decode_string(encoded.as_slice()).ok().unwrap());
+                decode_string(&encoded[0..]).ok().unwrap());
         }
         {
             let full_string: Vec<u8> = (0u8..127).collect();
             let mut encoded = encode_integer(full_string.len(), 7);
-            encoded.push_all(full_string.as_slice());
+            encoded.push_all(&full_string[0..]);
 
             assert_eq!(
                 (full_string, encoded.len()),
-                decode_string(encoded.as_slice()).ok().unwrap());
+                decode_string(&encoded[0..]).ok().unwrap());
         }
     }
 
@@ -1238,7 +1238,7 @@ mod tests {
                 (b"date".to_vec(), b"Mon, 21 Oct 2013 20:13:22 GMT".to_vec()),
             ];
             let actual = decoder.dynamic_table.get_table_as_list();
-            // assert_eq!(actual, expected_table);
+            assert_eq!(actual, expected_table);
         }
     }
 
@@ -1523,7 +1523,7 @@ mod tests {
         for raw_message in raw_messages.iter() {
             assert!(
                 is_decoder_error(&DecoderError::HeaderIndexOutOfBounds,
-                                 &decoder.decode(raw_message.as_slice())),
+                                 &decoder.decode(&raw_message[0..])),
                 "Expected index out of bounds");
         }
     }
