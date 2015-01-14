@@ -1782,4 +1782,29 @@ mod interop_tests {
             test_story(file_name);
         }
     }
+
+    #[test]
+    fn test_nghttp2_interop() {
+        test_fixture_set("fixtures/hpack/interop/nghttp2");
+    }
+
+    #[test]
+    fn test_nghttp2_change_table_size_interop() {
+        test_fixture_set("fixtures/hpack/interop/nghttp2-change-table-size");
+    }
+
+    #[test]
+    fn test_go_hpack_interop() {
+        test_fixture_set("fixtures/hpack/interop/go-hpack");
+    }
+
+    #[test]
+    fn test_node_http2_hpack_interop() {
+        test_fixture_set("fixtures/hpack/interop/node-http2-hpack");
+    }
+
+    #[test]
+    fn test_haskell_http2_linear_huffman() {
+        test_fixture_set("fixtures/hpack/interop/haskell-http2-linear-huffman");
+    }
 }
