@@ -403,6 +403,7 @@ fn decode_string(buf: &[u8]) -> Result<(Vec<u8>, usize), DecoderError> {
 /// Represents all errors that can be encountered while decoding an
 /// integer.
 #[derive(PartialEq)]
+#[derive(Copy)]
 #[derive(Show)]
 pub enum IntegerDecodingError {
     /// 5.1. specifies that "excessively large integer decodings" MUST be
@@ -423,6 +424,7 @@ pub enum IntegerDecodingError {
 /// Represents all errors that can be encountered while decoding an octet
 /// string.
 #[derive(PartialEq)]
+#[derive(Copy)]
 #[derive(Show)]
 pub enum StringDecodingError {
     NotEnoughOctets,
@@ -432,6 +434,7 @@ pub enum StringDecodingError {
 /// Represents all errors that can be encountered while performing the decoding
 /// of an HPACK header set.
 #[derive(PartialEq)]
+#[derive(Copy)]
 #[derive(Show)]
 pub enum DecoderError {
     HeaderIndexOutOfBounds,
