@@ -4,5 +4,11 @@ name = "solicit"
 version = "0.0.1"
 authors = ["Marko Lalic <marko.lalic@gmail.com>"]
 
+[features]
+
+# A feature defining some interop tests between solicit's HPACK decoder and
+# headers encoded by other libraries. It is only ever used in test builds!
+interop_tests = []
+
 [dependencies]
 log = "^0.1"

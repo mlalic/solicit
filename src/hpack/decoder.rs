@@ -1589,3 +1589,12 @@ mod tests {
         });
     }
 }
+
+/// The module defines interop tests between `solicit`'s HPACK decoder
+/// implementation and some encoder implementations, based on their results
+/// published at
+/// [http2jp/hpack-test-case](https://github.com/http2jp/hpack-test-case)
+#[cfg(feature="interop_tests")]
+#[cfg(test)]
+mod interop_tests {
+}
