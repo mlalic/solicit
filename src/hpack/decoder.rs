@@ -1605,6 +1605,8 @@ mod interop_tests {
     use rustc_serialize::{Decodable, json};
     use rustc_serialize::hex::FromHex;
 
+    use super::Decoder;
+
     /// Defines the structure of a single part of a story file. We only care
     /// about the bytes and corresponding headers and ignore the rest.
     struct TestFixture {
@@ -1734,5 +1736,50 @@ mod interop_tests {
             (b":authority".to_vec(), b"yahoo.co.jp".to_vec()),
             (b":path".to_vec(), b"/".to_vec()),
         ]);
+    }
+
+    /// A helper function that performs an interop test for a given story file.
+    ///
+    /// It does so by first decoding the JSON representation of the story into
+    /// a `TestStory` struct. After this, each subsequent block of headers is
+    /// passed to the same decoder instance (since each story represents one
+    /// coder context). The result returned by the decoder is compared to the
+    /// headers stored for that particular block within the story file.
+    fn test_story(story_file_name: &str) {
+        // Set up the story by parsing the given file
+        let story: TestStory = {
+            let mut file = File::open(&Path::new(story_file_name));
+            let raw_story = match file.read_to_string() {
+                Ok(raw) => raw,
+                Err(_) => {
+                    panic!(format!("Could not read file {}", story_file_name));
+                }
+            };
+
+            json::decode(&raw_story[0..]).unwrap()
+        };
+        // Set up the decoder
+        let mut decoder = Decoder::new();
+
+        // Now check whether we correctly decode each case
+        for case in story.cases.iter() {
+            let decoded = decoder.decode(&case.wire_bytes[0..]).unwrap();
+            assert_eq!(decoded, case.headers);
+        }
+    }
+
+    /// Tests a full fixture set, provided a path to a directory containing a
+    /// number of story files (and no other file types).
+    ///
+    /// It calls the `test_story` function for each file found in the given
+    /// directory.
+    fn test_fixture_set(fixture_dir: &str) {
+        let files = fs::readdir(&Path::new(fixture_dir)).unwrap();
+
+        for fixture in files.iter() {
+            let file_name = fixture.as_str().unwrap();
+            debug!("Testing fixture: {:?}", file_name);
+            test_story(file_name);
+        }
     }
 }
