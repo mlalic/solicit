@@ -276,10 +276,11 @@ impl DynamicTable {
                 let last_header = match self.table.back() {
                     Some(x) => x,
                     None => {
-                        // Can never happen as the size of the table must reach 0,
-                        // by the time we've exhausted all elements.
-                        // Only time it *could* happen is if max_size were 0 too.
-                        panic!("Somehow managed to have size != 0, with no headers");
+                        // Can never happen as the size of the table must reach
+                        // 0 by the time we've exhausted all elements.
+                        // The only time it *could* happen is if max_size were 0
+                        // too.
+                        panic!("Size of table != 0, but no headers left!");
                     }
                 };
                 self.size -= last_header.0.len() + last_header.1.len() + 32;
@@ -479,24 +480,25 @@ impl Decoder {
             // The type of the block can always be determined from the first
             // byte.
             let initial_octet = buf[current_octet_index];
+            let buffer_leftover = &buf[current_octet_index..];
             let consumed = match FieldRepresentation::new(initial_octet) {
                 FieldRepresentation::Indexed => {
                     let ((name, value), consumed) =
-                        try!(self.decode_indexed(&buf[current_octet_index..]));
+                        try!(self.decode_indexed(buffer_leftover));
                     header_list.push((name, value));
 
                     consumed
                 },
                 FieldRepresentation::LiteralWithIncrementalIndexing => {
                     let ((name, value), consumed) =
-                        try!(self.decode_literal(&buf[current_octet_index..], true));
+                        try!(self.decode_literal(buffer_leftover, true));
                     header_list.push((name, value));
 
                     consumed
                 },
                 FieldRepresentation::LiteralWithoutIndexing => {
                     let ((name, value), consumed) =
-                        try!(self.decode_literal(&buf[current_octet_index..], false));
+                        try!(self.decode_literal(buffer_leftover, false));
                     header_list.push((name, value));
 
                     consumed
@@ -507,14 +509,14 @@ impl Decoder {
                     // representation received here. We don't care about this
                     // for now.
                     let ((name, value), consumed) =
-                        try!(self.decode_literal(&buf[current_octet_index..], false));
+                        try!(self.decode_literal(buffer_leftover, false));
                     header_list.push((name, value));
 
                     consumed
                 },
                 FieldRepresentation::SizeUpdate => {
                     // Handle the dynamic table size update...
-                    self.update_max_dynamic_size(&buf[current_octet_index..])
+                    self.update_max_dynamic_size(buffer_leftover)
                 }
             };
 
@@ -997,9 +999,9 @@ mod tests {
         {
             // Prepares the context: the dynamic table contains a custom-key.
             let hex_dump = [
-                0x40, 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65,
-                0x79, 0x0d, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65,
-                0x61, 0x64, 0x65, 0x72,
+                0x40, 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b,
+                0x65, 0x79, 0x0d, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d,
+                0x68, 0x65, 0x61, 0x64, 0x65, 0x72,
             ];
 
             let header_list = decoder.decode(&hex_dump).ok().unwrap();
@@ -1663,7 +1665,10 @@ mod interop_tests {
                             // We convert it to a tuple, which is a more
                             // natural representation of headers.
                             for (name, value) in header.into_iter() {
-                                ret.push((name.as_bytes().to_vec(), value.as_bytes().to_vec()));
+                                ret.push((
+                                    name.as_bytes().to_vec(),
+                                    value.as_bytes().to_vec()
+                                ));
                             }
                         }
                         Ok(ret)
