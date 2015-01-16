@@ -4,6 +4,7 @@ use std::collections::RingBuf;
 
 pub use self::decoder::Decoder;
 
+pub mod encoder;
 pub mod decoder;
 pub mod huffman;
 
