@@ -90,9 +90,10 @@ fn decode_integer(buf: &[u8], prefix_size: u8)
 /// For now, incremental decoding is not supported, i.e. it is necessary
 /// to pass in the entire encoded representation of all headers to the
 /// decoder, rather than processing it piece-by-piece.
-pub struct Decoder {
+pub struct Decoder<'a> {
     // The dynamic table will own its own copy of headers
     dynamic_table: DynamicTable,
+    static_table: &'a [(&'a [u8], &'a [u8])]
 }
 
 /// Different variants of how a particular header field can be represented in
@@ -218,11 +219,25 @@ pub type DecoderResult = Result<Vec<(Vec<u8>, Vec<u8>)>, DecoderError>;
 
 /// Represents a decoder of HPACK encoded headers. Maintains the state
 /// necessary to correctly decode subsequent HPACK blocks.
-impl Decoder {
+impl<'a> Decoder<'a> {
     /// Creates a new `Decoder` with all settings set to default values.
-    pub fn new() -> Decoder {
+    pub fn new() -> Decoder<'a> {
+        Decoder::with_static_table(STATIC_TABLE)
+    }
+
+    /// Creates a new `Decoder` with the given slice serving as its static
+    /// table.
+    ///
+    /// The slice should contain tuples where the tuple coordinates represent
+    /// the header name and value, respectively.
+    ///
+    /// Note: in order for the final decoded content to match the encoding
+    ///       (according to the standard, at least), this static table must be
+    ///       the one defined in the HPACK spec.
+    fn with_static_table(static_table: &'a [(&'a [u8], &'a [u8])]) -> Decoder<'a> {
         Decoder {
             dynamic_table: DynamicTable::new(),
+            static_table: static_table,
         }
     }
 
@@ -319,12 +334,12 @@ impl Decoder {
             return Err(DecoderError::HeaderIndexOutOfBounds);
         };
 
-        if real_index < STATIC_TABLE.len() {
+        if real_index < self.static_table.len() {
             // It is in the static table so just return that...
-            Ok(STATIC_TABLE[real_index])
+            Ok(self.static_table[real_index])
         } else {
             // Maybe it's in the dynamic table then?
-            let dynamic_index = real_index - STATIC_TABLE.len();
+            let dynamic_index = real_index - self.static_table.len();
             if dynamic_index < self.dynamic_table.len() {
                 match self.dynamic_table.get(dynamic_index) {
                     Some(&(ref name, ref value)) => {
