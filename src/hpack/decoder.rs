@@ -85,52 +85,6 @@ fn decode_integer(buf: &[u8], prefix_size: u8)
             IntegerDecodingError::NotEnoughOctets))
 }
 
-/// Decodes headers encoded using HPACK.
-///
-/// For now, incremental decoding is not supported, i.e. it is necessary
-/// to pass in the entire encoded representation of all headers to the
-/// decoder, rather than processing it piece-by-piece.
-pub struct Decoder<'a> {
-    // The dynamic table will own its own copy of headers
-    dynamic_table: DynamicTable,
-    static_table: &'a [(&'a [u8], &'a [u8])]
-}
-
-/// Different variants of how a particular header field can be represented in
-/// an HPACK encoding.
-enum FieldRepresentation {
-    Indexed,
-    LiteralWithIncrementalIndexing,
-    SizeUpdate,
-    LiteralNeverIndexed,
-    LiteralWithoutIndexing,
-}
-
-impl FieldRepresentation {
-    /// Based on the given octet, returns the type of the field representation.
-    ///
-    /// The given octet should be the top-order byte of the header field that
-    /// is about to be decoded.
-    fn new(octet: u8) -> FieldRepresentation {
-        if octet & 128 == 128 {
-            // High-order bit set
-            FieldRepresentation::Indexed
-        } else if octet & 64 == 64 {
-            // Bit pattern `01`
-            FieldRepresentation::LiteralWithIncrementalIndexing
-        } else if octet & 32 == 32 {
-            // Bit pattern `001`
-            FieldRepresentation::SizeUpdate
-        } else if octet & 16 == 16 {
-            // Bit pattern `0001`
-            FieldRepresentation::LiteralNeverIndexed
-        } else {
-            // None of the top 4 bits is set => bit pattern `0000xxxx`
-            FieldRepresentation::LiteralWithoutIndexing
-        }
-    }
-}
-
 /// Decodes an octet string under HPACK rules of encoding found in the given
 /// buffer `buf`.
 ///
@@ -165,6 +119,41 @@ fn decode_string(buf: &[u8]) -> Result<(Vec<u8>, usize), DecoderError> {
         // The octets were transmitted raw
         debug!("decode_string: Raw octet string received");
         Ok((raw_string.to_vec(), consumed + len))
+    }
+}
+
+/// Different variants of how a particular header field can be represented in
+/// an HPACK encoding.
+enum FieldRepresentation {
+    Indexed,
+    LiteralWithIncrementalIndexing,
+    SizeUpdate,
+    LiteralNeverIndexed,
+    LiteralWithoutIndexing,
+}
+
+impl FieldRepresentation {
+    /// Based on the given octet, returns the type of the field representation.
+    ///
+    /// The given octet should be the top-order byte of the header field that
+    /// is about to be decoded.
+    fn new(octet: u8) -> FieldRepresentation {
+        if octet & 128 == 128 {
+            // High-order bit set
+            FieldRepresentation::Indexed
+        } else if octet & 64 == 64 {
+            // Bit pattern `01`
+            FieldRepresentation::LiteralWithIncrementalIndexing
+        } else if octet & 32 == 32 {
+            // Bit pattern `001`
+            FieldRepresentation::SizeUpdate
+        } else if octet & 16 == 16 {
+            // Bit pattern `0001`
+            FieldRepresentation::LiteralNeverIndexed
+        } else {
+            // None of the top 4 bits is set => bit pattern `0000xxxx`
+            FieldRepresentation::LiteralWithoutIndexing
+        }
     }
 }
 
@@ -216,6 +205,17 @@ pub enum DecoderError {
 
 /// The result returned by the `decode` method of the `Decoder`.
 pub type DecoderResult = Result<Vec<(Vec<u8>, Vec<u8>)>, DecoderError>;
+
+/// Decodes headers encoded using HPACK.
+///
+/// For now, incremental decoding is not supported, i.e. it is necessary
+/// to pass in the entire encoded representation of all headers to the
+/// decoder, rather than processing it piece-by-piece.
+pub struct Decoder<'a> {
+    // The dynamic table will own its own copy of headers
+    dynamic_table: DynamicTable,
+    static_table: &'a [(&'a [u8], &'a [u8])]
+}
 
 /// Represents a decoder of HPACK encoded headers. Maintains the state
 /// necessary to correctly decode subsequent HPACK blocks.
