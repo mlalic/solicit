@@ -151,6 +151,78 @@ impl fmt::Show for DynamicTable {
     }
 }
 
+/// Represents the type of the static table, as defined by the HPACK spec.
+type StaticTable<'a> = &'a [(&'a [u8], &'a [u8])];
+
+/// The struct represents the header table obtained by merging the static and
+/// dynamic tables into a single index address space, as described in section
+/// `2.3.3.` of the HPACK spec.
+struct HeaderTable<'a> {
+    static_table: StaticTable<'a>,
+    dynamic_table: DynamicTable,
+}
+
+impl<'a> HeaderTable<'a> {
+    /// Creates a new header table where the static part is initialized with
+    /// the given static table.
+    pub fn with_static_table(static_table: StaticTable<'a>) -> HeaderTable<'a> {
+        HeaderTable {
+            static_table: static_table,
+            dynamic_table: DynamicTable::new(),
+        }
+    }
+
+    /// Adds the given header to the table. Of course, this means that the new
+    /// header is added to the dynamic part of the table.
+    ///
+    /// If the size of the new header is larger than the current maximum table
+    /// size of the dynamic table, the effect will be that the dynamic table
+    /// gets emptied and the new header does *not* get inserted into it.
+    #[inline]
+    pub fn add_header(&mut self, name: Vec<u8>, value: Vec<u8>) {
+        self.dynamic_table.add_header(name, value);
+    }
+
+    /// Returns a reference to the header (a `(name, value)` pair) with the
+    /// given index in the table.
+    ///
+    /// The table is 1-indexed and constructed in such a way that the first
+    /// entries belong to the static table, followed by entries in the dynamic
+    /// table. They are merged into a single index address space, though.
+    ///
+    /// This is according to the [HPACK spec, section 2.3.3.]
+    /// (http://http2.github.io/http2-spec/compression.html#index.address.space)
+    pub fn get_from_table(&self, index: usize)
+            -> Option<(&[u8], &[u8])> {
+        // The IETF defined table indexing as 1-based.
+        // So, before starting, make sure the given index is within the proper
+        // bounds.
+        let real_index = if index > 0 {
+            index - 1
+        } else {
+            return None
+        };
+
+        if real_index < self.static_table.len() {
+            // It is in the static table so just return that...
+            Some(self.static_table[real_index])
+        } else {
+            // Maybe it's in the dynamic table then?
+            let dynamic_index = real_index - self.static_table.len();
+            if dynamic_index < self.dynamic_table.len() {
+                match self.dynamic_table.get(dynamic_index) {
+                    Some(&(ref name, ref value)) => {
+                        Some((&name[0..], &value[0..]))
+                    },
+                    None => None
+                }
+            } else {
+                // Index out of bounds!
+                None
+            }
+        }
+    }
+}
 
 /// The table represents the static header table defined by the HPACK spec.
 /// (HPACK, Appendix A)
@@ -221,6 +293,8 @@ static STATIC_TABLE: &'static [(&'static [u8], &'static [u8])] = &[
 #[cfg(test)]
 mod tests {
     use super::DynamicTable;
+    use super::HeaderTable;
+    use super::STATIC_TABLE;
 
     #[test]
     fn test_dynamic_table_size_calculation_simple() {
@@ -312,4 +386,49 @@ mod tests {
         assert_eq!(0, table.get_max_table_size());
     }
 
+    /// Tests that indexing the header table with indices that correspond to
+    /// entries found in the static table works.
+    #[test]
+    fn test_header_table_index_static() {
+        let table = HeaderTable::with_static_table(STATIC_TABLE);
+
+        for (index, entry) in STATIC_TABLE.iter().enumerate() {
+            assert_eq!(table.get_from_table(index + 1).unwrap(), *entry);
+        }
+    }
+
+    /// Tests that when the given index is out of bounds, the `HeaderTable`
+    /// returns a `None`
+    #[test]
+    fn test_header_table_index_out_of_bounds() {
+        let table = HeaderTable::with_static_table(STATIC_TABLE);
+
+        assert!(table.get_from_table(0).is_none());
+        assert!(table.get_from_table(STATIC_TABLE.len() + 1).is_none());
+    }
+
+    /// Tests that adding entries to the dynamic table through the
+    /// `HeaderTable` interface works.
+    #[test]
+    fn test_header_table_add_to_dynamic() {
+        let mut table = HeaderTable::with_static_table(STATIC_TABLE);
+        let header = (b"a".to_vec(), b"b".to_vec());
+
+        table.add_header(header.0.clone(), header.1.clone());
+
+        assert_eq!(table.dynamic_table.get_table_as_list(), vec![header]);
+    }
+
+    /// Tests that indexing the header table with indices that correspond to
+    /// entries found in the dynamic table works.
+    #[test]
+    fn test_header_table_index_dynamic() {
+        let mut table = HeaderTable::with_static_table(STATIC_TABLE);
+        let header = (b"a".to_vec(), b"b".to_vec());
+
+        table.add_header(header.0.clone(), header.1.clone());
+
+        assert_eq!(table.get_from_table(STATIC_TABLE.len() + 1).unwrap(),
+                   ((&header.0[0..], &header.1[0..])));
+    }
 }
