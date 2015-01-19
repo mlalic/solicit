@@ -127,7 +127,7 @@ impl DynamicTable {
     }
 
     /// Converts the current state of the table to a `Vec`
-    fn get_table_as_list(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+    fn to_vec(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut ret: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for elem in self.table.iter() {
             ret.push(elem.clone());
@@ -329,7 +329,7 @@ mod tests {
         // Resized?
         assert_eq!(32 + 6, table.get_size());
         // Only has the second header?
-        assert_eq!(table.get_table_as_list(), vec![
+        assert_eq!(table.to_vec(), vec![
             (b"123".to_vec(), b"456".to_vec())]);
     }
 
@@ -345,7 +345,7 @@ mod tests {
 
         // Resized and empty?
         assert_eq!(0, table.get_size());
-        assert_eq!(0, table.get_table_as_list().len());
+        assert_eq!(0, table.to_vec().len());
     }
 
     /// Tests that when changing the maximum size of the `DynamicTable`, the
@@ -362,7 +362,7 @@ mod tests {
         table.set_max_table_size(38);
 
         assert_eq!(32 + 2, table.get_size());
-        assert_eq!(table.get_table_as_list(), vec![
+        assert_eq!(table.to_vec(), vec![
             (b"c".to_vec(), b"d".to_vec())]);
     }
 
@@ -379,7 +379,7 @@ mod tests {
         table.set_max_table_size(0);
 
         assert_eq!(0, table.len());
-        assert_eq!(0, table.get_table_as_list().len());
+        assert_eq!(0, table.to_vec().len());
         assert_eq!(0, table.get_size());
         assert_eq!(0, table.get_max_table_size());
     }
@@ -393,7 +393,7 @@ mod tests {
         table.add_header(b"a".to_vec(), b"b".to_vec());
 
         assert_eq!(0, table.len());
-        assert_eq!(0, table.get_table_as_list().len());
+        assert_eq!(0, table.to_vec().len());
         assert_eq!(0, table.get_size());
         assert_eq!(0, table.get_max_table_size());
     }
@@ -428,7 +428,7 @@ mod tests {
 
         table.add_header(header.0.clone(), header.1.clone());
 
-        assert_eq!(table.dynamic_table.get_table_as_list(), vec![header]);
+        assert_eq!(table.dynamic_table.to_vec(), vec![header]);
     }
 
     /// Tests that indexing the header table with indices that correspond to
