@@ -110,8 +110,6 @@ impl DynamicTable {
                     None => {
                         // Can never happen as the size of the table must reach
                         // 0 by the time we've exhausted all elements.
-                        // The only time it *could* happen is if max_size were 0
-                        // too.
                         panic!("Size of table != 0, but no headers left!");
                     }
                 };
@@ -379,6 +377,20 @@ mod tests {
         assert_eq!(3 * 32 + 2 + 6 + 2, table.get_size());
 
         table.set_max_table_size(0);
+
+        assert_eq!(0, table.len());
+        assert_eq!(0, table.get_table_as_list().len());
+        assert_eq!(0, table.get_size());
+        assert_eq!(0, table.get_max_table_size());
+    }
+
+    /// Tests that when the initial max size of the table is 0, nothing
+    /// can be added to the table.
+    #[test]
+    fn test_dynamic_table_max_size_zero() {
+        let mut table = DynamicTable::with_size(0);
+
+        table.add_header(b"a".to_vec(), b"b".to_vec());
 
         assert_eq!(0, table.len());
         assert_eq!(0, table.get_table_as_list().len());
