@@ -1,12 +1,38 @@
 // Publicly exposes the `Decoder` directly from the module.
 use std::fmt;
 use std::collections::RingBuf;
+use std::collections::ring_buf;
 
 pub use self::decoder::Decoder;
 
 pub mod encoder;
 pub mod decoder;
 pub mod huffman;
+
+/// An `Iterator` through elements of the `DynamicTable`.
+///
+/// The implementation of the iterator itself is very tightly coupled
+/// to the implementation of the `DynamicTable`.
+///
+/// This iterator returns tuples of slices. The tuples themselves are
+/// constructed as new instances, containing a borrow from the `Vec`s
+/// representing the underlying Headers.
+struct DynamicTableIter<'a> {
+    /// Stores an iterator through the underlying structure that the
+    /// `DynamicTable` uses
+    inner: ring_buf::Iter<'a, (Vec<u8>, Vec<u8>)>,
+}
+
+impl<'a> Iterator for DynamicTableIter<'a> {
+    type Item = (&'a [u8], &'a [u8]);
+
+    fn next(&mut self) -> Option<(&'a [u8], &'a [u8])> {
+        match self.inner.next() {
+            Some(ref header) => Some((&header.0[0..], &header.1[0..])),
+            None => None,
+        }
+    }
+}
 
 /// A struct representing the dynamic table that needs to be maintained by the
 /// coder.
@@ -60,6 +86,19 @@ impl DynamicTable {
     /// HPACK spec.
     fn get_size(&self) -> usize {
         self.size
+    }
+
+    /// Returns an `Iterator` through the headers stored in the `DynamicTable`.
+    ///
+    /// The iterator will yield elements of type `(&[u8], &[u8])`,
+    /// corresponding to a single header name and value. The name and value
+    /// slices are borrowed from their representations in the `DynamicTable`
+    /// internal implementation, which means that it is possible only to
+    /// iterate through the headers, not mutate them.
+    fn iter(&self) -> DynamicTableIter {
+        DynamicTableIter {
+            inner: self.table.iter(),
+        }
     }
 
     /// Sets the new maximum table size.
@@ -396,6 +435,37 @@ mod tests {
         assert_eq!(0, table.to_vec().len());
         assert_eq!(0, table.get_size());
         assert_eq!(0, table.get_max_table_size());
+    }
+
+    /// Tests that the iterator through the `DynamicTable` works when there are
+    /// some elements in the dynamic table.
+    #[test]
+    fn test_dynamic_table_iter_with_elems() {
+        let mut table = DynamicTable::new();
+        table.add_header(b"a".to_vec(), b"b".to_vec());
+        table.add_header(b"123".to_vec(), b"456".to_vec());
+        table.add_header(b"c".to_vec(), b"d".to_vec());
+
+        let iter_res: Vec<(&[u8], &[u8])> = table.iter().collect();
+
+        let expected = vec![
+            (b"c", b"d"),
+            (b"123", b"456"),
+            (b"a", b"b"),
+        ];
+        assert_eq!(iter_res, expected);
+    }
+
+    /// Tests that the iterator through the `DynamicTable` works when there are
+    /// no elements in the dynamic table.
+    #[test]
+    fn test_dynamic_table_iter_no_elems() {
+        let table = DynamicTable::new();
+
+        let iter_res: Vec<(&[u8], &[u8])> = table.iter().collect();
+
+        let expected = vec![];
+        assert_eq!(iter_res, expected);
     }
 
     /// Tests that indexing the header table with indices that correspond to
