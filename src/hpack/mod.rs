@@ -1,5 +1,7 @@
 // Publicly exposes the `Decoder` directly from the module.
 use std::fmt;
+use std::iter;
+use std::slice;
 use std::collections::RingBuf;
 use std::collections::ring_buf;
 
@@ -191,6 +193,53 @@ impl fmt::Show for DynamicTable {
 /// Represents the type of the static table, as defined by the HPACK spec.
 type StaticTable<'a> = &'a [(&'a [u8], &'a [u8])];
 
+/// Implements an iterator through the entire `HeaderTable`.
+///
+/// Yields first the elements from the static table, followed by elements from
+/// the dynamic table, with each element being of type `(&[u8], &[u8])`.
+///
+/// This struct is tightly coupled to the implementation of the `HeaderTable`,
+/// but its clients are shielded from all that and have a convenient (and
+/// standardized) interface to iterate through all headers of the table.
+///
+/// The declaration of the inner iterator that is wrapped by this struct is a
+/// monstrosity, that is required because "abstract return types" don't exist
+/// yet ([https://github.com/rust-lang/rfcs/pull/105]).
+struct HeaderTableIter<'a> {
+    // Represents a chain of static-table -> dynamic-table elements.
+    // The mapper is required to transform the elements yielded from the static
+    // table to a type that matches the elements yielded from the dynamic table.
+    inner: iter::Chain<
+            iter::Map<
+                &'a (&'a [u8], &'a [u8]),
+                (&'a [u8], &'a [u8]),
+                slice::Iter<'a, (&'a [u8], &'a [u8])>,
+                fn((&'a (&'a [u8], &'a [u8]))) -> (&'a [u8], &'a [u8])>,
+            DynamicTableIter<'a>>,
+}
+
+impl<'a> Iterator for HeaderTableIter<'a> {
+    type Item = (&'a [u8], &'a [u8]);
+
+    fn next(&mut self) -> Option<(&'a [u8], &'a [u8])> {
+        // Simply delegates to the wrapped iterator that is constructed by the
+        // `HeaderTable` and passed into the `HeaderTableIter`.
+        self.inner.next()
+    }
+}
+
+/// A helper function that maps a borrowed tuple containing two borrowed slices
+/// to just a tuple of two borrowed slices.
+///
+/// This helper function is needed because in order to define the type
+/// `HeaderTableIter` we need to be able to refer to a real type for the Fn
+/// template parameter, which means that when instantiating an instance, a
+/// closure cannot be passed, since it cannot be named.
+fn static_table_mapper<'a>(h: &'a (&'a [u8], &'a [u8]))
+        -> (&'a [u8], &'a [u8]) {
+    *h
+}
+
 /// The struct represents the header table obtained by merging the static and
 /// dynamic tables into a single index address space, as described in section
 /// `2.3.3.` of the HPACK spec.
@@ -206,6 +255,23 @@ impl<'a> HeaderTable<'a> {
         HeaderTable {
             static_table: static_table,
             dynamic_table: DynamicTable::new(),
+        }
+    }
+
+    /// Returns an iterator through *all* headers stored in the header table,
+    /// i.e. it includes both the ones found in the static table and the
+    /// dynamic table, in the order of their indices in the single address
+    /// space (first the headers in the static table, followed by headers in
+    /// the dynamic table).
+    ///
+    /// The type yielded by the iterator is `(&[u8], &[u8])`, where the tuple
+    /// corresponds to the header name, value pairs in the described order.
+    pub fn iter(&'a self) -> HeaderTableIter<'a> {
+        HeaderTableIter {
+            inner: self.static_table.iter()
+                                    .map(static_table_mapper as
+                                            fn((&'a (&'a [u8], &'a [u8]))) -> (&'a [u8], &'a [u8]))
+                                    .chain(self.dynamic_table.iter()),
         }
     }
 
@@ -512,5 +578,34 @@ mod tests {
 
         assert_eq!(table.get_from_table(STATIC_TABLE.len() + 1).unwrap(),
                    ((&header.0[0..], &header.1[0..])));
+    }
+
+    /// Tests that the `iter` method of the `HeaderTable` returns an iterator
+    /// through *all* the headers found in the header table (static and dynamic
+    /// tables both included)
+    #[test]
+    fn test_header_table_iter() {
+        let mut table = HeaderTable::with_static_table(STATIC_TABLE);
+        let headers = [
+            (b"a", b"b"),
+            (b"c", b"d"),
+        ];
+        for header in headers.iter() {
+            table.add_header(header.0.to_vec(), header.1.to_vec());
+        }
+
+        let iterated: Vec<(&[u8], &[u8])> = table.iter().collect();
+
+        assert_eq!(iterated.len(), headers.len() + STATIC_TABLE.len());
+        // Part of the static table correctly iterated through
+        for (h1, h2) in iterated.iter().zip(STATIC_TABLE.iter()) {
+            assert_eq!(h1, h2);
+        }
+        // Part of the dynamic table correctly iterated through: the elements
+        // are in reversed order of insertion in the dynamic table.
+        for (h1, h2) in iterated.iter().skip(STATIC_TABLE.len())
+                                .zip(headers.iter().rev()) {
+            assert_eq!(h1, h2);
+        }
     }
 }
