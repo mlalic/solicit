@@ -325,6 +325,48 @@ impl<'a> HeaderTable<'a> {
             }
         }
     }
+
+    /// Finds the given header in the header table. Tries to match both the
+    /// header name and value to one of the headers in the table. If no such
+    /// header exists, then falls back to returning one that matched only the
+    /// name.
+    ///
+    /// # Returns
+    ///
+    /// An `Option`, where `Some` corresponds to a tuple representing the index
+    /// of the header in the header tables (the 1-based index that HPACK uses)
+    /// and a `bool` indicating whether the value of the header also matched.
+    pub fn find_header(&self, header: (&[u8], &[u8])) -> Option<(usize, bool)> {
+        // Just does a simple scan of the entire table, searching for a header
+        // that matches both the name and the value of the given header.
+        // If no such header is found, then any one of the headers that had a
+        // matching name is returned, with the appropriate return flag set.
+        //
+        // The tables are so small that it is unlikely that the linear scan
+        // would be a major performance bottlneck. If it does prove to be,
+        // though, a more efficient lookup/header representation method could
+        // be devised.
+        let mut matching_name: Option<usize> = None;
+        for (i, h) in self.iter().enumerate() {
+            if header.0 == h.0 {
+                if header.1 == h.1 {
+                    // Both name and value matched: returns it immediately
+                    return Some((i + 1, true));
+                }
+                // If only the name was valid, we continue scanning, hoping to
+                // find one where both the name and value match. We remember
+                // this one, in case such a header isn't found after all.
+                matching_name = Some(i);
+            }
+        }
+
+        // Finally, if there's no header with a matching name and value,
+        // return one that matched only the name, if that *was* found.
+        match matching_name {
+            Some(i) => Some((i, false)),
+            None => None,
+        }
+    }
 }
 
 /// The table represents the static header table defined by the HPACK spec.
@@ -606,6 +648,48 @@ mod tests {
         for (h1, h2) in iterated.iter().skip(STATIC_TABLE.len())
                                 .zip(headers.iter().rev()) {
             assert_eq!(h1, h2);
+        }
+    }
+
+    /// Tests that searching for an entry in the header table, which should be
+    /// fully in the static table (both name and value), works correctly.
+    #[test]
+    fn test_find_header_static_full() {
+        let table = HeaderTable::with_static_table(STATIC_TABLE);
+
+        for (i, h) in STATIC_TABLE.iter().enumerate() {
+            assert_eq!(table.find_header(*h).unwrap(),
+                       (i + 1, true));
+        }
+    }
+
+    /// Tests that searching for an entry in the header table, which should be
+    /// only partially in the static table (only the name), works correctly.
+    #[test]
+    fn test_find_header_static_partial() {
+        let table = HeaderTable::with_static_table(STATIC_TABLE);
+        let h = (b":method", b"PUT");
+
+        if let (index, false) = table.find_header(h).unwrap() {
+            assert_eq!(h.0, STATIC_TABLE[index - 1].0);
+        } else {
+            panic!("The header should have matched only partially");
+        }
+    }
+
+
+    /// Tests that searching for an entry in the header table, which should be
+    /// fully in the dynamic table (both name and value), works correctly.
+    #[test]
+    fn test_find_header_dynamic_full() {
+        let mut table = HeaderTable::with_static_table(STATIC_TABLE);
+        let h = (b":method", b"PUT");
+        table.add_header(h.0.to_vec(), h.1.to_vec());
+
+        if let (index, true) = table.find_header(h).unwrap() {
+            assert_eq!(index, STATIC_TABLE.len() + 1);
+        } else {
+            panic!("The header should have matched fully");
         }
     }
 }
