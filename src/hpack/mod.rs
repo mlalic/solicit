@@ -6,6 +6,7 @@ use std::collections::RingBuf;
 use std::collections::ring_buf;
 
 pub use self::decoder::Decoder;
+pub use self::encoder::Encoder;
 
 pub mod encoder;
 pub mod decoder;

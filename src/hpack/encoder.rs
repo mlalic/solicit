@@ -1,3 +1,7 @@
+use super::STATIC_TABLE;
+use super::HeaderTable;
+
+
 /// Encode an integer to the representation defined by HPACK.
 ///
 /// Returns a newly allocated `Vec` containing the encoded bytes.
@@ -22,6 +26,26 @@ pub fn encode_integer(mut value: usize, prefix_size: u8) -> Vec<u8> {
     res.push(value as u8);
 
     res
+}
+
+/// Represents an HPACK encoder. Allows clients to encode arbitrary header sets
+/// and tracks the encoding context. That is, encoding subsequent header sets
+/// will use the context built by previous encode calls.
+///
+/// This is the main API for performing HPACK encoding of headers.
+pub struct Encoder<'a> {
+    /// The header table represents the encoder's context
+    header_table: HeaderTable<'a>,
+}
+
+impl<'a> Encoder<'a> {
+    /// Creates a new `Encoder` with a default static table, as defined by the
+    /// HPACK spec (Appendix A).
+    pub fn new() -> Encoder<'a> {
+        Encoder {
+            header_table: HeaderTable::with_static_table(STATIC_TABLE),
+        }
+    }
 }
 
 #[cfg(test)]
