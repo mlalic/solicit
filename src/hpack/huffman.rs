@@ -1,6 +1,6 @@
-/// A module exposing utilities for encoding and decoding Huffman-coded octet
-/// strings, under the Huffman code defined by HPACK.
-/// (HPACK-draft-10, Appendix B)
+//! A module exposing utilities for encoding and decoding Huffman-coded octet
+//! strings, under the Huffman code defined by HPACK.
+//! (HPACK-draft-10, Appendix B)
 
 use std::collections::HashMap;
 

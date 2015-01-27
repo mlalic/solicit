@@ -1,10 +1,14 @@
-// Publicly exposes the `Decoder` directly from the module.
+//! A module implementing HPACK functionality. Exposes a simple API for
+//! performing the encoding and decoding of header sets, according to the
+//! HPACK spec.
+
 use std::fmt;
 use std::iter;
 use std::slice;
 use std::collections::RingBuf;
 use std::collections::ring_buf;
 
+// Re-export the main HPACK API entry points.
 pub use self::decoder::Decoder;
 pub use self::encoder::Encoder;
 

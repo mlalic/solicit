@@ -1,33 +1,33 @@
-/// Implements all functionality related to encoding header blocks using
-/// HPACK.
-///
-/// Clients should use the `Encoder` struct as the API for performing HPACK
-/// encoding.
-///
-/// # Examples
-///
-/// Encodes a header using a literal encoding.
-///
-/// ```rust
-/// use solicit::hpack::Encoder;
-///
-/// let mut encoder = Encoder::new();
-///
-/// let headers = vec![
-///     (b"custom-key".to_vec(), b"custom-value".to_vec()),
-/// ];
-/// // First encoding...
-/// let result = encoder.encode(&headers);
-/// // The result is a literal encoding of the header name and value, with an
-/// // initial byte representing the type of the encoding
-/// // (incremental indexing).
-/// assert_eq!(
-///     vec![0x40,
-///          10, b'c', b'u', b's', b't', b'o', b'm', b'-', b'k', b'e', b'y',
-///          12, b'c', b'u', b's', b't', b'o', b'm', b'-', b'v', b'a', b'l',
-///          b'u', b'e'],
-///     result);
-/// ```
+//! Implements all functionality related to encoding header blocks using
+//! HPACK.
+//!
+//! Clients should use the `Encoder` struct as the API for performing HPACK
+//! encoding.
+//!
+//! # Examples
+//!
+//! Encodes a header using a literal encoding.
+//!
+//! ```rust
+//! use solicit::hpack::Encoder;
+//!
+//! let mut encoder = Encoder::new();
+//!
+//! let headers = vec![
+//!     (b"custom-key".to_vec(), b"custom-value".to_vec()),
+//! ];
+//! // First encoding...
+//! let result = encoder.encode(&headers);
+//! // The result is a literal encoding of the header name and value, with an
+//! // initial byte representing the type of the encoding
+//! // (incremental indexing).
+//! assert_eq!(
+//!     vec![0x40,
+//!          10, b'c', b'u', b's', b't', b'o', b'm', b'-', b'k', b'e', b'y',
+//!          12, b'c', b'u', b's', b't', b'o', b'm', b'-', b'v', b'a', b'l',
+//!          b'u', b'e'],
+//!     result);
+//! ```
 use super::STATIC_TABLE;
 use super::HeaderTable;
 
