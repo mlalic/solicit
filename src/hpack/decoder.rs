@@ -1255,7 +1255,7 @@ mod tests {
 #[cfg(test)]
 mod interop_tests {
     use std::str::from_utf8;
-    use std::io::{File, fs};
+    use std::old_io::{File, fs};
     use std::collections::HashMap;
 
     use rustc_serialize::Decoder as JsonDecoder;
