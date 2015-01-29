@@ -189,7 +189,7 @@ impl DynamicTable {
     }
 }
 
-impl fmt::Show for DynamicTable {
+impl fmt::Debug for DynamicTable {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(formatter, "{:?}", self.table)
     }
