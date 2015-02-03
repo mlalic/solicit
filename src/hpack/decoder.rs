@@ -161,7 +161,7 @@ impl FieldRepresentation {
 /// integer.
 #[derive(PartialEq)]
 #[derive(Copy)]
-#[derive(Show)]
+#[derive(Debug)]
 pub enum IntegerDecodingError {
     /// 5.1. specifies that "excessively large integer decodings" MUST be
     /// considered an error (whether the size is the number of octets or
@@ -182,7 +182,7 @@ pub enum IntegerDecodingError {
 /// string.
 #[derive(PartialEq)]
 #[derive(Copy)]
-#[derive(Show)]
+#[derive(Debug)]
 pub enum StringDecodingError {
     NotEnoughOctets,
     HuffmanDecoderError(HuffmanDecoderError),
@@ -192,7 +192,7 @@ pub enum StringDecodingError {
 /// of an HPACK header set.
 #[derive(PartialEq)]
 #[derive(Copy)]
-#[derive(Show)]
+#[derive(Debug)]
 pub enum DecoderError {
     HeaderIndexOutOfBounds,
     IntegerDecodingError(IntegerDecodingError),

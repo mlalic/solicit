@@ -28,7 +28,7 @@ impl HuffmanCodeSymbol {
 /// Represents the error variants that the `HuffmanDecoder` can return.
 #[derive(PartialEq)]
 #[derive(Copy)]
-#[derive(Show)]
+#[derive(Debug)]
 pub enum HuffmanDecoderError {
     /// Any padding strictly larger than 7 bits MUST be interpreted as an error
     PaddingTooLarge,
