@@ -28,10 +28,27 @@ fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
     (length, frame_type, flags, stream_id)
 }
 
+fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
+    let &(length, frame_type, flags, stream_id) = header;
+
+    [
+        (((length >> 16) & 0x000000FF) as u8),
+        (((length >>  8) & 0x000000FF) as u8),
+        (((length >>  0) & 0x000000FF) as u8),
+        frame_type,
+        flags,
+        (((stream_id >> 24) & 0x000000FF) as u8),
+        (((stream_id >> 16) & 0x000000FF) as u8),
+        (((stream_id >>  8) & 0x000000FF) as u8),
+        (((stream_id >>  0) & 0x000000FF) as u8),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         unpack_header,
+        pack_header
     };
 
     /// Tests that the `unpack_header` function correctly returns the
@@ -75,6 +92,49 @@ mod tests {
             assert_eq!(
                 ((1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24)),
                 unpack_header(&header));
+        }
+    }
+
+    #[test]
+    fn test_pack_header() {
+        {
+            let header = [0; 9];
+            assert_eq!(pack_header(&(0, 0, 0, 0)), header);
+        }
+        {
+            let header = [0, 0, 1, 2, 3, 0, 0, 0, 4];
+            assert_eq!(pack_header(&(1, 2, 3, 4)), header);
+        }
+        {
+            let header = [0, 0, 1, 200, 100, 0, 0, 0, 4];
+            assert_eq!(pack_header(&(1, 200, 100, 4)), header);
+        }
+        {
+            let header = [0, 0, 1, 0, 0, 0, 0, 0, 0];
+            assert_eq!(pack_header(&(1, 0, 0, 0)), header);
+        }
+        {
+            let header = [0, 1, 0, 0, 0, 0, 0, 0, 0];
+            assert_eq!(pack_header(&(256, 0, 0, 0)), header);
+        }
+        {
+            let header = [1, 0, 0, 0, 0, 0, 0, 0, 0];
+            assert_eq!(pack_header(&(256 * 256, 0, 0, 0)), header);
+        }
+        {
+            let header = [0, 0, 0, 0, 0, 0, 0, 0, 1];
+            assert_eq!(pack_header(&(0, 0, 0, 1)), header);
+        }
+        {
+            let header = [0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 1];
+            assert_eq!(pack_header(&((1 << 24) - 1, 0, 0, 1)), header);
+        }
+        {
+            let header = [0xFF, 0xFF, 0xFF, 0, 0, 1, 1, 1, 1];
+            let header_components = (
+                (1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24)
+            );
+            assert_eq!(pack_header(&header_components), header);
         }
     }
 }
