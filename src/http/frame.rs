@@ -135,6 +135,20 @@ impl HttpSetting {
             &HttpSetting::MaxHeaderListSize(ref val) => val.clone(),
         }
     }
+
+    /// Serializes a setting into its "on-the-wire" representation of 6 octets,
+    /// according to section 6.5.1.
+    fn serialize(&self) -> [u8; 6] {
+        let (id, val) = (self.get_id(), self.get_val());
+        [
+            ((id >> 8) & 0x00FF) as u8,
+            ((id >> 0) & 0x00FF) as u8,
+            (((val >> 24) & 0x000000FF) as u8),
+            (((val >> 16) & 0x000000FF) as u8),
+            (((val >>  8) & 0x000000FF) as u8),
+            (((val >>  0) & 0x000000FF) as u8),
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -293,6 +307,54 @@ mod tests {
             let setting = HttpSetting::parse_setting(&buf);
 
             assert!(setting.is_none());
+        }
+    }
+
+    /// Tests that the `HttpSetting::serialize` method correctly creates
+    /// a 6 byte buffer based on the given setting.
+    #[test]
+    fn test_setting_serialize() {
+        {
+            let buf = [0, 1, 0, 0, 1, 0];
+
+            let setting = HttpSetting::HeaderTableSize(1 << 8);
+
+            assert_eq!(buf, setting.serialize());
+        }
+        {
+            let buf = [0, 2, 0, 0, 0, 1];
+
+            let setting = HttpSetting::EnablePush(1);
+
+            assert_eq!(buf, setting.serialize());
+        }
+        {
+            let buf = [0, 3, 0, 0, 0, 0];
+
+            let setting = HttpSetting::MaxConcurrentStreams(0);
+
+            assert_eq!(buf, setting.serialize());
+        }
+        {
+            let buf = [0, 4, 0, 0, 0, 1];
+
+            let setting = HttpSetting::InitialWindowSize(1);
+
+            assert_eq!(buf, setting.serialize());
+        }
+        {
+            let buf = [0, 5, 0, 0, 0, 255];
+
+            let setting = HttpSetting::MaxFrameSize((1 << 8) - 1);
+
+            assert_eq!(buf, setting.serialize());
+        }
+        {
+            let buf = [0, 6, 0, 0, 0, 255];
+
+            let setting = HttpSetting::MaxHeaderListSize((1 << 8) - 1);
+
+            assert_eq!(buf, setting.serialize());
         }
     }
 }
