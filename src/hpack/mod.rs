@@ -216,8 +216,6 @@ struct HeaderTableIter<'a> {
     // table to a type that matches the elements yielded from the dynamic table.
     inner: iter::Chain<
             iter::Map<
-                &'a (&'a [u8], &'a [u8]),
-                (&'a [u8], &'a [u8]),
                 slice::Iter<'a, (&'a [u8], &'a [u8])>,
                 fn((&'a (&'a [u8], &'a [u8]))) -> (&'a [u8], &'a [u8])>,
             DynamicTableIter<'a>>,
