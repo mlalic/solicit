@@ -61,11 +61,28 @@ fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     ]
 }
 
+/// An enum that lists all valid settings that can be sent in a SETTINGS
+/// frame.
+///
+/// Each setting has a value that is a 32 bit unsigned integer (6.5.1.).
+#[derive(Clone)]
+#[derive(PartialEq)]
+#[derive(Debug)]
+#[derive(Copy)]
+pub enum HttpSetting {
+    HeaderTableSize(u32),
+    EnablePush(u32),
+    MaxConcurrentStreams(u32),
+    InitialWindowSize(u32),
+    MaxFrameSize(u32),
+    MaxHeaderListSize(u32),
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         unpack_header,
-        pack_header
+        pack_header,
     };
 
     /// Tests that the `unpack_header` function correctly returns the
