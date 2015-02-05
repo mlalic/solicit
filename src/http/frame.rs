@@ -26,6 +26,8 @@ type FrameHeaderBuffer = [u8; 9];
 /// An alias for the 4-tuple representing the components of each HTTP/2 frame
 /// header.
 pub type FrameHeader = (u32, u8, u8, u32);
+/// An alias for the type that represents the ID of an HTTP/2 stream
+pub type StreamId = u32;
 
 /// Deconstructs a `FrameHeader` into its corresponding 4 components,
 /// represented as a 4-tuple: `(length, frame_type, flags, stream_id)`.
