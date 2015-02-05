@@ -137,6 +137,27 @@ impl RawFrame {
     }
 }
 
+/// An enum representing the flags that a `DataFrame` can have.
+/// The integer representation associated to each variant is that flag's
+/// bitmask.
+///
+/// HTTP/2 spec, section 6.1.
+#[derive(Clone)]
+#[derive(PartialEq)]
+#[derive(Debug)]
+#[derive(Copy)]
+enum DataFlag {
+    EndStream = 0x1,
+    Padded = 0x8,
+}
+
+impl Flag for DataFlag {
+    #[inline]
+    fn bitmask(&self) -> u8 {
+        *self as u8
+    }
+}
+
 /// An enum that lists all valid settings that can be sent in a SETTINGS
 /// frame.
 ///
