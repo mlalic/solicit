@@ -63,6 +63,45 @@ fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     ]
 }
 
+/// A trait that all HTTP/2 frame header flags need to implement.
+pub trait Flag {
+    /// Returns a bit mask that represents the flag.
+    fn bitmask(&self) -> u8;
+}
+
+/// A trait that all HTTP/2 frame structs need to implement.
+pub trait Frame {
+    /// The type that represents the flags that the particular `Frame` can take.
+    /// This makes sure that only valid `Flag`s are used with each `Frame`.
+    type FlagType: Flag;
+
+    /// Creates a new `Frame` from the given `RawFrame` (i.e. header and
+    /// payload), if possible.
+    ///
+    /// # Returns
+    ///
+    /// `None` if a valid `Frame` cannot be constructed from the given
+    /// `RawFrame`. Some reasons why this may happen is a wrong frame type in
+    /// the header, a body that cannot be decoded according to the particular
+    /// frame's rules, etc.
+    ///
+    /// Otherwise, returns a newly constructed `Frame`.
+    fn from_raw(raw_frame: RawFrame) -> Option<Self>;
+
+    /// Tests if the given flag is set for the frame.
+    fn is_set(&self, flag: Self::FlagType) -> bool;
+    /// Returns the `StreamId` of the stream to which the frame is associated
+    fn get_stream_id(&self) -> StreamId;
+    /// Returns a `FrameHeader` based on the current state of the `Frame`.
+    fn get_header(&self) -> FrameHeader;
+
+    /// Sets the given flag for the frame.
+    fn set_flag(&mut self, flag: Self::FlagType);
+
+    /// Returns a `Vec` with the serialized representation of the frame.
+    fn serialize(&self) -> Vec<u8>;
+}
+
 /// An enum that lists all valid settings that can be sent in a SETTINGS
 /// frame.
 ///
