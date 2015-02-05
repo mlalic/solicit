@@ -28,6 +28,7 @@ fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
     (length, frame_type, flags, stream_id)
 }
 
+/// Constructs a buffer of 9 bytes that represents the given `FrameHeader`.
 fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     let &(length, frame_type, flags, stream_id) = header;
 
@@ -95,6 +96,8 @@ mod tests {
         }
     }
 
+    /// Tests that the `pack_header` function correctly returns the buffer
+    /// corresponding to components of HTTP/2 frame headers.
     #[test]
     fn test_pack_header() {
         {
