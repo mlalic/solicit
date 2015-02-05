@@ -1,5 +1,25 @@
 //! The module contains the implementation of HTTP/2 frames.
 
+/// A helper macro that unpacks a sequence of 4 bytes found in the buffer with
+/// the given identifier, starting at the given offset, into the given integer
+/// type. Obviously, the integer type should be able to support at least 4
+/// bytes.
+///
+/// # Examples
+///
+/// ```rust
+/// let buf: [u8; 4] = [0, 0, 0, 1];
+/// assert_eq!(1u32, unpack_octets_4!(buf, 0, u32));
+/// ```
+macro_rules! unpack_octets_4 {
+    ($buf:ident, $offset:expr, $tip:ty) => (
+        (($buf[$offset + 0] as $tip) << 24) |
+        (($buf[$offset + 1] as $tip) << 16) |
+        (($buf[$offset + 2] as $tip) <<  8) |
+        (($buf[$offset + 3] as $tip) <<  0)
+    );
+}
+
 /// An alias for the 9-byte buffer that each HTTP/2 frame header must be stored
 /// in.
 type FrameHeaderBuffer = [u8; 9];
@@ -19,11 +39,7 @@ fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
         ((header[2] as u32) <<  0));
     let frame_type = header[3];
     let flags = header[4];
-    let stream_id: u32 = (
-        ((header[5] as u32) << 24) |
-        ((header[6] as u32) << 16) |
-        ((header[7] as u32) <<  8) |
-        ((header[8] as u32) <<  0));
+    let stream_id: u32 = unpack_octets_4!(header, 5, u32);
 
     (length, frame_type, flags, stream_id)
 }
