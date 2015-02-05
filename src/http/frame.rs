@@ -102,6 +102,41 @@ pub trait Frame {
     fn serialize(&self) -> Vec<u8>;
 }
 
+/// A struct that defines the format of the raw HTTP/2 frame, i.e. the frame
+/// as it is read from the wire.
+///
+/// This format is defined in section 4.1. of the HTTP/2 spec.
+///
+/// The `RawFrame` struct simply stores the raw components of an HTTP/2 frame:
+/// its header and the payload as a sequence of bytes.
+///
+/// It does not try to interpret the payload bytes, nor do any validation in
+/// terms of its validity based on the frame type given in the header.
+/// It is simply a wrapper around the two parts of an HTTP/2 frame.
+pub struct RawFrame {
+    /// The parsed header of the frame.
+    pub header: FrameHeader,
+    /// The payload of the frame, as the raw byte sequence, as received on
+    /// the wire.
+    pub payload: Vec<u8>,
+}
+
+impl RawFrame {
+    /// Creates a new `RawFrame` with the given `FrameHeader`. The payload is
+    /// left empty.
+    pub fn new(header: FrameHeader) -> RawFrame {
+        RawFrame::with_payload(header, Vec::new())
+    }
+
+    /// Creates a new `Frame` with the given header and payload.
+    pub fn with_payload(header: FrameHeader, payload: Vec<u8>) -> RawFrame {
+        RawFrame {
+            header: header,
+            payload: payload,
+        }
+    }
+}
+
 /// An enum that lists all valid settings that can be sent in a SETTINGS
 /// frame.
 ///
