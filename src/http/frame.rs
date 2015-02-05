@@ -430,6 +430,26 @@ impl HttpSetting {
     }
 }
 
+/// An enum representing the flags that a `SettingsFrame` can have.
+/// The integer representation associated to each variant is that flag's
+/// bitmask.
+///
+/// HTTP/2 spec, section 6.5.
+#[derive(Clone)]
+#[derive(PartialEq)]
+#[derive(Debug)]
+#[derive(Copy)]
+pub enum SettingsFlag {
+    Ack = 0x1,
+}
+
+impl Flag for SettingsFlag {
+    #[inline]
+    fn bitmask(&self) -> u8 {
+        *self as u8
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
