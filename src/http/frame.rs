@@ -450,6 +450,191 @@ impl Flag for SettingsFlag {
     }
 }
 
+/// A struct representing the SETTINGS frames of HTTP/2, as defined in the
+/// HTTP/2 spec, section 6.5.
+///
+/// The struct does not try to prevent the client from creating malformed
+/// SETTINGS frames, such as ones that have the ACK flag set along with some
+/// settings values. The users are responsible to follow the prescribed rules
+/// before sending the frame to the peer.
+///
+/// On parsing received frames, it treats the following as errors:
+///
+/// - ACK flag and a number of settings both set
+/// - Payload length not a multiple of 6
+/// - Stream ID not zero (SETTINGS frames MUST be associated to stream 0)
+///
+/// What is *not* treated as an error (for now) are settings values out of
+/// allowed bounds such as a EnablePush being set to something other than 0 or
+/// 1.
+pub struct SettingsFrame {
+    /// Contains all the settings that are currently set in the frame. It is
+    /// safe to access this field (to read, add, or remove settings), even
+    /// though a helper method `add_setting` exists.
+    pub settings: Vec<HttpSetting>,
+    /// Represents the flags currently set on the `SettingsFrame`, packed into
+    /// a single byte.
+    flags: u8,
+}
+
+impl SettingsFrame {
+    /// Creates a new `SettingsFrame`
+    pub fn new() -> SettingsFrame {
+        SettingsFrame {
+            settings: Vec::new(),
+            // By default, no flags are set
+            flags: 0,
+        }
+    }
+
+    /// A convenience constructor that returns a `SettingsFrame` with the ACK
+    /// flag already set and no settings.
+    pub fn new_ack() -> SettingsFrame {
+        SettingsFrame {
+            settings: Vec::new(),
+            flags: SettingsFlag::Ack.bitmask(),
+        }
+    }
+
+    /// Adds the given setting to the frame.
+    pub fn add_setting(&mut self, setting: HttpSetting) {
+        self.settings.push(setting);
+    }
+
+    /// Sets the ACK flag for the frame. This method is just a convenience
+    /// method for calling `frame.set_flag(SettingsFlag::Ack)`.
+    pub fn set_ack(&mut self) {
+        self.set_flag(SettingsFlag::Ack)
+    }
+
+    /// Checks whether the `SettingsFrame` has an ACK attached to it.
+    pub fn is_ack(&self) -> bool {
+        self.is_set(SettingsFlag::Ack)
+    }
+
+    /// Returns the total length of the payload in bytes.
+    fn payload_len(&self) -> u32 {
+        // Each setting is represented with 6 bytes =>
+        6 * self.settings.len() as u32
+    }
+
+    /// Parses the given buffer, considering it a representation of a settings
+    /// frame payload.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec` of settings that are set by the given payload.
+    ///
+    /// Any unknown setting is ignored, as per the HTTP/2 spec requirement.
+    ///
+    /// If the frame is invalid (i.e. the length of the payload is not a
+    /// multiple of 6) it returns `None`.
+    fn parse_payload(payload: &[u8]) -> Option<Vec<HttpSetting>> {
+        if payload.len() % 6 != 0 {
+            return None;
+        }
+
+        // Iterates through chunks of the raw payload of size 6 bytes and
+        // parses each of them into an `HttpSetting`
+        Some(payload.chunks(6).filter_map(|chunk| {
+            HttpSetting::parse_setting(chunk)
+        }).collect())
+    }
+}
+
+impl Frame for SettingsFrame {
+    /// The type that represents the flags that the particular `Frame` can take.
+    /// This makes sure that only valid `Flag`s are used with each `Frame`.
+    type FlagType = SettingsFlag;
+
+    /// Creates a new `SettingsFrame` with the given `RawFrame` (i.e. header and
+    /// payload), if possible.
+    ///
+    /// # Returns
+    ///
+    /// `None` if a valid `SettingsFrame` cannot be constructed from the given
+    /// `RawFrame`. The stream ID *must* be 0 in order for the frame to be
+    /// valid. If the `ACK` flag is set, there MUST not be a payload. The
+    /// total payload length must be multiple of 6.
+    ///
+    /// Otherwise, returns a newly constructed `SettingsFrame`.
+    fn from_raw(raw_frame: RawFrame) -> Option<SettingsFrame> {
+        // Unpack the header
+        let (len, frame_type, flags, stream_id) = raw_frame.header;
+        // Check that the frame type is correct for this frame implementation
+        if frame_type != 0x4 {
+            return None;
+        }
+        // Check that the length given in the header matches the payload
+        // length; if not, something went wrong and we do not consider this a
+        // valid frame.
+        if (len as usize) != raw_frame.payload.len() {
+            return None;
+        }
+        // Check that the SETTINGS frame is associated to stream 0
+        if stream_id != 0 {
+            return None;
+        }
+        if (flags & SettingsFlag::Ack.bitmask()) != 0 {
+            if len != 0 {
+                // The SETTINGS flag MUST not have a payload if Ack is set
+                return None;
+            } else {
+                // Ack is set and there's no payload => just an Ack frame
+                return Some(SettingsFrame {
+                    settings: Vec::new(),
+                    flags: flags,
+                });
+            }
+        }
+
+        match SettingsFrame::parse_payload(&raw_frame.payload[]) {
+            Some(settings) => {
+                Some(SettingsFrame {
+                    settings: settings,
+                    flags: flags,
+                })
+            },
+            None => None,
+        }
+    }
+
+    /// Tests if the given flag is set for the frame.
+    fn is_set(&self, flag: SettingsFlag) -> bool {
+        (self.flags & flag.bitmask()) != 0
+    }
+
+    /// Returns the `StreamId` of the stream to which the frame is associated.
+    ///
+    /// A `SettingsFrame` always has to be associated to stream `0`.
+    fn get_stream_id(&self) -> StreamId {
+        0
+    }
+
+    /// Returns a `FrameHeader` based on the current state of the `Frame`.
+    fn get_header(&self) -> FrameHeader {
+        (self.payload_len(), 0x4, self.flags, 0)
+    }
+
+    /// Sets the given flag for the frame.
+    fn set_flag(&mut self, flag: SettingsFlag) {
+        self.flags |= flag.bitmask();
+    }
+
+    /// Returns a `Vec` with the serialized representation of the frame.
+    fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(self.payload_len() as usize);
+        // First the header...
+        buf.push_all(&pack_header(&self.get_header()));
+        // ...now the settings
+        for setting in self.settings.iter() {
+            buf.push_all(&setting.serialize());
+        }
+
+        buf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -458,6 +643,7 @@ mod tests {
         RawFrame,
         FrameHeader,
         DataFrame,
+        SettingsFrame,
         DataFlag,
         Frame,
         HttpSetting,
@@ -887,5 +1073,223 @@ mod tests {
 
             assert_eq!(buf, setting.serialize());
         }
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with
+    /// no ACK flag and only a single setting.
+    #[test]
+    fn test_settings_frame_parse_no_ack_one_setting() {
+        let payload = [0, 1, 0, 0, 0, 1];
+        // A header with the flag indicating no padding
+        let header = (payload.len() as u32, 4, 0, 0);
+
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+
+        // The frame correctly interprets the settings?
+        assert_eq!(frame.settings, vec![HttpSetting::HeaderTableSize(1)]);
+        // ...and the headers?
+        assert_eq!(frame.get_header(), header);
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with
+    /// no ACK flag and multiple settings within the frame.
+    #[test]
+    fn test_settings_frame_parse_no_ack_multiple_settings() {
+        let settings = vec![
+            HttpSetting::HeaderTableSize(1),
+            HttpSetting::MaxHeaderListSize(5),
+            HttpSetting::EnablePush(0),
+        ];
+        let payload = {
+            let mut res: Vec<u8> = Vec::new();
+            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+
+            res
+        };
+        let header = (payload.len() as u32, 4, 0, 0);
+
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+
+        // The frame correctly interprets the settings?
+        assert_eq!(frame.settings, settings);
+        // ...and the headers?
+        assert_eq!(frame.get_header(), header);
+        assert!(!frame.is_ack());
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with
+    /// no ACK and multiple *duplicate* settings within the frame.
+    #[test]
+    fn test_settings_frame_parse_no_ack_duplicate_settings() {
+        let settings = vec![
+            HttpSetting::HeaderTableSize(1),
+            HttpSetting::MaxHeaderListSize(5),
+            HttpSetting::EnablePush(0),
+            HttpSetting::HeaderTableSize(2),
+        ];
+        let payload = {
+            let mut res: Vec<u8> = Vec::new();
+            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+
+            res
+        };
+        let header = (payload.len() as u32, 4, 0, 0);
+
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+
+        // All the settings are returned, even the duplicates
+        assert_eq!(frame.settings, settings);
+        // ...and the headers?
+        assert_eq!(frame.get_header(), header);
+        assert!(!frame.is_ack());
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTING frame with no
+    /// ACK and an unknown setting within the frame. The unknown setting is
+    /// simply ignored.
+    #[test]
+    fn test_settings_frame_parse_no_ack_unknown_setting() {
+        let settings = vec![
+            HttpSetting::HeaderTableSize(1),
+            HttpSetting::MaxHeaderListSize(5),
+        ];
+        let payload = {
+            let mut res: Vec<u8> = Vec::new();
+            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+            res.push_all(&[0, 10, 0, 0, 0, 0]);
+            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+
+            res
+        };
+        let header = (payload.len() as u32, 4, 0, 0);
+
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+
+        // All the settings are returned twice, but the unkown isn't found in
+        // the returned Vec. For now, we ignore the unknown setting fully, not
+        // exposing it in any way to any other higher-level clients.
+        assert_eq!(frame.settings.len(), 4);
+        assert_eq!(&frame.settings[0..2], &settings[]);
+        assert_eq!(&frame.settings[2..], &settings[]);
+        assert!(!frame.is_ack());
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with an
+    /// ACK flag and no settings.
+    #[test]
+    fn test_settings_frame_parse_ack_no_settings() {
+        let payload = [];
+        let header = (payload.len() as u32, 4, 1, 0);
+
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+
+        // No settings there?
+        assert_eq!(frame.settings, vec![]);
+        // ...and the headers?
+        assert_eq!(frame.get_header(), header);
+        // ...and the frame indicates it's an ACK
+        assert!(frame.is_ack());
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with an
+    /// ACK flag, along with settings. In this case, the frame needs to be
+    /// considered invalid.
+    #[test]
+    fn test_settings_frame_parse_ack_with_settings() {
+        let settings = [
+            HttpSetting::EnablePush(0),
+        ];
+        let payload = {
+            let mut res: Vec<u8> = Vec::new();
+            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+
+            res
+        };
+        let header = (payload.len() as u32, 4, 1, 0);
+
+        let frame: Option<SettingsFrame> = Frame::from_raw(
+            RawFrame::with_payload(header, payload));
+
+        assert!(frame.is_none());
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame which
+    /// was not associated to stream 0 by returning an error.
+    #[test]
+    fn test_settings_frame_parse_not_stream_zero() {
+        let payload = vec![];
+        // Header indicates that it is associated to stream 1
+        let header = (payload.len() as u32, 4, 1, 1);
+
+        let frame: Option<SettingsFrame> = Frame::from_raw(
+            RawFrame::with_payload(header, payload));
+
+        assert!(frame.is_none());
+    }
+
+    /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame which
+    /// does not have a payload with a number of bytes that's a multiple of 6.
+    #[test]
+    fn test_settings_frame_parse_not_multiple_of_six() {
+        let payload = vec![1, 2, 3];
+
+        let header = (payload.len() as u32, 4, 0, 0);
+
+        let frame: Option<SettingsFrame> = Frame::from_raw(
+            RawFrame::with_payload(header, payload));
+
+        assert!(frame.is_none());
+    }
+
+    /// Tests that a `SettingsFrame` gets correctly serialized when it contains
+    /// only settings and no ACK.
+    #[test]
+    fn test_settings_frame_serialize_no_ack_settings() {
+        let mut frame = SettingsFrame::new();
+        frame.add_setting(HttpSetting::EnablePush(0));
+        let expected = {
+            let mut res: Vec<u8> = Vec::new();
+            res.push_all(&pack_header(&(6, 4, 0, 0)));
+            res.push_all(&HttpSetting::EnablePush(0).serialize());
+
+            res
+        };
+
+        let serialized = frame.serialize();
+
+        assert_eq!(serialized, expected);
+    }
+
+    /// Tests that a `SettingsFrame` gets correctly serialized when it contains
+    /// multiple settings and no ACK.
+    #[test]
+    fn test_settings_frame_serialize_no_ack_multiple_settings() {
+        let mut frame = SettingsFrame::new();
+        frame.add_setting(HttpSetting::EnablePush(0));
+        frame.add_setting(HttpSetting::MaxHeaderListSize(0));
+        let expected = {
+            let mut res: Vec<u8> = Vec::new();
+            res.push_all(&pack_header(&(6 * 2, 4, 0, 0)));
+            res.push_all(&HttpSetting::EnablePush(0).serialize());
+            res.push_all(&HttpSetting::MaxHeaderListSize(0).serialize());
+
+            res
+        };
+
+        let serialized = frame.serialize();
+
+        assert_eq!(serialized, expected);
+    }
+
+    /// Tests that a `SettingsFrame` gets correctly serialized when it contains
+    /// multiple settings and no ACK.
+    #[test]
+    fn test_settings_frame_serialize_ack() {
+        let frame = SettingsFrame::new_ack();
+        let expected = pack_header(&(0, 4, 1, 0)).to_vec();
+
+        let serialized = frame.serialize();
+
+        assert_eq!(serialized, expected);
     }
 }
