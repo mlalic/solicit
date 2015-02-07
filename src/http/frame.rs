@@ -635,6 +635,31 @@ impl Frame for SettingsFrame {
     }
 }
 
+
+/// An enum representing the flags that a `HeadersFrame` can have.
+/// The integer representation associated to each variant is that flag's
+/// bitmask.
+///
+/// HTTP/2 spec, section 6.2.
+#[derive(Clone)]
+#[derive(PartialEq)]
+#[derive(Debug)]
+#[derive(Copy)]
+pub enum HeadersFlag {
+    EndStream = 0x1,
+    EndHeaders = 0x4,
+    Padded = 0x8,
+    Priority = 0x20,
+}
+
+impl Flag for HeadersFlag {
+    #[inline]
+    fn bitmask(&self) -> u8 {
+        *self as u8
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::{
