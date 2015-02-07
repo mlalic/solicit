@@ -63,6 +63,37 @@ fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     ]
 }
 
+/// A helper function that parses the given payload, considering it padded.
+///
+/// This means that the first byte is the length of the padding with that many
+/// 0 bytes expected to follow the actual payload.
+///
+/// # Returns
+///
+/// A slice of the given payload where the actual one is found and the length
+/// of the padding.
+///
+/// If the padded payload is invalid (e.g. the length of the padding is equal
+/// to the total length), returns `None`.
+fn parse_padded_payload<'a>(payload: &'a [u8]) -> Option<(&'a [u8], u8)> {
+    if payload.len() == 0 {
+        // We make sure not to index the payload before we're sure how
+        // large the buffer is.
+        // If this is the case, the frame is invalid as no padding
+        // length can be extracted, even though the frame should be
+        // padded.
+        return None;
+    }
+    let pad_len = payload[0] as usize;
+    if pad_len >= payload.len() {
+        // This is invalid: the padding length MUST be less than the
+        // total frame size.
+        return None;
+    }
+
+    Some((&payload[1..payload.len() - pad_len], pad_len as u8))
+}
+
 /// A trait that all HTTP/2 frame header flags need to implement.
 pub trait Flag {
     /// Returns a bit mask that represents the flag.
@@ -228,28 +259,16 @@ impl DataFrame {
     /// If the payload was invalid for a DATA frame, returns `None`
     fn parse_payload(payload: &[u8], padded: bool)
             -> Option<(Vec<u8>, Option<u8>)> {
-        let (start, end, pad_len) = if padded {
-            if payload.len() == 0 {
-                // We make sure not to index the payload before we're sure how
-                // large the buffer is.
-                // If this is the case, the frame is invalid as no padding
-                // length can be extracted, even though the frame should be
-                // padded.
-                return None;
+        let (data, pad_len) = if padded {
+            match parse_padded_payload(payload) {
+                Some((data, pad_len)) => (data, Some(pad_len)),
+                None => return None,
             }
-            let pad_len = payload[0];
-            if (pad_len as usize) >= payload.len() {
-                // This is invalid: the padding length MUST be less than the
-                // total frame size.
-                return None;
-            }
-
-            (1, payload.len() - pad_len as usize, Some(pad_len))
         } else {
-            (0, payload.len(), None)
+            (&payload[], None)
         };
 
-        Some((payload[start..end].to_vec(), pad_len))
+        Some((data.to_vec(), pad_len))
     }
 }
 
