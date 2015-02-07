@@ -659,6 +659,90 @@ impl Flag for HeadersFlag {
     }
 }
 
+/// The struct represents the dependency information that can be attached to
+/// a stream and sent within a HEADERS frame (one with the Priority flag set).
+#[derive(PartialEq)]
+#[derive(Debug)]
+#[derive(Clone)]
+pub struct StreamDependency {
+    /// The ID of the stream that a particular stream depends on
+    pub stream_id: StreamId,
+    /// The weight for the stream. The value exposed (and set) here is always
+    /// in the range [0, 255], instead of [1, 256] \(as defined in section 5.3.2.)
+    /// so that the value fits into a `u8`.
+    pub weight: u8,
+    /// A flag indicating whether the stream dependency is exclusive.
+    pub is_exclusive: bool,
+}
+
+impl StreamDependency {
+    /// Creates a new `StreamDependency` with the given stream ID, weight, and
+    /// exclusivity.
+    pub fn new(stream_id: StreamId, weight: u8, is_exclusive: bool)
+            -> StreamDependency {
+        StreamDependency {
+            stream_id: stream_id,
+            weight: weight,
+            is_exclusive: is_exclusive,
+        }
+    }
+
+    /// Parses the first 5 bytes in the buffer as a `StreamDependency`.
+    /// (Each 5-byte sequence is always decodable into a stream dependency
+    /// structure).
+    ///
+    /// # Panics
+    ///
+    /// If the given buffer has less than 5 elements, the method will panic.
+    pub fn parse(buf: &[u8]) -> StreamDependency {
+        // The most significant bit of the first byte is the "E" bit indicating
+        // whether the dependency is exclusive.
+        let is_exclusive = buf[0] & 0x80 != 0;
+        let stream_id = {
+            // Parse the first 4 bytes into a u32...
+            let mut id = unpack_octets_4!(buf, 0, u32);
+            // ...clear the first bit since the stream id is only 31 bits.
+            id &= !(1 << 31);
+            id
+        };
+
+        StreamDependency {
+            stream_id: stream_id,
+            weight: buf[4],
+            is_exclusive: is_exclusive,
+        }
+    }
+
+    /// Serializes the `StreamDependency` into a 5-byte buffer representing the
+    /// dependency description, as described in section 6.2. of the HTTP/2
+    /// spec:
+    ///
+    /// ```notest
+    ///  0                   1                   2                   3
+    ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    /// +-+-------------+-----------------------------------------------+
+    /// |E|                 Stream Dependency  (31)                     |
+    /// +-+-------------+-----------------------------------------------+
+    /// |  Weight  (8)  |
+    /// +-+-------------+-----------------------------------------------+
+    /// ```
+    ///
+    /// Where "E" is set if the dependency is exclusive.
+    pub fn serialize(&self) -> [u8; 5] {
+        let e_bit = if self.is_exclusive {
+            1 << 7
+        } else {
+            0
+        };
+        [
+            (((self.stream_id >> 24) & 0x000000FF) as u8) | e_bit,
+            (((self.stream_id >> 16) & 0x000000FF) as u8),
+            (((self.stream_id >>  8) & 0x000000FF) as u8),
+            (((self.stream_id >>  0) & 0x000000FF) as u8),
+            self.weight,
+        ]
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -672,6 +756,7 @@ mod tests {
         DataFlag,
         Frame,
         HttpSetting,
+        StreamDependency,
     };
 
     /// Tests that the `unpack_header` function correctly returns the
@@ -1316,5 +1401,85 @@ mod tests {
         let serialized = frame.serialize();
 
         assert_eq!(serialized, expected);
+    }
+
+    /// Tests that a stream dependency structure can be correctly parsed by the
+    /// `StreamDependency::parse` method.
+    #[test]
+    fn test_parse_stream_dependency() {
+        {
+            let buf = [0, 0, 0, 1, 5];
+
+            let dep = StreamDependency::parse(&buf);
+
+            assert_eq!(dep.stream_id, 1);
+            assert_eq!(dep.weight, 5);
+            // This one was not exclusive!
+            assert!(!dep.is_exclusive)
+        }
+        {
+            // Most significant bit set => is exclusive!
+            let buf = [128, 0, 0, 1, 5];
+
+            let dep = StreamDependency::parse(&buf);
+
+            assert_eq!(dep.stream_id, 1);
+            assert_eq!(dep.weight, 5);
+            // This one was indeed exclusive!
+            assert!(dep.is_exclusive)
+        }
+        {
+            // Most significant bit set => is exclusive!
+            let buf = [255, 255, 255, 255, 5];
+
+            let dep = StreamDependency::parse(&buf);
+
+            assert_eq!(dep.stream_id, (1 << 31) - 1);
+            assert_eq!(dep.weight, 5);
+            // This one was indeed exclusive!
+            assert!(dep.is_exclusive);
+        }
+        {
+            let buf = [127, 255, 255, 255, 5];
+
+            let dep = StreamDependency::parse(&buf[]);
+
+            assert_eq!(dep.stream_id, (1 << 31) - 1);
+            assert_eq!(dep.weight, 5);
+            // This one was not exclusive!
+            assert!(!dep.is_exclusive);
+        }
+    }
+
+    /// Tests that a stream dependency structure can be correctly serialized by
+    /// the `StreamDependency::serialize` method.
+    #[test]
+    fn test_serialize_stream_dependency() {
+        {
+            let buf = [0, 0, 0, 1, 5];
+            let dep = StreamDependency::new(1, 5, false);
+
+            assert_eq!(buf, dep.serialize());
+        }
+        {
+            // Most significant bit set => is exclusive!
+            let buf = [128, 0, 0, 1, 5];
+            let dep = StreamDependency::new(1, 5, true);
+
+            assert_eq!(buf, dep.serialize());
+        }
+        {
+            // Most significant bit set => is exclusive!
+            let buf = [255, 255, 255, 255, 5];
+            let dep = StreamDependency::new((1 << 31) - 1, 5, true);
+
+            assert_eq!(buf, dep.serialize());
+        }
+        {
+            let buf = [127, 255, 255, 255, 5];
+            let dep = StreamDependency::new((1 << 31) - 1, 5, false);
+
+            assert_eq!(buf, dep.serialize());
+        }
     }
 }
