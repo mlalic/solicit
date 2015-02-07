@@ -763,6 +763,199 @@ impl StreamDependency {
     }
 }
 
+/// A struct representing the HEADERS frames of HTTP/2, as defined in the
+/// HTTP/2 spec, section 6.2.
+pub struct HeadersFrame {
+    /// The header fragment bytes stored within the frame.
+    pub header_fragment: Vec<u8>,
+    /// The ID of the stream with which this frame is associated
+    pub stream_id: StreamId,
+    /// The stream dependency information, if any.
+    pub stream_dep: Option<StreamDependency>,
+    /// The length of the padding, if any.
+    pub padding_len: Option<u8>,
+    /// The set of flags for the frame, packed into a single byte.
+    flags: u8,
+}
+
+impl HeadersFrame {
+    /// Creates a new `HeadersFrame` with the given header fragment and stream
+    /// ID. No padding, no stream dependency, and no flags are set.
+    pub fn new(fragment: Vec<u8>, stream_id: StreamId) -> HeadersFrame {
+        HeadersFrame {
+            header_fragment: fragment,
+            stream_id: stream_id,
+            stream_dep: None,
+            padding_len: None,
+            flags: 0,
+        }
+    }
+
+    /// Creates a new `HeadersFrame` with the given header fragment, stream ID
+    /// and stream dependency information. No padding and no flags are set.
+    pub fn with_dependency(
+            fragment: Vec<u8>,
+            stream_id: StreamId,
+            stream_dep: StreamDependency) -> HeadersFrame {
+        HeadersFrame {
+            header_fragment: fragment,
+            stream_id: stream_id,
+            stream_dep: Some(stream_dep),
+            padding_len: None,
+            flags: HeadersFlag::Priority.bitmask(),
+        }
+    }
+
+    /// Returns whether this frame ends the headers. If not, there MUST be a
+    /// number of follow up CONTINUATION frames that send the rest of the
+    /// header data.
+    pub fn is_headers_end(&self) -> bool {
+        self.is_set(HeadersFlag::EndHeaders)
+    }
+
+    /// Sets the padding length for the frame, as well as the corresponding
+    /// Padded flag.
+    pub fn set_padding(&mut self, padding_len: u8) {
+        self.padding_len = Some(padding_len);
+        self.set_flag(HeadersFlag::Padded);
+    }
+
+    /// Returns the length of the payload of the current frame, including any
+    /// possible padding in the number of bytes.
+    fn payload_len(&self) -> u32 {
+        let padding = if self.is_set(HeadersFlag::Padded) {
+            1 + self.padding_len.unwrap_or(0) as u32
+        } else {
+            0
+        };
+        let priority = if self.is_set(HeadersFlag::Priority) {
+            5
+        } else {
+            0
+        };
+
+        self.header_fragment.len() as u32 + priority + padding
+    }
+}
+
+impl Frame for HeadersFrame {
+    /// The type that represents the flags that the particular `Frame` can take.
+    /// This makes sure that only valid `Flag`s are used with each `Frame`.
+    type FlagType = HeadersFlag;
+
+    /// Creates a new `HeadersFrame` with the given `RawFrame` (i.e. header and
+    /// payload), if possible.
+    ///
+    /// # Returns
+    ///
+    /// `None` if a valid `HeadersFrame` cannot be constructed from the given
+    /// `RawFrame`. The stream ID *must not* be 0.
+    ///
+    /// Otherwise, returns a newly constructed `HeadersFrame`.
+    fn from_raw(raw_frame: RawFrame) -> Option<HeadersFrame> {
+        // Unpack the header
+        let (len, frame_type, flags, stream_id) = raw_frame.header;
+        // Check that the frame type is correct for this frame implementation
+        if frame_type != 0x1 {
+            return None;
+        }
+        // Check that the length given in the header matches the payload
+        // length; if not, something went wrong and we do not consider this a
+        // valid frame.
+        if (len as usize) != raw_frame.payload.len() {
+            return None;
+        }
+        // Check that the HEADERS frame is not associated to stream 0
+        if stream_id == 0 {
+            return None;
+        }
+
+        // First, we get a slice containing the actual payload, depending on if
+        // the frame is padded.
+        let padded = (flags & HeadersFlag::Padded.bitmask()) != 0;
+        let (actual, pad_len) = if padded {
+            match parse_padded_payload(&raw_frame.payload[]) {
+                Some((data, pad_len)) => (data, Some(pad_len)),
+                None => return None,
+            }
+        } else {
+            (&raw_frame.payload[], None)
+        };
+
+        // From the actual payload we extract the stream dependency info, if
+        // the appropriate flag is set.
+        let priority = (flags & HeadersFlag::Priority.bitmask()) != 0;
+        let (data, stream_dep) = if priority {
+            (&actual[5..], Some(StreamDependency::parse(&actual[..5])))
+        } else {
+            (&actual[], None)
+        };
+
+        Some(HeadersFrame {
+            header_fragment: data.to_vec(),
+            stream_id: stream_id,
+            stream_dep: stream_dep,
+            padding_len: pad_len,
+            flags: flags,
+        })
+    }
+
+    /// Tests if the given flag is set for the frame.
+    fn is_set(&self, flag: HeadersFlag) -> bool {
+        (self.flags & flag.bitmask()) != 0
+    }
+
+    /// Returns the `StreamId` of the stream to which the frame is associated.
+    ///
+    /// A `SettingsFrame` always has to be associated to stream `0`.
+    fn get_stream_id(&self) -> StreamId {
+        self.stream_id
+    }
+
+    /// Returns a `FrameHeader` based on the current state of the `Frame`.
+    fn get_header(&self) -> FrameHeader {
+        (self.payload_len(), 0x1, self.flags, self.stream_id)
+    }
+
+    /// Sets the given flag for the frame.
+    fn set_flag(&mut self, flag: HeadersFlag) {
+        self.flags |= flag.bitmask();
+    }
+
+    /// Returns a `Vec` with the serialized representation of the frame.
+    ///
+    /// # Panics
+    ///
+    /// If the `HeadersFlag::Priority` flag was set, but no stream dependency
+    /// information is given (i.e. `stream_dep` is `None`).
+    fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(self.payload_len() as usize);
+        // First the header...
+        buf.push_all(&pack_header(&self.get_header()));
+        // Now the length of the padding, if any.
+        let padded = self.is_set(HeadersFlag::Padded);
+        if padded {
+            buf.push(self.padding_len.unwrap_or(0));
+        }
+        // The stream dependency fields follow, if the priority flag is set
+        if self.is_set(HeadersFlag::Priority) {
+            let dep_buf = match self.stream_dep {
+                Some(ref dep) => dep.serialize(),
+                None => panic!("Priority flag set, but no dependency information given"),
+            };
+            buf.push_all(&dep_buf);
+        }
+        // Now the actual headers fragment
+        buf.push_all(&self.header_fragment[]);
+        // Finally, add the trailing padding, if required
+        if padded {
+            for _ in 0..self.padding_len.unwrap_or(0) { buf.push(0); }
+        }
+
+        buf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -772,7 +965,9 @@ mod tests {
         FrameHeader,
         DataFrame,
         SettingsFrame,
+        HeadersFrame,
         DataFlag,
+        HeadersFlag,
         Frame,
         HttpSetting,
         StreamDependency,
@@ -1500,5 +1695,228 @@ mod tests {
 
             assert_eq!(buf, dep.serialize());
         }
+    }
+
+    /// Tests that a simple HEADERS frame is correctly parsed. The frame does
+    /// not contain any padding nor priority information.
+    #[test]
+    fn test_headers_frame_parse_simple() {
+        let data = b"123";
+        let payload = data.to_vec();
+        let header = (payload.len() as u32, 0x1, 0, 1);
+
+        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+
+        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.flags, 0);
+        assert_eq!(frame.get_stream_id(), 1);
+        assert!(frame.stream_dep.is_none());
+        assert!(frame.padding_len.is_none());
+    }
+
+    /// Tests that a HEADERS frame with padding is correctly parsed.
+    #[test]
+    fn test_headers_frame_parse_with_padding() {
+        let data = b"123";
+        let payload = build_padded_frame_payload(&data, 6);
+        let header = (payload.len() as u32, 0x1, 0x08, 1);
+
+        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+
+        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.flags, 8);
+        assert_eq!(frame.get_stream_id(), 1);
+        assert!(frame.stream_dep.is_none());
+        assert_eq!(frame.padding_len.unwrap(), 6);
+    }
+
+    /// Tests that a HEADERS frame with the priority flag (and necessary fields)
+    /// is correctly parsed.
+    #[test]
+    fn test_headers_frame_parse_with_priority() {
+        let data = b"123";
+        let dep = StreamDependency::new(0, 5, true);
+        let payload = {
+            let mut buf: Vec<u8> = Vec::new();
+            buf.push_all(&dep.serialize());
+            buf.push_all(&data);
+
+            buf
+        };
+        let header = (payload.len() as u32, 0x1, 0x20, 1);
+
+        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+
+        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.flags, 0x20);
+        assert_eq!(frame.get_stream_id(), 1);
+        assert_eq!(frame.stream_dep.unwrap(), dep);
+        assert!(frame.padding_len.is_none());
+    }
+
+    /// Tests that a HEADERS frame with both padding and priority gets
+    /// correctly parsed.
+    #[test]
+    fn test_headers_frame_parse_padding_and_priority() {
+        let data = b"123";
+        let dep = StreamDependency::new(0, 5, true);
+        let full = {
+            let mut buf: Vec<u8> = Vec::new();
+            buf.push_all(&dep.serialize());
+            buf.push_all(&data);
+
+            buf
+        };
+        let payload = build_padded_frame_payload(&full[], 4);
+        let header = (payload.len() as u32, 0x1, 0x20 | 0x8, 1);
+
+        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+
+        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.flags, 0x20 | 0x8);
+        assert_eq!(frame.get_stream_id(), 1);
+        assert_eq!(frame.stream_dep.unwrap(), dep);
+        assert_eq!(frame.padding_len.unwrap(), 4);
+    }
+
+    /// Tests that a HEADERS with stream ID 0 is considered invalid.
+    #[test]
+    fn test_headers_frame_parse_invalid_stream_id() {
+        let data = b"123";
+        let payload = data.to_vec();
+        let header = (payload.len() as u32, 0x1, 0, 0);
+
+        let frame: Option<HeadersFrame> = Frame::from_raw(
+            RawFrame::with_payload(header, payload));
+        
+        assert!(frame.is_none());
+    }
+
+    /// Tests that the `HeadersFrame::parse` method considers any frame with
+    /// a frame ID other than 1 in the frame header invalid.
+    #[test]
+    fn test_headers_frame_parse_invalid_type() {
+        let data = b"123";
+        let payload = data.to_vec();
+        let header = (payload.len() as u32, 0x2, 0, 1);
+
+        let frame: Option<HeadersFrame> = Frame::from_raw(
+            RawFrame::with_payload(header, payload));
+        
+        assert!(frame.is_none());
+    }
+
+    /// Tests that a simple HEADERS frame (no padding, no priority) gets
+    /// correctly serialized.
+    #[test]
+    fn test_headers_frame_serialize_simple() {
+        let data = b"123";
+        let payload = data.to_vec();
+        let header = (payload.len() as u32, 0x1, 0, 1);
+        let expected = {
+            let headers = pack_header(&header);
+            let mut res: Vec<u8> = Vec::new();
+            res.push_all(&headers[]);
+            res.push_all(&payload[]);
+
+            res
+        };
+        let frame = HeadersFrame::new(data.to_vec(), 1);
+
+        let actual = frame.serialize();
+
+        assert_eq!(expected, actual);
+    }
+
+    /// Tests that a HEADERS frame with padding is correctly serialized.
+    #[test]
+    fn test_headers_frame_serialize_with_padding() {
+        let data = b"123";
+        let payload = build_padded_frame_payload(&data, 6);
+        let header = (payload.len() as u32, 0x1, 0x08, 1);
+        let expected = {
+            let headers = pack_header(&header);
+            let mut res: Vec<u8> = Vec::new();
+            res.push_all(&headers[]);
+            res.push_all(&payload[]);
+
+            res
+        };
+        let mut frame = HeadersFrame::new(data.to_vec(), 1);
+        frame.set_padding(6);
+
+        let actual = frame.serialize();
+
+        assert_eq!(expected, actual);
+    }
+
+    /// Tests that a HEADERS frame with priority gets correctly serialized.
+    #[test]
+    fn test_headers_frame_serialize_with_priority() {
+        let data = b"123";
+        let dep = StreamDependency::new(0, 5, true);
+        let payload = {
+            let mut buf: Vec<u8> = Vec::new();
+            buf.push_all(&dep.serialize());
+            buf.push_all(&data);
+
+            buf
+        };
+        let header = (payload.len() as u32, 0x1, 0x20, 1);
+        let expected = {
+            let headers = pack_header(&header);
+            let mut res: Vec<u8> = Vec::new();
+            res.push_all(&headers[]);
+            res.push_all(&payload[]);
+
+            res
+        };
+        let frame = HeadersFrame::with_dependency(data.to_vec(), 1, dep.clone());
+
+        let actual = frame.serialize();
+
+        assert_eq!(expected, actual);
+    }
+
+    /// Tests that a HEADERS frame with both padding and a priority gets correctly
+    /// serialized.
+    #[test]
+    fn test_headers_frame_serialize_padding_and_priority() {
+        let data = b"123";
+        let dep = StreamDependency::new(0, 5, true);
+        let full = {
+            let mut buf: Vec<u8> = Vec::new();
+            buf.push_all(&dep.serialize());
+            buf.push_all(&data);
+
+            buf
+        };
+        let payload = build_padded_frame_payload(&full[], 4);
+        let header = (payload.len() as u32, 0x1, 0x20 | 0x8, 1);
+        let expected = {
+            let headers = pack_header(&header);
+            let mut res: Vec<u8> = Vec::new();
+            res.push_all(&headers[]);
+            res.push_all(&payload[]);
+
+            res
+        };
+        let mut frame = HeadersFrame::with_dependency(data.to_vec(), 1, dep.clone());
+        frame.set_padding(4);
+
+        let actual = frame.serialize();
+
+        assert_eq!(expected, actual);
+    }
+
+    /// Tests that the `HeadersFrame::is_headers_end` method returns the correct
+    /// value depending on the `EndHeaders` flag being set or not.
+    #[test]
+    fn test_headers_frame_is_headers_end() {
+        let mut frame = HeadersFrame::new(vec![], 1);
+        assert!(!frame.is_headers_end());
+
+        frame.set_flag(HeadersFlag::EndHeaders);
+        assert!(frame.is_headers_end());
     }
 }
