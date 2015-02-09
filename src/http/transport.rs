@@ -3,3 +3,12 @@
 //! use the transport layer without requiring it to know which exact
 //! implementation they are using (i.e. a clear-text TCP connection, a TLS
 //! protected connection, or even a mock implementation).
+
+use std::old_io::Stream;
+
+/// A trait that any struct that wants to provide the transport layer for
+/// HTTP/2 needs to implement.
+///
+/// For now, we do not define any additional methods on top of those required
+/// by the `Stream` trait.
+pub trait TransportStream: Stream {}
