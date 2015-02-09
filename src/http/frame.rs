@@ -1,5 +1,7 @@
 //! The module contains the implementation of HTTP/2 frames.
 
+use super::StreamId;
+
 /// A helper macro that unpacks a sequence of 4 bytes found in the buffer with
 /// the given identifier, starting at the given offset, into the given integer
 /// type. Obviously, the integer type should be able to support at least 4
@@ -26,8 +28,6 @@ pub type FrameHeaderBuffer = [u8; 9];
 /// An alias for the 4-tuple representing the components of each HTTP/2 frame
 /// header.
 pub type FrameHeader = (u32, u8, u8, u32);
-/// An alias for the type that represents the ID of an HTTP/2 stream
-pub type StreamId = u32;
 
 /// Deconstructs a `FrameHeader` into its corresponding 4 components,
 /// represented as a 4-tuple: `(length, frame_type, flags, stream_id)`.
