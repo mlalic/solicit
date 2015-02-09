@@ -5,6 +5,7 @@
 //! protected connection, or even a mock implementation).
 
 use std::old_io::Stream;
+use std::old_io::net::tcp::TcpStream;
 
 /// A trait that any struct that wants to provide the transport layer for
 /// HTTP/2 needs to implement.
@@ -12,3 +13,7 @@ use std::old_io::Stream;
 /// For now, we do not define any additional methods on top of those required
 /// by the `Stream` trait.
 pub trait TransportStream: Stream {}
+
+/// Since `TcpStream` already implements `Stream` and we do not define any
+/// additional required methods on `TransportStream`, we get this for free.
+impl TransportStream for TcpStream {}
