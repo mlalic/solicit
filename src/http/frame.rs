@@ -22,7 +22,7 @@ macro_rules! unpack_octets_4 {
 
 /// An alias for the 9-byte buffer that each HTTP/2 frame header must be stored
 /// in.
-type FrameHeaderBuffer = [u8; 9];
+pub type FrameHeaderBuffer = [u8; 9];
 /// An alias for the 4-tuple representing the components of each HTTP/2 frame
 /// header.
 pub type FrameHeader = (u32, u8, u8, u32);
@@ -34,7 +34,7 @@ pub type StreamId = u32;
 ///
 /// The frame `type` and `flags` components are returned as their original
 /// octet representation, rather than reinterpreted.
-fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
+pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
     let length: u32 = (
         ((header[0] as u32) << 16) |
         ((header[1] as u32) <<  8) |
@@ -177,7 +177,7 @@ impl RawFrame {
 #[derive(PartialEq)]
 #[derive(Debug)]
 #[derive(Copy)]
-enum DataFlag {
+pub enum DataFlag {
     EndStream = 0x1,
     Padded = 0x8,
 }
@@ -192,7 +192,7 @@ impl Flag for DataFlag {
 /// A struct representing the DATA frames of HTTP/2, as defined in the HTTP/2
 /// spec, section 6.1.
 #[derive(PartialEq)]
-struct DataFrame {
+pub struct DataFrame {
     /// The data found in the frame as an opaque byte sequence. It never
     /// includes padding bytes.
     pub data: Vec<u8>,
