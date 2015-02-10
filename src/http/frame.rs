@@ -1126,6 +1126,29 @@ mod tests {
         assert_eq!(frame.get_header(), header);
     }
 
+    /// Tests that a DATA frame with a zero-length payload is still considered
+    /// valid.
+    ///
+    /// There doesn't seem to be anything in the spec that would make it invalid.
+    /// The spec says that frames are considered invalid if their size is too
+    /// small to contain all the mandatory parts of the frame of a particular
+    /// type. Since the DATA frame does not have any mandatory fields (of size
+    /// greater than 1), a zero-len payload should be all right.
+    #[test]
+    fn test_data_frame_zero_len_payload() {
+        let data = b"";
+        let payload = data.to_vec();
+        // A header with the flag indicating no padding
+        let header = (payload.len() as u32, 0u8, 0u8, 1u32);
+
+        let frame = build_test_frame::<DataFrame>(&header, &payload[]);
+
+        // The frame correctly returns the data?
+        assert_eq!(&frame.data[], data);
+        // ...and the headers?
+        assert_eq!(frame.get_header(), header);
+    }
+
     /// Tests that the `DataFrame` struct correctly handles the case where the
     /// padding is invalid: the size of the padding given is greater than or
     /// equal to the total size of the frame.
