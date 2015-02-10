@@ -192,6 +192,7 @@ impl Flag for DataFlag {
 /// A struct representing the DATA frames of HTTP/2, as defined in the HTTP/2
 /// spec, section 6.1.
 #[derive(PartialEq)]
+#[derive(Debug)]
 pub struct DataFrame {
     /// The data found in the frame as an opaque byte sequence. It never
     /// includes padding bytes.
@@ -486,6 +487,8 @@ impl Flag for SettingsFlag {
 /// What is *not* treated as an error (for now) are settings values out of
 /// allowed bounds such as a EnablePush being set to something other than 0 or
 /// 1.
+#[derive(PartialEq)]
+#[derive(Debug)]
 pub struct SettingsFrame {
     /// Contains all the settings that are currently set in the frame. It is
     /// safe to access this field (to read, add, or remove settings), even
@@ -765,6 +768,8 @@ impl StreamDependency {
 
 /// A struct representing the HEADERS frames of HTTP/2, as defined in the
 /// HTTP/2 spec, section 6.2.
+#[derive(PartialEq)]
+#[derive(Debug)]
 pub struct HeadersFrame {
     /// The header fragment bytes stored within the frame.
     pub header_fragment: Vec<u8>,
