@@ -292,6 +292,10 @@ impl Frame for DataFrame {
         if (len as usize) != raw_frame.payload.len() {
             return None;
         }
+        // A DATA frame cannot be associated to the connection itself.
+        if stream_id == 0x0 {
+            return None;
+        }
         // No validation is required for the flags, since according to the spec,
         // unknown flags MUST be ignored.
         // Everything has been validated so far: try to extract the data from
@@ -1136,6 +1140,22 @@ mod tests {
 
         // The frame was not even created since the raw bytes are invalid
         assert!(frame.is_none())
+    }
+
+    /// Tests that if a frame that should be parsed has a stream ID of 0, it is
+    /// not considered a valid DATA frame.
+    #[test]
+    fn test_data_frame_stream_zero() {
+        let data = b"asdf";
+        let payload = data.to_vec();
+        // Stream 0
+        let header = (payload.len() as u32, 0u8, 0u8, 0u32);
+
+        let frame: Option<DataFrame> = Frame::from_raw(
+            RawFrame::with_payload(header.clone(), payload.to_vec()));
+
+        // The frame is not valid.
+        assert!(frame.is_none());
     }
 
     /// Tests that the `DataFrame` struct correctly interprets a DATA frame
