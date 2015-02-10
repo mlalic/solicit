@@ -47,7 +47,7 @@ pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
 }
 
 /// Constructs a buffer of 9 bytes that represents the given `FrameHeader`.
-fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
+pub fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     let &(length, frame_type, flags, stream_id) = header;
 
     [
