@@ -13,5 +13,6 @@ pub type StreamId = u32;
 /// involving an HTTP/2 connection.
 pub enum HttpError {
     IoError(IoError),
+    UnknownFrameType,
     InvalidFrame,
 }

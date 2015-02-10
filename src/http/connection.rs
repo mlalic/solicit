@@ -7,6 +7,7 @@ use super::HttpError;
 use super::transport::TransportStream;
 use super::frame::{
     Frame,
+    RawFrame,
     DataFrame,
     HeadersFrame,
     SettingsFrame,
@@ -74,6 +75,92 @@ impl<S> HttpConnection<S> where S: TransportStream {
         debug!("Sending frame ... {:?}", frame.get_header());
         try_io!(self.stream.write(&frame.serialize()[]));
         Ok(())
+    }
+
+    /// Reads a new frame from the transport layer.
+    ///
+    /// # Returns
+    ///
+    /// Any IO errors raised by the underlying transport layer are wrapped in a
+    /// `HttpError::IoError` variant and propagated upwards.
+    ///
+    /// If the frame type is unknown the `HttpError::UnknownFrameType` variant
+    /// is returned.
+    ///
+    /// If the frame type is recognized, but the frame cannot be successfully
+    /// decoded, the `HttpError::InvalidFrame` variant is returned. For now,
+    /// invalid frames are not further handled by informing the peer (e.g.
+    /// sending PROTOCOL_ERROR) nor can the exact reason behind failing to
+    /// decode the frame be extracted.
+    ///
+    /// If a frame is successfully read and parsed, returns the frame wrapped
+    /// in the appropriate variant of the `HttpFrame` enum.
+    pub fn recv_frame(&mut self) -> Result<HttpFrame, HttpError> {
+        let header = unpack_header(&try!(self.read_header_bytes()));
+        debug!("Received frame header {:?}", header);
+
+        let payload = try!(self.read_payload(header.0));
+        let raw_frame = RawFrame::with_payload(header, payload);
+
+        // TODO: The reason behind being unable to decode the frame should be
+        //       extracted and an appropriate connection-level action taken
+        //       (e.g. responding with a PROTOCOL_ERROR).
+        let frame = match header.1 {
+            0x0 => HttpFrame::DataFrame(try!(self.parse_frame(raw_frame))),
+            0x1 => HttpFrame::HeadersFrame(try!(self.parse_frame(raw_frame))),
+            0x4 => HttpFrame::SettingsFrame(try!(self.parse_frame(raw_frame))),
+            _ => return Err(HttpError::UnknownFrameType),
+        };
+
+        Ok(frame)
+    }
+
+    /// Reads the header bytes of the next frame from the underlying stream.
+    ///
+    /// # Returns
+    ///
+    /// Since each frame header is exactly 9 octets long, returns an array of
+    /// 9 bytes if the frame header is successfully read.
+    ///
+    /// Any IO errors raised by the underlying transport layer are wrapped in a
+    /// `HttpError::IoError` variant and propagated upwards.
+    fn read_header_bytes(&mut self) -> Result<[u8; 9], HttpError> {
+        let mut buf = [0; 9];
+        try_io!(self.stream.read_at_least(9, &mut buf));
+
+        Ok(buf)
+    }
+
+    /// Reads the payload of an HTTP/2 frame with the given length.
+    ///
+    /// # Returns
+    ///
+    /// A newly allocated buffer containing the entire payload of the frame.
+    ///
+    /// Any IO errors raised by the underlying transport layer are wrapped in a
+    /// `HttpError::IoError` variant and propagated upwards.
+    fn read_payload(&mut self, len: u32) -> Result<Vec<u8>, HttpError> {
+        debug!("Trying to read {} bytes of frame payload", len);
+        let length = len as usize;
+        let mut buf: Vec<u8> = Vec::with_capacity(length);
+        // This is completely safe since we *just* allocated the vector with
+        // the same capacity.
+        unsafe { buf.set_len(length); }
+        try_io!(self.stream.read_at_least(length, &mut buf[]));
+
+        Ok(buf)
+    }
+
+    /// A helper method that parses the given `RawFrame` into the given `Frame`
+    /// implementation.
+    ///
+    /// # Returns
+    ///
+    /// Failing to decode the given `Frame` from the `raw_frame`, an
+    /// `HttpError::InvalidFrame` error is returned.
+    #[inline]
+    fn parse_frame<F: Frame>(&self, raw_frame: RawFrame) -> Result<F, HttpError> {
+        Frame::from_raw(raw_frame).ok_or(HttpError::InvalidFrame)
     }
 }
 
@@ -174,6 +261,161 @@ mod tests {
         }
 
         buf
+    }
+
+    /// Tests that it is possible to read a single frame from the stream.
+    #[test]
+    fn test_read_single_frame() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+        ];
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+
+        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+                                      .collect();
+
+        assert_eq!(actual, frames);
+    }
+
+    /// Tests that multiple frames are correctly read from the stream.
+    #[test]
+    fn test_read_multiple_frames() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+            HttpFrame::DataFrame(DataFrame::new(1)),
+            HttpFrame::DataFrame(DataFrame::new(3)),
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
+        ];
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+
+        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+                                      .collect();
+
+        assert_eq!(actual, frames);
+    }
+
+    /// Tests that when reading from a stream that initially contains no data,
+    /// an `IoError` is returned.
+    #[test]
+    fn test_read_no_data() {
+        let mut conn = build_http_conn(&vec![]);
+
+        let res = conn.recv_frame();
+
+        assert!(match res.err().unwrap() {
+            HttpError::IoError(_) => true,
+            _ => false,
+        });
+    }
+
+    /// Tests that a read past the end of file (stream) results in an `IoError`.
+    #[test]
+    fn test_read_past_eof() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+        ];
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+
+        let _: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+                                      .collect();
+        let res = conn.recv_frame();
+
+        assert!(match res.err().unwrap() {
+            HttpError::IoError(_) => true,
+            _ => false,
+        });
+    }
+
+    /// Tests that when reading off a stream that doesn't have a complete frame
+    /// header causes a graceful failure.
+    #[test]
+    fn test_read_invalid_stream_incomplete_frame() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+        ];
+        let mut conn = build_http_conn(&{
+            let mut buf: Vec<u8> = Vec::new();
+            buf.push_all(&build_stub_from_frames(&frames));
+            // We add an extra trailing byte (a start of the header of another
+            // frame).
+            buf.push(0);
+            buf
+        });
+
+        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+                                      .collect();
+        // The first frame is correctly read
+        assert_eq!(actual, frames);
+        // ...but now we get an error
+        assert!(match conn.recv_frame().err().unwrap() {
+            HttpError::IoError(_) => true,
+            _ => false,
+        });
+    }
+
+    /// Tests that when reading off a stream that doesn't have a frame payload
+    /// (when it should) causes a graceful failure.
+    #[test]
+    fn test_read_invalid_stream_incomplete_payload() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+        ];
+        let mut conn = build_http_conn(&{
+            let mut buf: Vec<u8> = Vec::new();
+            buf.push_all(&build_stub_from_frames(&frames));
+            // We add a header indicating that there should be 1 byte of payload
+            let header = (1u32, 0u8, 0u8, 1u32);
+            buf.push_all(&pack_header(&header));
+            // ...but we don't add any payload!
+            buf
+        });
+
+        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+                                      .collect();
+        // The first frame is correctly read
+        assert_eq!(actual, frames);
+        // ...but now we get an error
+        assert!(match conn.recv_frame().err().unwrap() {
+            HttpError::IoError(_) => true,
+            _ => false,
+        });
+    }
+
+    /// Tests that when reading off a stream that contains an invalid frame
+    /// returns an appropriate indicator.
+    #[test]
+    fn test_read_invalid_frame() {
+        // A DATA header which is attached to stream 0
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 0)),
+        ];
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+
+        // An error indicating that the frame is invalid.
+        assert!(match conn.recv_frame().err().unwrap() {
+            HttpError::InvalidFrame => true,
+            _ => false,
+        });
+    }
+
+    /// Tests that when reading a frame with a header that indicates an
+    /// unknown frame type, an appropriate error is returned.
+    #[test]
+    fn test_read_unknown_frame() {
+        let mut conn = build_http_conn(&{
+            let mut buf: Vec<u8> = Vec::new();
+            // Frame type 10 with a payload of length 1 on stream 1
+            let header = (1u32, 10u8, 0u8, 1u32);
+            buf.push_all(&pack_header(&header));
+            buf.push(1);
+            buf
+        });
+
+        // Unknown frame error.
+        assert!(match conn.recv_frame().err().unwrap() {
+            HttpError::UnknownFrameType => true,
+            _ => false,
+        });
     }
 
     /// Tests that it is possible to write a single frame to the connection.
