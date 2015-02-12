@@ -16,3 +16,7 @@ pub enum HttpError {
     UnknownFrameType,
     InvalidFrame,
 }
+
+/// A convenience `Result` type that has the `HttpError` type as the error
+/// type and a generic Ok result type.
+pub type HttpResult<T> = Result<T, HttpError>;

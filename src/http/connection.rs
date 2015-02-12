@@ -3,7 +3,7 @@
 //! This provides an API to read and write raw HTTP/2 frames.
 
 use std::old_io::IoError;
-use super::HttpError;
+use super::{HttpError, HttpResult};
 use super::transport::TransportStream;
 use super::frame::{
     Frame,
@@ -71,7 +71,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// `HttpError::IoError` variant and propagated upwards.
     ///
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
-    pub fn send_frame<F: Frame>(&mut self, frame: F) -> Result<(), HttpError> {
+    pub fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
         debug!("Sending frame ... {:?}", frame.get_header());
         try_io!(self.stream.write(&frame.serialize()[]));
         Ok(())
@@ -95,7 +95,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     ///
     /// If a frame is successfully read and parsed, returns the frame wrapped
     /// in the appropriate variant of the `HttpFrame` enum.
-    pub fn recv_frame(&mut self) -> Result<HttpFrame, HttpError> {
+    pub fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
         let header = unpack_header(&try!(self.read_header_bytes()));
         debug!("Received frame header {:?}", header);
 
@@ -124,7 +124,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     ///
     /// Any IO errors raised by the underlying transport layer are wrapped in a
     /// `HttpError::IoError` variant and propagated upwards.
-    fn read_header_bytes(&mut self) -> Result<[u8; 9], HttpError> {
+    fn read_header_bytes(&mut self) -> HttpResult<[u8; 9]> {
         let mut buf = [0; 9];
         try_io!(self.stream.read_at_least(9, &mut buf));
 
@@ -139,7 +139,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     ///
     /// Any IO errors raised by the underlying transport layer are wrapped in a
     /// `HttpError::IoError` variant and propagated upwards.
-    fn read_payload(&mut self, len: u32) -> Result<Vec<u8>, HttpError> {
+    fn read_payload(&mut self, len: u32) -> HttpResult<Vec<u8>> {
         debug!("Trying to read {} bytes of frame payload", len);
         let length = len as usize;
         let mut buf: Vec<u8> = Vec::with_capacity(length);
@@ -159,7 +159,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// Failing to decode the given `Frame` from the `raw_frame`, an
     /// `HttpError::InvalidFrame` error is returned.
     #[inline]
-    fn parse_frame<F: Frame>(&self, raw_frame: RawFrame) -> Result<F, HttpError> {
+    fn parse_frame<F: Frame>(&self, raw_frame: RawFrame) -> HttpResult<F> {
         Frame::from_raw(raw_frame).ok_or(HttpError::InvalidFrame)
     }
 }
