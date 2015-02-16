@@ -1,6 +1,6 @@
 //! The module implements the client side of the HTTP/2 protocol and exposes
 //! an API for using it.
-use std::old_io::IoError;
+use std::io;
 
 pub mod frame;
 pub mod transport;
@@ -12,7 +12,7 @@ pub type StreamId = u32;
 /// An enum representing errors that can arise when performing operations
 /// involving an HTTP/2 connection.
 pub enum HttpError {
-    IoError(IoError),
+    IoError(io::Error),
     UnknownFrameType,
     InvalidFrame,
 }

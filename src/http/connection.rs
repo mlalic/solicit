@@ -2,7 +2,7 @@
 //!
 //! This provides an API to read and write raw HTTP/2 frames.
 
-use std::old_io::IoError;
+use std::io;
 use super::{HttpError, HttpResult};
 use super::transport::TransportStream;
 use super::frame::{
@@ -27,7 +27,7 @@ pub enum HttpFrame {
 }
 
 /// A helper macro that can be used on `old_io::Result`s to either unwrap the
-/// result (the same as the `try!` macro) or else wrap the returned `IoError`
+/// result (the same as the `try!` macro) or else wrap the returned `io::Error`
 /// to an `HttpError::IoError` variant and do an early return with such an
 /// error.
 ///
@@ -38,7 +38,7 @@ macro_rules! try_io {
     ($e:expr) => (
         match $e {
             Ok(e) => e,
-            Err(e@IoError { .. }) => {
+            Err(e@io::Error { .. }) => {
                 debug!("ignored error: {:?}", e);
                 return Err(HttpError::IoError(e));
             }
@@ -73,7 +73,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
     pub fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
         debug!("Sending frame ... {:?}", frame.get_header());
-        try_io!(self.stream.write(&frame.serialize()[]));
+        try_io!(self.stream.write_all(&frame.serialize()[]));
         Ok(())
     }
 
@@ -126,7 +126,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// `HttpError::IoError` variant and propagated upwards.
     fn read_header_bytes(&mut self) -> HttpResult<[u8; 9]> {
         let mut buf = [0; 9];
-        try_io!(self.stream.read_at_least(9, &mut buf));
+        try_io!(self.stream.read_exact(&mut buf));
 
         Ok(buf)
     }
@@ -146,7 +146,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
         // This is completely safe since we *just* allocated the vector with
         // the same capacity.
         unsafe { buf.set_len(length); }
-        try_io!(self.stream.read_at_least(length, &mut buf[]));
+        try_io!(self.stream.read_exact(&mut buf[]));
 
         Ok(buf)
     }
@@ -166,7 +166,8 @@ impl<S> HttpConnection<S> where S: TransportStream {
 
 #[cfg(test)]
 mod tests {
-    use std::old_io::{IoResult, IoError, MemReader, MemWriter};
+    use std::io::{Cursor, Read, Write};
+    use std::io;
 
     use super::super::frame::{
         Frame, DataFrame, HeadersFrame,
@@ -186,10 +187,10 @@ mod tests {
     /// method.
     ///
     /// It is possible to "close" the stream (both ends at once) so that
-    /// aftwerwards any read or write attempt returns an IoError;
+    /// aftwerwards any read or write attempt returns an `io::Error`;
     struct StubTransportStream {
-        reader: MemReader,
-        writer: MemWriter,
+        reader: Cursor<Vec<u8>>,
+        writer: Cursor<Vec<u8>>,
         closed: bool,
     }
 
@@ -198,8 +199,8 @@ mod tests {
         /// the bytes that will be read from the stream.
         fn with_stub_content(stub: &Vec<u8>) -> StubTransportStream {
             StubTransportStream {
-                reader: MemReader::new(stub.clone()),
-                writer: MemWriter::new(),
+                reader: Cursor::new(stub.clone()),
+                writer: Cursor::new(Vec::new()),
                 closed: false,
             }
         }
@@ -211,33 +212,57 @@ mod tests {
         }
 
         /// Closes the stream, making any read or write operation return an
-        /// `IoError` from there on out.
+        /// `io::Error` from there on out.
         fn close(&mut self) {
             self.closed = true;
         }
     }
 
-    impl Reader for StubTransportStream {
-        fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+    impl io::Read for StubTransportStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             if self.closed {
-                Err(IoError::from_errno(1, false))
+                Err(io::Error::new(io::ErrorKind::Other, "Closed", None))
             } else {
                 self.reader.read(buf)
             }
         }
     }
 
-    impl Writer for StubTransportStream {
-        fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
+    impl io::Write for StubTransportStream {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             if self.closed {
-                Err(IoError::from_errno(1, false))
+                Err(io::Error::new(io::ErrorKind::Other, "Closed", None))
             } else {
-                self.writer.write_all(buf)
+                self.writer.write(buf)
             }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.writer.flush()
         }
     }
 
     impl TransportStream for StubTransportStream {}
+
+    /// A test that makes sure that the `StubTransportStream` exhibits
+    /// properties that a "real" `TransportStream` would too.
+    #[test]
+    fn sanity_check_stub_stream() {
+        // `read` returns 0 at the "end of file"?
+        {
+            let mut stream = StubTransportStream::with_stub_content(&vec![]);
+            let mut buf = [0u8; 5];
+            assert_eq!(stream.read(&mut buf).unwrap(), 0);
+            assert_eq!(stream.read(&mut buf).unwrap(), 0);
+        }
+        // A closed stream always returns an io::Error
+        {
+            let mut stream = StubTransportStream::with_stub_content(&vec![]);
+            stream.close();
+            assert!(stream.write(&[1]).is_err());
+            assert!(stream.read(&mut [0; 5]).is_err());
+        }
+    }
 
     /// A helper function that creates an `HttpConnection` with a `StubTransportStream`
     /// where the content of the stream is defined by the given `stub_data`
