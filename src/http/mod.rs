@@ -18,6 +18,7 @@ pub enum HttpError {
     IoError(io::Error),
     UnknownFrameType,
     InvalidFrame,
+    UnableToConnect,
 }
 
 /// A convenience `Result` type that has the `HttpError` type as the error

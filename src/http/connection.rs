@@ -11,6 +11,7 @@ use super::frame::{
     DataFrame,
     HeadersFrame,
     SettingsFrame,
+    HttpSetting,
     unpack_header,
 };
 
@@ -164,6 +165,109 @@ impl<S> HttpConnection<S> where S: TransportStream {
     }
 }
 
+/// A struct implementing the client side of an HTTP/2 connection.
+///
+/// It builds on top of an `HttpConnection` and provides additional methods
+/// that are only used by clients.
+pub struct ClientConnection<TS>
+        where TS: TransportStream {
+    /// The underlying `HttpConnection` that will be used for any HTTP/2
+    /// communication.
+    conn: HttpConnection<TS>,
+}
+
+impl<TS> ClientConnection<TS> where TS: TransportStream {
+    /// Creates a new `ClientConnection` that will use the given `stream` as its
+    /// underlying transport-layer service provider. It automatically wraps the
+    /// stream into an `HttpConnection`.
+    pub fn new(stream: TS) -> ClientConnection<TS> {
+        ClientConnection {
+            conn: HttpConnection::with_stream(stream),
+        }
+    }
+
+    /// Creates a new `ClientConnection` that will use the given `HttpConnection`
+    /// for all its underlying HTTP/2 communication.
+    pub fn with_connection(conn: HttpConnection<TS>)
+            -> ClientConnection<TS> {
+        ClientConnection {
+            conn: conn,
+        }
+    }
+
+    /// Performs the initialization of the `ClientConnection`.
+    ///
+    /// Sends the client preface, followed by validating the receipt of the
+    /// server preface.
+    pub fn init(&mut self) -> Result<(), HttpError> {
+        try!(self.write_preface());
+        try!(self.read_preface());
+        Ok(())
+    }
+
+    /// Writes the client preface to the underlying HTTP/2 connection.
+    ///
+    /// According to the HTTP/2 spec, a client preface is first a specific
+    /// sequence of octets, followed by a settings frame.
+    ///
+    /// # Returns
+    /// Any error raised by the underlying connection is propagated.
+    fn write_preface(&mut self) -> Result<(), HttpError> {
+        // The first part of the client preface is always this sequence of 24
+        // raw octets.
+        let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+        try_io!(self.conn.stream.write(&preface));
+
+        // It is followed by the client's settings.
+        let settings = {
+            let mut frame = SettingsFrame::new();
+            frame.add_setting(HttpSetting::EnablePush(0));
+            frame
+        };
+        try!(self.conn.send_frame(settings));
+        debug!("Sent client preface");
+
+        Ok(())
+    }
+
+    /// Reads and handles the server preface from the underlying HTTP/2
+    /// connection.
+    ///
+    /// According to the HTTP/2 spec, a server preface consists of a single
+    /// settings frame.
+    ///
+    /// # Returns
+    ///
+    /// Any error raised by the underlying connection is propagated.
+    ///
+    /// Additionally, if it is not possible to decode the server preface,
+    /// it returns the `HttpError::UnableToConnect` variant.
+    fn read_preface(&mut self) -> Result<(), HttpError> {
+        match self.conn.recv_frame() {
+            Ok(HttpFrame::SettingsFrame(settings)) => {
+                debug!("Correctly received a SETTINGS frame from the server");
+                self.handle_settings_frame(settings);
+            },
+            // Wrong frame received...
+            Ok(_) => return Err(HttpError::UnableToConnect),
+            // Already an error -- propagate that.
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
+    fn handle_settings_frame(&mut self, frame: SettingsFrame) -> Result<(), HttpError> {
+        if !frame.is_ack() {
+            // TODO: Actually handle the settings change before
+            //       sending out the ACK.
+            debug!("Sending a SETTINGS ack");
+            try!(self.conn.send_frame(SettingsFrame::new_ack()));
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Read, Write};
@@ -171,9 +275,11 @@ mod tests {
 
     use super::super::frame::{
         Frame, DataFrame, HeadersFrame,
-        pack_header
+        SettingsFrame,
+        pack_header,
+        RawFrame,
     };
-    use super::{HttpConnection, HttpFrame};
+    use super::{HttpConnection, HttpFrame, ClientConnection};
     use super::super::transport::TransportStream;
     use super::super::HttpError;
 
@@ -209,6 +315,11 @@ mod tests {
         /// stream.
         fn get_written(&self) -> &[u8] {
             self.writer.get_ref()
+        }
+
+        /// Returns the position up to which the stream has been read.
+        fn get_read_pos(&self) -> u64 {
+            self.reader.position()
         }
 
         /// Closes the stream, making any read or write operation return an
@@ -493,7 +604,6 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let expected = build_stub_from_frames(&frames);
         let mut conn = build_http_conn(&vec![]);
         // Close the underlying stream!
         conn.stream.close();
@@ -510,5 +620,67 @@ mod tests {
                 _ => false,
             });
         }
+    }
+
+    fn get_frame_from_buf<F: Frame>(buf: &[u8]) -> (F, usize) {
+        let raw = RawFrame::from_buf(buf).unwrap();
+        let len = raw.header.0 as usize;
+        let frame = Frame::from_raw(raw).unwrap();
+
+        (frame, len + 9)
+    }
+
+    /// Tests that a client connection is correctly initialized, by writing the
+    /// client preface and reading the server preface.
+    #[test]
+    fn test_init_client_conn() {
+        let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
+        let server_frame_buf = build_stub_from_frames(&frames);
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&server_frame_buf));
+
+        conn.init().ok().unwrap();
+        let written = conn.conn.stream.get_written();
+
+        // The first bytes written to the underlying transport layer are the
+        // preface bytes.
+        let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+        let frames_buf = &written[preface.len()..];
+        // Immediately after that we sent a settings frame...
+        assert_eq!(preface, &written[..preface.len()]);
+        let len_settings = {
+            let (frame, sz): (SettingsFrame, _) = get_frame_from_buf(frames_buf);
+            // ...which was not an ack, but our own settings.
+            assert!(!frame.is_ack());
+            sz
+        };
+        // Then, we have read the server's response
+        assert_eq!(
+            server_frame_buf.len() as u64,
+            conn.conn.stream.get_read_pos());
+        // Finally, we also expect that the client has already sent a response
+        // (an ack) to this server settings frame.
+        let len_ack = {
+            let (settings_frame, sz): (SettingsFrame, _) =
+                get_frame_from_buf(&frames_buf[len_settings..]);
+            assert!(settings_frame.is_ack());
+            sz
+        };
+        // ...and we have not written anything else!
+        assert_eq!(len_settings + len_ack, frames_buf.len());
+    }
+
+    /// Tests that a client connection fails to initialize when the server does
+    /// not send a settings frame as its first frame (i.e. server preface).
+    #[test]
+    fn test_init_client_conn_no_settings() {
+        let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
+        let server_frame_buf = build_stub_from_frames(&frames);
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&server_frame_buf));
+
+        // We get an error since the first frame sent by the server was not
+        // SETTINGS.
+        assert!(conn.init().is_err());
     }
 }
