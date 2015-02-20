@@ -1,5 +1,7 @@
 //! The module contains the implementation of HTTP/2 frames.
 
+use std::mem;
+use std::raw::Repr;
 use super::StreamId;
 
 /// A helper macro that unpacks a sequence of 4 bytes found in the buffer with
@@ -159,12 +161,45 @@ impl RawFrame {
         RawFrame::with_payload(header, Vec::new())
     }
 
-    /// Creates a new `Frame` with the given header and payload.
+    /// Creates a new `RawFrame` with the given header and payload.
     pub fn with_payload(header: FrameHeader, payload: Vec<u8>) -> RawFrame {
         RawFrame {
             header: header,
             payload: payload,
         }
+    }
+
+    /// Creates a new `RawFrame` by parsing the given buffer.
+    ///
+    /// # Returns
+    ///
+    /// If the first bytes of the buffer represent a valid frame, a `RawFrame`
+    /// that represents it is returned. Obviously, the buffer should contain
+    /// both the header and the payload of the frame.
+    ///
+    /// If the first bytes of the buffer cannot be interpreted as a raw frame,
+    /// `None` is returned. This includes the case where the buffer does not
+    /// contain enough data to contain the entire payload (whose length was
+    /// advertised in the header).
+    pub fn from_buf(buf: &[u8]) -> Option<RawFrame> {
+        if buf.len() < 9 {
+            return None;
+        }
+        let header = unpack_header(unsafe {
+            assert!(buf.len() >= 9);
+            // We just asserted that this transmute is safe.
+            mem::transmute(buf.repr().data)
+        });
+        let payload_len = header.0 as usize;
+
+        if buf[9..].len() < payload_len {
+            return None;
+        }
+
+        Some(RawFrame {
+            header: header,
+            payload: buf[9..9 + header.0 as usize].to_vec(),
+        })
     }
 }
 
@@ -1966,5 +2001,72 @@ mod tests {
 
         frame.set_flag(HeadersFlag::EndHeaders);
         assert!(frame.is_headers_end());
+    }
+
+    /// Tests that the `RawFrame::from_buf` method correctly constructs a
+    /// `RawFrame` from a given buffer.
+    #[test]
+    fn test_raw_frame_from_buffer() {
+        // Correct frame
+        {
+            let data = b"123";
+            let header = (data.len() as u32, 0x1, 0, 1);
+            let buf = {
+                let mut buf = Vec::new();
+                buf.push_all(&pack_header(&header));
+                buf.push_all(&data);
+                buf
+            };
+
+            let raw = RawFrame::from_buf(&buf).unwrap();
+
+            assert_eq!(raw.header, header);
+            assert_eq!(raw.payload, data)
+        }
+        // Correct frame with trailing data
+        {
+            let data = b"123";
+            let header = (data.len() as u32, 0x1, 0, 1);
+            let buf = {
+                let mut buf = Vec::new();
+                buf.push_all(&pack_header(&header));
+                buf.push_all(&data);
+                buf.push_all(&[1, 2, 3, 4, 5]);
+                buf
+            };
+
+            let raw = RawFrame::from_buf(&buf).unwrap();
+
+            assert_eq!(raw.header, header);
+            assert_eq!(raw.payload, data)
+        }
+        // Missing payload chunk
+        {
+            let data = b"123";
+            let header = (data.len() as u32, 0x1, 0, 1);
+            let buf = {
+                let mut buf = Vec::new();
+                buf.push_all(&pack_header(&header));
+                buf.push_all(&data[..2]);
+                buf
+            };
+
+            assert!(RawFrame::from_buf(&buf).is_none());
+        }
+        // Missing header chunk
+        {
+            let header = (0, 0x1, 0, 1);
+            let buf = {
+                let mut buf = Vec::new();
+                buf.push_all(&pack_header(&header)[..5]);
+                buf
+            };
+
+            assert!(RawFrame::from_buf(&buf).is_none());
+        }
+        // Completely empty buffer
+        {
+            assert!(RawFrame::from_buf(&[]).is_none());
+        }
     }
 }
