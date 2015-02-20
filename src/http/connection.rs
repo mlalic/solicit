@@ -11,6 +11,7 @@
 
 use std::io;
 
+use super::session::Session;
 use super::{HttpError, HttpResult, Request};
 use super::transport::TransportStream;
 use super::frame::{
@@ -180,8 +181,8 @@ impl<S> HttpConnection<S> where S: TransportStream {
 ///
 /// It builds on top of an `HttpConnection` and provides additional methods
 /// that are only used by clients.
-pub struct ClientConnection<TS>
-        where TS: TransportStream {
+pub struct ClientConnection<TS, S>
+        where TS: TransportStream, S: Session {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection<TS>,
@@ -189,28 +190,34 @@ pub struct ClientConnection<TS>
     encoder: hpack::Encoder<'static>,
     /// HPACK decoder
     decoder: hpack::Decoder<'static>,
+    /// The `Session` associated with this connection. It is essentially a set
+    /// of callbacks that are triggered by the connection when different states
+    /// in the HTTP/2 communication arise.
+    pub session: S,
 }
 
-impl<TS> ClientConnection<TS> where TS: TransportStream {
+impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     /// Creates a new `ClientConnection` that will use the given `stream` as its
     /// underlying transport-layer service provider. It automatically wraps the
     /// stream into an `HttpConnection`.
-    pub fn new(stream: TS) -> ClientConnection<TS> {
+    pub fn new(stream: TS, session: S) -> ClientConnection<TS, S> {
         ClientConnection {
             conn: HttpConnection::with_stream(stream),
             encoder: hpack::Encoder::new(),
             decoder: hpack::Decoder::new(),
+            session: session,
         }
     }
 
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
-    pub fn with_connection(conn: HttpConnection<TS>)
-            -> ClientConnection<TS> {
+    pub fn with_connection(conn: HttpConnection<TS>, session: S)
+            -> ClientConnection<TS, S> {
         ClientConnection {
             conn: conn,
             encoder: hpack::Encoder::new(),
             decoder: hpack::Decoder::new(),
+            session: session,
         }
     }
 
@@ -344,8 +351,11 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
 
     /// Private helper method that handles a received `DataFrame`.
     fn handle_data_frame(&mut self, frame: DataFrame) -> HttpResult<()> {
+        self.session.new_data_chunk(frame.get_stream_id(), &frame.data);
+
         if frame.is_set(DataFlag::EndStream) {
             debug!("End of stream {}", frame.get_stream_id());
+            self.session.end_of_stream(frame.get_stream_id())
         }
 
         Ok(())
@@ -355,9 +365,11 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
     fn handle_headers_frame(&mut self, frame: HeadersFrame) -> HttpResult<()> {
         let headers = try!(self.decoder.decode(&frame.header_fragment)
                                        .map_err(|e| HttpError::CompressionError(e)));
+        self.session.new_headers(frame.get_stream_id(), headers);
 
         if frame.is_end_of_stream() {
             debug!("End of stream {}", frame.get_stream_id());
+            self.session.end_of_stream(frame.get_stream_id());
         }
 
         Ok(())
@@ -389,7 +401,9 @@ mod tests {
     };
     use super::{HttpConnection, HttpFrame, ClientConnection};
     use super::super::transport::TransportStream;
-    use super::super::{HttpError, Request};
+    use super::super::{HttpError, Request, StreamId, Header};
+    use super::super::session::Session;
+    use super::super::super::hpack;
 
     /// A helper stub implementation of a `TransportStream`.
     ///
@@ -462,6 +476,76 @@ mod tests {
     }
 
     impl TransportStream for StubTransportStream {}
+
+    /// A helper struct implementing the `Session` trait, intended for testing
+    /// purposes.
+    ///
+    /// It is basically a poor man's mock, providing us the ability to check
+    /// how many times the particular callbacks were called (although not the
+    /// order in which they were called).
+    ///
+    /// Additionally, when created with `new_verify` it is possible to provide
+    /// a list of headers and data chunks and make the session verify that it
+    /// them from the connection in the exactly given order (i.e. relative
+    /// order of chunks and headers; there is no way to check the order between
+    /// chunks and headers for now).
+    struct TestSession {
+        silent: bool,
+        /// List of expected headers -- in the order that they are expected
+        headers: Vec<Vec<Header>>,
+        /// List of expected data chunks -- in the order that they are expected
+        chunks: Vec<Vec<u8>>,
+        /// The current number of header calls.
+        curr_header: usize,
+        /// The current number of data chunk calls.
+        curr_chunk: usize,
+    }
+
+    impl TestSession {
+        /// Returns a new `TestSession` that only counts how many times the
+        /// callback methods were invoked.
+        fn new() -> TestSession {
+            TestSession {
+                silent: true,
+                headers: Vec::new(),
+                chunks: Vec::new(),
+                curr_header: 0,
+                curr_chunk: 0,
+            }
+        }
+
+        /// Returns a new `TestSession` that veriies that the headers received
+        /// in the callbacks are equal to those in the given headers `Vec` and
+        /// that they come in exactly the given order. Does the same for chunks.
+        fn new_verify(headers: Vec<Vec<Header>>, chunks: Vec<Vec<u8>>)
+                -> TestSession {
+            TestSession {
+                silent: false,
+                headers: headers,
+                chunks: chunks,
+                curr_header: 0,
+                curr_chunk: 0,
+            }
+        }
+    }
+
+    impl Session for TestSession {
+        fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
+            if !self.silent {
+                assert_eq!(&self.chunks[self.curr_chunk], &data);
+            }
+            self.curr_chunk += 1;
+        }
+
+        fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>) {
+            if !self.silent {
+                assert_eq!(self.headers[self.curr_header], headers);
+            }
+            self.curr_header += 1;
+        }
+
+        fn end_of_stream(&mut self, stream_id: StreamId) {}
+    }
 
     /// A test that makes sure that the `StubTransportStream` exhibits
     /// properties that a "real" `TransportStream` would too.
@@ -750,7 +834,8 @@ mod tests {
         let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
         let server_frame_buf = build_stub_from_frames(&frames);
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&server_frame_buf));
+            build_http_conn(&server_frame_buf),
+            TestSession::new());
 
         conn.init().ok().unwrap();
         let written = conn.conn.stream.get_written();
@@ -790,7 +875,8 @@ mod tests {
         let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
         let server_frame_buf = build_stub_from_frames(&frames);
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&server_frame_buf));
+            build_http_conn(&server_frame_buf),
+            TestSession::new());
 
         // We get an error since the first frame sent by the server was not
         // SETTINGS.
@@ -811,7 +897,7 @@ mod tests {
             body: Vec::new(),
         };
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&vec![]));
+            build_http_conn(&vec![]), TestSession::new());
 
         conn.send_request(req);
         let written = conn.conn.stream.get_written();
@@ -822,5 +908,97 @@ mod tests {
         assert!(frame.is_end_of_stream());
         // ...and nothing else!
         assert_eq!(sz, written.len());
+    }
+
+    /// Tests that the `ClientConnection` correctly notifies the session on a
+    /// new data chunk.
+    #[test]
+    fn test_client_conn_notifies_session_header() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+        ];
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&build_stub_from_frames(&frames)),
+            TestSession::new());
+
+        conn.handle_next_frame().ok().unwrap();
+
+        // A poor man's mock...
+        // The header callback was called
+        assert_eq!(conn.session.curr_header, 1);
+        // ...no chunks were seen.
+        assert_eq!(conn.session.curr_chunk, 0);
+    }
+
+    /// Tests that the `ClientConnection` correctly notifies the session on
+    /// a new data chunk.
+    #[test]
+    fn test_client_conn_notifies_session_data() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::DataFrame(DataFrame::new(1)),
+        ];
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&build_stub_from_frames(&frames)),
+            TestSession::new());
+
+        conn.handle_next_frame().ok().unwrap();
+
+        // A poor man's mock...
+        // The header callback was not called
+        assert_eq!(conn.session.curr_header, 0);
+        // and exactly one chunk seen.
+        assert_eq!(conn.session.curr_chunk, 1);
+    }
+
+    /// Tests that there is no notification for an invalid headers frame.
+    #[test]
+    fn test_client_conn_invalid_frame_no_notification() {
+        let frames: Vec<HttpFrame> = vec![
+            // Associated to stream 0!
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 0)),
+        ];
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&build_stub_from_frames(&frames)),
+            TestSession::new());
+
+        // We get an invalid frame error back...
+        assert_eq!(
+            conn.handle_next_frame().err().unwrap(),
+            HttpError::InvalidFrame);
+
+        // A poor man's mock...
+        // No callbacks triggered
+        assert_eq!(conn.session.curr_header, 0);
+        assert_eq!(conn.session.curr_chunk, 0);
+    }
+
+    /// Tests that the session gets the correct values for the headers and data
+    /// from the `ClientConnection`.
+    #[test]
+    fn test_client_conn_session_gets_headers_data_values() {
+        let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(
+                    hpack::Encoder::new().encode(&headers),
+                    1)),
+            HttpFrame::DataFrame(DataFrame::new(1)), {
+                let mut frame = DataFrame::new(1);
+                frame.data = b"1234".to_vec();
+                HttpFrame::DataFrame(frame)
+            },
+        ];
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&build_stub_from_frames(&frames)),
+            TestSession::new_verify(
+                vec![headers],
+                vec![b"".to_vec(), b"1234".to_vec()]));
+
+        conn.handle_next_frame().ok().unwrap();
+        conn.handle_next_frame().ok().unwrap();
+        conn.handle_next_frame().ok().unwrap();
+
+        // Two chunks and one header processed?
+        assert_eq!(conn.session.curr_chunk, 2);
+        assert_eq!(conn.session.curr_header, 1);
     }
 }
