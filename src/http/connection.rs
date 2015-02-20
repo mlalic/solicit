@@ -10,6 +10,7 @@ use super::frame::{
     Frame,
     RawFrame,
     DataFrame,
+    DataFlag,
     HeadersFrame,
     HeadersFlag,
     SettingsFrame,
@@ -179,6 +180,8 @@ pub struct ClientConnection<TS>
     conn: HttpConnection<TS>,
     /// HPACK encoder
     encoder: hpack::Encoder<'static>,
+    /// HPACK decoder
+    decoder: hpack::Decoder<'static>,
 }
 
 impl<TS> ClientConnection<TS> where TS: TransportStream {
@@ -189,6 +192,7 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
         ClientConnection {
             conn: HttpConnection::with_stream(stream),
             encoder: hpack::Encoder::new(),
+            decoder: hpack::Decoder::new(),
         }
     }
 
@@ -199,6 +203,7 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
         ClientConnection {
             conn: conn,
             encoder: hpack::Encoder::new(),
+            decoder: hpack::Decoder::new(),
         }
     }
 
@@ -287,6 +292,66 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
         // Sending this HEADER frame opens the new stream and is equivalent to
         // sending the given request to the server.
         try!(self.conn.send_frame(frame));
+
+        Ok(())
+    }
+
+    /// Fully handle the next incoming frame, blocking to read it from the
+    /// underlying transport stream if not available yet.
+    ///
+    /// All communication errors are propagated.
+    pub fn handle_next_frame(&mut self) -> HttpResult<()> {
+        debug!("Waiting for frame...");
+        let frame = match self.conn.recv_frame() {
+            Ok(frame) => frame,
+            Err(HttpError::UnknownFrameType) => {
+                debug!("Ignoring unknown frame type");
+                return Ok(())
+            },
+            Err(e) => {
+                debug!("Encountered an HTTP/2 error, stopping.");
+                return Err(e);
+            },
+        };
+
+        self.handle_frame(frame)
+    }
+
+    /// Private helper method that actually handles a received frame.
+    fn handle_frame(&mut self, frame: HttpFrame) -> HttpResult<()> {
+        match frame {
+            HttpFrame::DataFrame(frame) => {
+                debug!("Data frame received");
+                self.handle_data_frame(frame)
+            },
+            HttpFrame::HeadersFrame(frame) => {
+                debug!("Headers frame received");
+                self.handle_headers_frame(frame)
+            },
+            HttpFrame::SettingsFrame(frame) => {
+                debug!("Settings frame received");
+                self.handle_settings_frame(frame)
+            }
+        }
+    }
+
+    /// Private helper method that handles a received `DataFrame`.
+    fn handle_data_frame(&mut self, frame: DataFrame) -> HttpResult<()> {
+        if frame.is_set(DataFlag::EndStream) {
+            debug!("End of stream {}", frame.get_stream_id());
+        }
+
+        Ok(())
+    }
+
+    /// Private helper method that handles a received `HeadersFrame`.
+    fn handle_headers_frame(&mut self, frame: HeadersFrame) -> HttpResult<()> {
+        let headers = try!(self.decoder.decode(&frame.header_fragment)
+                                       .map_err(|e| HttpError::CompressionError(e)));
+
+        if frame.is_end_of_stream() {
+            debug!("End of stream {}", frame.get_stream_id());
+        }
 
         Ok(())
     }
