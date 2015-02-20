@@ -5,8 +5,8 @@
 use std::fmt;
 use std::iter;
 use std::slice;
-use std::collections::RingBuf;
-use std::collections::ring_buf;
+use std::collections::VecDeque;
+use std::collections::vec_deque;
 
 // Re-export the main HPACK API entry points.
 pub use self::decoder::Decoder;
@@ -27,7 +27,7 @@ pub mod huffman;
 struct DynamicTableIter<'a> {
     /// Stores an iterator through the underlying structure that the
     /// `DynamicTable` uses
-    inner: ring_buf::Iter<'a, (Vec<u8>, Vec<u8>)>,
+    inner: vec_deque::Iter<'a, (Vec<u8>, Vec<u8>)>,
 }
 
 impl<'a> Iterator for DynamicTableIter<'a> {
@@ -67,7 +67,7 @@ impl<'a> Iterator for DynamicTableIter<'a> {
 /// *it* worry about making certain that the changes are valid according to
 /// the (current) constraints of the protocol.
 struct DynamicTable {
-    table: RingBuf<(Vec<u8>, Vec<u8>)>,
+    table: VecDeque<(Vec<u8>, Vec<u8>)>,
     size: usize,
     max_size: usize,
 }
@@ -83,7 +83,7 @@ impl DynamicTable {
     /// Creates a new empty dynamic table with the given maximum size.
     fn with_size(max_size: usize) -> DynamicTable {
         DynamicTable {
-            table: RingBuf::new(),
+            table: VecDeque::new(),
             size: 0,
             max_size: max_size,
         }
