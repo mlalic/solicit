@@ -1,6 +1,13 @@
 //! The module contains the implementation of an HTTP/2 connection.
 //!
 //! This provides an API to read and write raw HTTP/2 frames.
+//!
+//! The basic `HttpConnection` provides an API to read and write raw HTTP/2
+//! frames.
+//!
+//! The `ClientConnection` provides a slightly higher level API (based on the
+//! `HttpConnection`) that exposes client-specific functions of an HTTP/2
+//! connection, such as sending requests.
 
 use std::io;
 
