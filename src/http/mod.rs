@@ -14,6 +14,9 @@ pub type Header = (Vec<u8>, Vec<u8>);
 
 /// An enum representing errors that can arise when performing operations
 /// involving an HTTP/2 connection.
+#[derive(PartialEq)]
+#[derive(Clone)]
+#[derive(Debug)]
 pub enum HttpError {
     IoError(io::Error),
     UnknownFrameType,
