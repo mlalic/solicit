@@ -3,17 +3,20 @@
 //! This provides an API to read and write raw HTTP/2 frames.
 
 use std::io;
-use super::{HttpError, HttpResult};
+
+use super::{HttpError, HttpResult, Request};
 use super::transport::TransportStream;
 use super::frame::{
     Frame,
     RawFrame,
     DataFrame,
     HeadersFrame,
+    HeadersFlag,
     SettingsFrame,
     HttpSetting,
     unpack_header,
 };
+use super::super::hpack;
 
 /// An enum representing all frame variants that can be returned by an
 /// `HttpConnection`.
@@ -174,6 +177,8 @@ pub struct ClientConnection<TS>
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection<TS>,
+    /// HPACK encoder
+    encoder: hpack::Encoder<'static>,
 }
 
 impl<TS> ClientConnection<TS> where TS: TransportStream {
@@ -183,6 +188,7 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
     pub fn new(stream: TS) -> ClientConnection<TS> {
         ClientConnection {
             conn: HttpConnection::with_stream(stream),
+            encoder: hpack::Encoder::new(),
         }
     }
 
@@ -192,6 +198,7 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
             -> ClientConnection<TS> {
         ClientConnection {
             conn: conn,
+            encoder: hpack::Encoder::new(),
         }
     }
 
@@ -256,7 +263,36 @@ impl<TS> ClientConnection<TS> where TS: TransportStream {
         Ok(())
     }
 
-    fn handle_settings_frame(&mut self, frame: SettingsFrame) -> Result<(), HttpError> {
+    /// A method that sends the given `Request` to the server.
+    ///
+    /// The method blocks until the entire request has been sent.
+    ///
+    /// All errors are propagated.
+    ///
+    /// # Note
+    ///
+    /// Request body is ignored for now.
+    pub fn send_request(&mut self, req: Request) -> HttpResult<()> {
+        let headers_fragment = self.encoder.encode(&req.headers);
+        // For now, sending header fragments larger than 16kB is not supported
+        // (i.e. the encoded representation cannot be split into CONTINUATION
+        // frames).
+        let mut frame = HeadersFrame::new(headers_fragment, req.stream_id);
+        frame.set_flag(HeadersFlag::EndHeaders);
+        // Since we are not supporting methods which require request bodies to
+        // be sent, we end the stream from this side already.
+        // TODO: Support bodies!
+        frame.set_flag(HeadersFlag::EndStream);
+
+        // Sending this HEADER frame opens the new stream and is equivalent to
+        // sending the given request to the server.
+        try!(self.conn.send_frame(frame));
+
+        Ok(())
+    }
+
+    /// Private helper method that handles a received `SettingsFrame`.
+    fn handle_settings_frame(&mut self, frame: SettingsFrame) -> HttpResult<()> {
         if !frame.is_ack() {
             // TODO: Actually handle the settings change before
             //       sending out the ACK.
@@ -281,7 +317,7 @@ mod tests {
     };
     use super::{HttpConnection, HttpFrame, ClientConnection};
     use super::super::transport::TransportStream;
-    use super::super::HttpError;
+    use super::super::{HttpError, Request};
 
     /// A helper stub implementation of a `TransportStream`.
     ///
@@ -622,6 +658,11 @@ mod tests {
         }
     }
 
+    /// A helper function that parses out the first frame contained in the
+    /// given buffer, expecting it to be the frame type of the generic parameter
+    /// `F`. Returns the size of the raw frame read and the frame itself.
+    ///
+    /// Panics if unable to obtain such a frame.
     fn get_frame_from_buf<F: Frame>(buf: &[u8]) -> (F, usize) {
         let raw = RawFrame::from_buf(buf).unwrap();
         let len = raw.header.0 as usize;
@@ -682,5 +723,32 @@ mod tests {
         // We get an error since the first frame sent by the server was not
         // SETTINGS.
         assert!(conn.init().is_err());
+    }
+
+    /// Tests that a `ClientConnection` correctly sends a `Request` with no
+    /// body.
+    #[test]
+    fn test_client_conn_send_request_no_body() {
+        let req = Request {
+            stream_id: 1,
+            // An incomplete header list, but this does not matter for this test.
+            headers: vec![
+                (b":method".to_vec(), b"GET".to_vec()),
+                (b":path".to_vec(), b"/".to_vec()),
+             ],
+            body: Vec::new(),
+        };
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&vec![]));
+
+        conn.send_request(req);
+        let written = conn.conn.stream.get_written();
+
+        let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(written);
+        // We sent a headers frame with end of headers and end of stream flags
+        assert!(frame.is_headers_end());
+        assert!(frame.is_end_of_stream());
+        // ...and nothing else!
+        assert_eq!(sz, written.len());
     }
 }

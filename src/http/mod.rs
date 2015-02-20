@@ -22,6 +22,7 @@ pub enum HttpError {
     UnknownFrameType,
     InvalidFrame,
     UnableToConnect,
+    MalformedResponse,
 }
 
 /// A convenience `Result` type that has the `HttpError` type as the error
