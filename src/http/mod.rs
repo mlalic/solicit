@@ -2,6 +2,8 @@
 //! an API for using it.
 use std::io;
 
+use super::hpack::decoder::DecoderError;
+
 pub mod frame;
 pub mod transport;
 pub mod connection;
@@ -22,6 +24,7 @@ pub enum HttpError {
     IoError(io::Error),
     UnknownFrameType,
     InvalidFrame,
+    CompressionError(DecoderError),
     UnableToConnect,
     MalformedResponse,
 }
