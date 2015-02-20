@@ -1,6 +1,7 @@
 //! Defines the interface for the session-level management of HTTP/2
 //! communication. This is effectively an API that allows hooking into an
 //! HTTP/2 connection in order to handle events arising on the connection.
+use std::collections::HashMap;
 use super::{StreamId, Header};
 
 /// A trait that defines methods that need to be defined in order to track the
@@ -95,5 +96,129 @@ impl Stream for DefaultStream {
 
     fn is_closed(&self) -> bool {
         self.closed
+    }
+}
+
+/// A simple implementation of the `Session` trait.
+///
+/// Keeps track of which streams are currently active by holding a `HashMap`
+/// of stream IDs to `Stream` instances. Callbacks delegate to the corresponding
+/// stream instance, after validating the received stream ID.
+///
+/// The purpose of the type is to make it easier for client implementations to
+/// only handle stream-level events by providing a `Stream` implementation,
+/// instead of having to implement the entire session management (tracking active
+/// streams, etc.).
+///
+/// For example, by varying the `Stream` implementation it is easy to implement
+/// a client that streams responses directly into a file on the local file system,
+/// instead of keeping it in memory (like the `DefaultStream` does), without
+/// having to change any HTTP/2-specific logic.
+pub struct DefaultSession<S=DefaultStream> where S: Stream {
+    streams: HashMap<StreamId, S>,
+}
+
+impl<S> DefaultSession<S> where S: Stream {
+    /// Returns a new `DefaultSession` with no active streams.
+    pub fn new() -> DefaultSession<S> {
+        DefaultSession {
+            streams: HashMap::new(),
+        }
+    }
+
+    /// Returns a reference to a stream with the given ID, if such a stream is
+    /// found in the `DefaultSession`.
+    pub fn get_stream(&self, stream_id: StreamId) -> Option<&S> {
+        self.streams.get(&stream_id)
+    }
+
+    /// Creates a new stream with the given ID in the session.
+    pub fn new_stream(&mut self, stream_id: StreamId) {
+        self.streams.insert(stream_id, Stream::new(stream_id));
+    }
+}
+
+impl<S> Session for DefaultSession<S> where S: Stream {
+    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
+        debug!("Data chunk for stream {}", stream_id);
+        let mut stream = match self.streams.get_mut(&stream_id) {
+            None => {
+                debug!("Received a frame for an unknown stream!");
+                return;
+            },
+            Some(stream) => stream,
+        };
+        // Now let the stream handle the data chunk
+        stream.new_data_chunk(data);
+    }
+
+    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>) {
+        debug!("Headers for stream {}", stream_id);
+        let mut stream = match self.streams.get_mut(&stream_id) {
+            None => {
+                debug!("Received a frame for an unknown stream!");
+                return;
+            },
+            Some(stream) => stream,
+        };
+        // Now let the stream handle the headers
+        stream.set_headers(headers);
+    }
+
+    fn end_of_stream(&mut self, stream_id: StreamId) {
+        debug!("End of stream {}", stream_id);
+        let mut stream = match self.streams.get_mut(&stream_id) {
+            None => {
+                debug!("Received a frame for an unknown stream!");
+                return;
+            },
+            Some(stream) => stream,
+        };
+        stream.close()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Session, DefaultSession,
+        Stream, DefaultStream,
+    };
+
+    /// Tests that a `DefaultSession` notifies the correct stream when the
+    /// appropriate callback is invoked.
+    ///
+    /// A better unit test would give a mock Stream to the `DefaultSession`,
+    /// instead of testing both the `DefaultSession` and the `DefaultStream`
+    /// in the same time...
+    #[test]
+    fn test_default_session_notifies_stream() {
+        let mut session: DefaultSession = DefaultSession::new();
+        session.new_stream(1);
+
+        // Registering some data to stream 1...
+        session.new_data_chunk(1, &[1, 2, 3]);
+        // ...works.
+        assert_eq!(session.get_stream(1).unwrap().body, vec![1, 2, 3]);
+        // Some more...
+        session.new_data_chunk(1, &[4]);
+        // ...works.
+        assert_eq!(session.get_stream(1).unwrap().body, vec![1, 2, 3, 4]);
+        // Now headers?
+        let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
+        session.new_headers(1, headers.clone());
+        assert_eq!(session.get_stream(1).unwrap().headers.clone().unwrap(),
+                   headers);
+        // Add another stream in the mix
+        session.new_stream(3);
+        // and send it some data
+        session.new_data_chunk(3, &[100]);
+        assert_eq!(session.get_stream(3).unwrap().body, vec![100]);
+        // Finally, the stream 1 ends...
+        session.end_of_stream(1);
+        // ...and gets closed.
+        assert!(session.get_stream(1).unwrap().closed);
+        // but not the other one.
+        assert!(!session.get_stream(3).unwrap().closed);
     }
 }
