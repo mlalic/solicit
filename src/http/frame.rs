@@ -857,6 +857,11 @@ impl HeadersFrame {
         self.is_set(HeadersFlag::EndHeaders)
     }
 
+    /// Returns whther this frame ends the stream it is associated with.
+    pub fn is_end_of_stream(&self) -> bool {
+        self.is_set(HeadersFlag::EndStream)
+    }
+
     /// Sets the padding length for the frame, as well as the corresponding
     /// Padded flag.
     pub fn set_padding(&mut self, padding_len: u8) {
