@@ -46,3 +46,54 @@ pub trait Stream {
     /// Returns whether the stream is closed.
     fn is_closed(&self) -> bool;
 }
+
+/// An implementation of the `Stream` trait that saves all headers and data
+/// in memory.
+pub struct DefaultStream {
+    /// The ID of the stream
+    pub stream_id: StreamId,
+    /// The headers associated with the stream (i.e. the response headers)
+    pub headers: Option<Vec<Header>>,
+    /// The body of the stream (i.e. the response body)
+    pub body: Vec<u8>,
+    /// Whether the stream is already closed
+    pub closed: bool,
+}
+
+impl DefaultStream {
+    /// Create a new `DefaultStream` with the given ID.
+    pub fn new(stream_id: StreamId) -> DefaultStream {
+        DefaultStream {
+            stream_id: stream_id,
+            headers: None,
+            body: Vec::new(),
+            closed: false,
+        }
+    }
+}
+
+impl Stream for DefaultStream {
+    fn new(stream_id: StreamId) -> DefaultStream {
+        DefaultStream::new(stream_id)
+    }
+
+    fn new_data_chunk(&mut self, data: &[u8]) {
+        self.body.push_all(data);
+    }
+
+    fn set_headers(&mut self, headers: Vec<Header>) {
+        self.headers = Some(headers);
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
+    }
+
+    fn id(&self) -> StreamId {
+        self.stream_id
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed
+    }
+}
