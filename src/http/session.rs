@@ -1,6 +1,15 @@
 //! Defines the interface for the session-level management of HTTP/2
 //! communication. This is effectively an API that allows hooking into an
 //! HTTP/2 connection in order to handle events arising on the connection.
+//!
+//! It also provides a default implementation of this interface, the
+//! `DefaultSession`. This implementation is based on keeping a mapping of
+//! valid stream IDs to instances of `Stream` objects. When the session
+//! receives a callback for a particular stream ID, it first validates that
+//! it represents a valid stream ID and then delegates to the appropriate
+//! action of a `Stream`. This allows clients to easily vary the stream-level
+//! logic, without worrying about handling the book-keeping tasks of which
+//! streams are active.
 use std::collections::HashMap;
 use super::{StreamId, Header};
 
