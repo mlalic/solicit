@@ -25,6 +25,7 @@ pub enum HttpError {
     UnknownFrameType,
     InvalidFrame,
     CompressionError(DecoderError),
+    UnknownStreamId,
     UnableToConnect,
     MalformedResponse,
 }

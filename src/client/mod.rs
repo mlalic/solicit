@@ -2,4 +2,6 @@
 //! directly used to access HTTP/2 servers, i.e. send requests and read
 //! responses.
 
+pub use self::simple::SimpleClient;
+
 mod simple;
