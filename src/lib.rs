@@ -3,6 +3,7 @@ extern crate "rustc-serialize" as rustc_serialize;
 
 pub mod hpack;
 pub mod http;
+pub mod client;
 
 mod tests {
 }
