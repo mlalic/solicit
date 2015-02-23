@@ -5,3 +5,4 @@
 pub use self::simple::SimpleClient;
 
 mod simple;
+mod async;
