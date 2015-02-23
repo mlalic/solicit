@@ -3,6 +3,7 @@
 //! responses.
 
 pub use self::simple::SimpleClient;
+pub use self::async::Client;
 
 mod simple;
 mod async;
