@@ -272,7 +272,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
         match self.conn.recv_frame() {
             Ok(HttpFrame::SettingsFrame(settings)) => {
                 debug!("Correctly received a SETTINGS frame from the server");
-                self.handle_settings_frame(settings);
+                try!(self.handle_settings_frame(settings));
             },
             // Wrong frame received...
             Ok(_) => return Err(HttpError::UnableToConnect),
