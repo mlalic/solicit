@@ -59,6 +59,7 @@ pub trait Stream {
 
 /// An implementation of the `Stream` trait that saves all headers and data
 /// in memory.
+#[derive(Clone)]
 pub struct DefaultStream {
     /// The ID of the stream
     pub stream_id: StreamId,
