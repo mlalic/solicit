@@ -11,6 +11,7 @@
 //! logic, without worrying about handling the book-keeping tasks of which
 //! streams are active.
 use std::collections::HashMap;
+use std::iter::FromIterator;
 use super::{StreamId, Header};
 
 /// A trait that defines methods that need to be defined in order to track the
@@ -146,6 +147,18 @@ impl<S> DefaultSession<S> where S: Stream {
     pub fn new_stream(&mut self, stream_id: StreamId) {
         self.streams.insert(stream_id, Stream::new(stream_id));
     }
+
+    /// Returns all streams that are closed and tracked by the session.
+    ///
+    /// The streams are moved out of the session.
+    pub fn get_closed(&mut self) -> Vec<S> {
+        let ids: Vec<_> = self.streams.iter()
+                              .filter_map(|(i, s)| {
+                                  if s.is_closed() { Some(*i) } else { None }
+                              })
+                              .collect();
+        FromIterator::from_iter(ids.into_iter().map(|i| self.streams.remove(&i).unwrap()))
+    }
 }
 
 impl<S> Session for DefaultSession<S> where S: Stream {
@@ -230,5 +243,13 @@ mod tests {
         assert!(session.get_stream(1).unwrap().closed);
         // but not the other one.
         assert!(!session.get_stream(3).unwrap().closed);
+        // Sanity check: both streams still found in the session
+        assert_eq!(session.streams.len(), 2);
+        // The closed stream is returned...
+        let closed = session.get_closed();
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].id(), 1);
+        // ...and is also removed from the session!
+        assert_eq!(session.streams.len(), 1);
     }
 }
