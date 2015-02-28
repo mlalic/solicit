@@ -35,7 +35,7 @@ impl<'a> Iterator for DynamicTableIter<'a> {
 
     fn next(&mut self) -> Option<(&'a [u8], &'a [u8])> {
         match self.inner.next() {
-            Some(ref header) => Some((&header.0[0..], &header.1[0..])),
+            Some(ref header) => Some((&header.0, &header.1)),
             None => None,
         }
     }
@@ -318,7 +318,7 @@ impl<'a> HeaderTable<'a> {
             if dynamic_index < self.dynamic_table.len() {
                 match self.dynamic_table.get(dynamic_index) {
                     Some(&(ref name, ref value)) => {
-                        Some((&name[0..], &value[0..]))
+                        Some((name, value))
                     },
                     None => None
                 }
@@ -622,7 +622,7 @@ mod tests {
         table.add_header(header.0.clone(), header.1.clone());
 
         assert_eq!(table.get_from_table(STATIC_TABLE.len() + 1).unwrap(),
-                   ((&header.0[0..], &header.1[0..])));
+                   ((&header.0[..], &header.1[..])));
     }
 
     /// Tests that the `iter` method of the `HeaderTable` returns an iterator

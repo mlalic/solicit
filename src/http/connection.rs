@@ -86,7 +86,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
     pub fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
         debug!("Sending frame ... {:?}", frame.get_header());
-        try_io!(self.stream.write_all(&frame.serialize()[]));
+        try_io!(self.stream.write_all(&frame.serialize()));
         Ok(())
     }
 
@@ -159,7 +159,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
         // This is completely safe since we *just* allocated the vector with
         // the same capacity.
         unsafe { buf.set_len(length); }
-        try_io!(self.stream.read_exact(&mut buf[]));
+        try_io!(self.stream.read_exact(&mut buf));
 
         Ok(buf)
     }
@@ -585,7 +585,7 @@ mod tests {
                 &HttpFrame::HeadersFrame(ref frame) => frame.serialize(),
                 &HttpFrame::SettingsFrame(ref frame) => frame.serialize(),
             };
-            buf.push_all(&serialized[]);
+            buf.push_all(&serialized);
         }
 
         buf

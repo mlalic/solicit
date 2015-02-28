@@ -556,20 +556,20 @@ mod tests {
         {
             let full_string: Vec<u8> = (0u8..200).collect();
             let mut encoded = encode_integer(full_string.len(), 7);
-            encoded.push_all(&full_string[0..]);
+            encoded.push_all(&full_string);
 
             assert_eq!(
                 (full_string, encoded.len()),
-                decode_string(&encoded[0..]).ok().unwrap());
+                decode_string(&encoded).ok().unwrap());
         }
         {
             let full_string: Vec<u8> = (0u8..127).collect();
             let mut encoded = encode_integer(full_string.len(), 7);
-            encoded.push_all(&full_string[0..]);
+            encoded.push_all(&full_string);
 
             assert_eq!(
                 (full_string, encoded.len()),
-                decode_string(&encoded[0..]).ok().unwrap());
+                decode_string(&encoded).ok().unwrap());
         }
     }
 
@@ -1183,7 +1183,7 @@ mod tests {
         for raw_message in raw_messages.iter() {
             assert!(
                 is_decoder_error(&DecoderError::HeaderIndexOutOfBounds,
-                                 &decoder.decode(&raw_message[0..])),
+                                 &decoder.decode(&raw_message)),
                 "Expected index out of bounds");
         }
     }
@@ -1301,7 +1301,7 @@ mod interop_tests {
                     Decodable::decode(d).and_then(|res: String| {
                         // If valid, parse out the octets from the String by
                         // considering it a hex encoded byte sequence.
-                        Ok(res[0..].from_hex().unwrap())
+                        Ok(res.from_hex().unwrap())
                     })
                 })),
                 headers: try!(d.read_struct_field("headers", 0, |d| {
@@ -1412,14 +1412,14 @@ mod interop_tests {
                 }
             };
 
-            json::decode(&raw_story[0..]).unwrap()
+            json::decode(&raw_story).unwrap()
         };
         // Set up the decoder
         let mut decoder = Decoder::new();
 
         // Now check whether we correctly decode each case
         for case in story.cases.iter() {
-            let decoded = decoder.decode(&case.wire_bytes[0..]).unwrap();
+            let decoded = decoder.decode(&case.wire_bytes).unwrap();
             assert_eq!(decoded, case.headers);
         }
     }

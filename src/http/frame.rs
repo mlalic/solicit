@@ -301,7 +301,7 @@ impl DataFrame {
                 None => return None,
             }
         } else {
-            (&payload[], None)
+            (payload, None)
         };
 
         Some((data.to_vec(), pad_len))
@@ -336,7 +336,7 @@ impl Frame for DataFrame {
         // Everything has been validated so far: try to extract the data from
         // the payload.
         let padded = (flags & DataFlag::Padded.bitmask()) != 0;
-        match DataFrame::parse_payload(&raw_frame.payload[], padded) {
+        match DataFrame::parse_payload(&raw_frame.payload, padded) {
             Some((data, Some(padding_len))) => {
                 // The data got extracted (from a padded frame)
                 Some(DataFrame {
@@ -388,11 +388,11 @@ impl Frame for DataFrame {
         if self.is_padded() {
             let pad_len = self.padding_len.unwrap_or(0);
             buf.push(pad_len);
-            buf.push_all(&self.data[]);
+            buf.push_all(&self.data);
             // The padding bytes MUST be 0
             for _ in 0..pad_len { buf.push(0); }
         } else {
-            buf.push_all(&self.data[]);
+            buf.push_all(&self.data);
         }
 
         buf
@@ -649,7 +649,7 @@ impl Frame for SettingsFrame {
             }
         }
 
-        match SettingsFrame::parse_payload(&raw_frame.payload[]) {
+        match SettingsFrame::parse_payload(&raw_frame.payload) {
             Some(settings) => {
                 Some(SettingsFrame {
                     settings: settings,
@@ -923,12 +923,12 @@ impl Frame for HeadersFrame {
         // the frame is padded.
         let padded = (flags & HeadersFlag::Padded.bitmask()) != 0;
         let (actual, pad_len) = if padded {
-            match parse_padded_payload(&raw_frame.payload[]) {
+            match parse_padded_payload(&raw_frame.payload) {
                 Some((data, pad_len)) => (data, Some(pad_len)),
                 None => return None,
             }
         } else {
-            (&raw_frame.payload[], None)
+            (&raw_frame.payload[..], None)
         };
 
         // From the actual payload we extract the stream dependency info, if
@@ -937,7 +937,7 @@ impl Frame for HeadersFrame {
         let (data, stream_dep) = if priority {
             (&actual[5..], Some(StreamDependency::parse(&actual[..5])))
         } else {
-            (&actual[], None)
+            (actual, None)
         };
 
         Some(HeadersFrame {
@@ -995,7 +995,7 @@ impl Frame for HeadersFrame {
             buf.push_all(&dep_buf);
         }
         // Now the actual headers fragment
-        buf.push_all(&self.header_fragment[]);
+        buf.push_all(&self.header_fragment);
         // Finally, add the trailing padding, if required
         if padded {
             for _ in 0..self.padding_len.unwrap_or(0) { buf.push(0); }
@@ -1141,10 +1141,10 @@ mod tests {
         // A header with the flag indicating no padding
         let header = (payload.len() as u32, 0u8, 0u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload[]);
+        let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data[], data);
+        assert_eq!(&frame.data, &data);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -1158,10 +1158,10 @@ mod tests {
         // A header with the flag indicating padding
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload[]);
+        let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data[], data);
+        assert_eq!(&frame.data, &data);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -1181,10 +1181,10 @@ mod tests {
         // A header with the flag indicating no padding
         let header = (payload.len() as u32, 0u8, 0u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload[]);
+        let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data[], data);
+        assert_eq!(&frame.data, &data);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -1228,10 +1228,10 @@ mod tests {
         let payload = [];
         let header = (payload.len() as u32, 0u8, 0u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload[]);
+        let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data -- i.e. an empty array?
-        assert_eq!(&frame.data[], []);
+        assert_eq!(&frame.data, &[]);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -1260,10 +1260,10 @@ mod tests {
         // A header with the flag indicating padding
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload[]);
+        let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data[], data);
+        assert_eq!(&frame.data, &data);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -1292,7 +1292,7 @@ mod tests {
         let expected = {
             let headers = pack_header(&(0, 0, 0, 1));
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers[]);
+            res.push_all(&headers);
 
             res
         };
@@ -1312,8 +1312,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&(6, 0, 0, 1));
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers[]);
-            res.push_all(&data[]);
+            res.push_all(&headers);
+            res.push_all(&data);
 
             res
         };
@@ -1335,11 +1335,11 @@ mod tests {
             let headers = pack_header(&(6 + 1 + 5, 0, 8, 1));
             let mut res: Vec<u8> = Vec::new();
             // Headers
-            res.push_all(&headers[]);
+            res.push_all(&headers);
             // Padding len
             res.push(5);
             // Data
-            res.push_all(&data[]);
+            res.push_all(&data);
             // Actual padding
             for _ in 0..5 { res.push(0); }
 
@@ -1363,11 +1363,11 @@ mod tests {
             let headers = pack_header(&(6 + 1, 0, 8, 1));
             let mut res: Vec<u8> = Vec::new();
             // Headers
-            res.push_all(&headers[]);
+            res.push_all(&headers);
             // Padding len
             res.push(0);
             // Data
-            res.push_all(&data[]);
+            res.push_all(&data);
 
             res
         };
@@ -1495,7 +1495,7 @@ mod tests {
         // A header with the flag indicating no padding
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
 
         // The frame correctly interprets the settings?
         assert_eq!(frame.settings, vec![HttpSetting::HeaderTableSize(1)]);
@@ -1520,7 +1520,7 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
 
         // The frame correctly interprets the settings?
         assert_eq!(frame.settings, settings);
@@ -1547,7 +1547,7 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
 
         // All the settings are returned, even the duplicates
         assert_eq!(frame.settings, settings);
@@ -1575,14 +1575,14 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
 
         // All the settings are returned twice, but the unkown isn't found in
         // the returned Vec. For now, we ignore the unknown setting fully, not
         // exposing it in any way to any other higher-level clients.
         assert_eq!(frame.settings.len(), 4);
-        assert_eq!(&frame.settings[0..2], &settings[]);
-        assert_eq!(&frame.settings[2..], &settings[]);
+        assert_eq!(&frame.settings[0..2], &settings[..]);
+        assert_eq!(&frame.settings[2..], &settings[..]);
         assert!(!frame.is_ack());
     }
 
@@ -1593,7 +1593,7 @@ mod tests {
         let payload = [];
         let header = (payload.len() as u32, 4, 1, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload[]);
+        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
 
         // No settings there?
         assert_eq!(frame.settings, vec![]);
@@ -1744,7 +1744,7 @@ mod tests {
         {
             let buf = [127, 255, 255, 255, 5];
 
-            let dep = StreamDependency::parse(&buf[]);
+            let dep = StreamDependency::parse(&buf);
 
             assert_eq!(dep.stream_id, (1 << 31) - 1);
             assert_eq!(dep.weight, 5);
@@ -1855,7 +1855,7 @@ mod tests {
 
             buf
         };
-        let payload = build_padded_frame_payload(&full[], 4);
+        let payload = build_padded_frame_payload(&full, 4);
         let header = (payload.len() as u32, 0x1, 0x20 | 0x8, 1);
 
         let frame = build_test_frame::<HeadersFrame>(&header, &payload);
@@ -1904,8 +1904,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers[]);
-            res.push_all(&payload[]);
+            res.push_all(&headers);
+            res.push_all(&payload);
 
             res
         };
@@ -1925,8 +1925,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers[]);
-            res.push_all(&payload[]);
+            res.push_all(&headers);
+            res.push_all(&payload);
 
             res
         };
@@ -1954,8 +1954,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers[]);
-            res.push_all(&payload[]);
+            res.push_all(&headers);
+            res.push_all(&payload);
 
             res
         };
@@ -1979,13 +1979,13 @@ mod tests {
 
             buf
         };
-        let payload = build_padded_frame_payload(&full[], 4);
+        let payload = build_padded_frame_payload(&full, 4);
         let header = (payload.len() as u32, 0x1, 0x20 | 0x8, 1);
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers[]);
-            res.push_all(&payload[]);
+            res.push_all(&headers);
+            res.push_all(&payload);
 
             res
         };

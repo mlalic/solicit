@@ -124,7 +124,7 @@ impl<'a> Encoder<'a> {
         let mut encoded: Vec<u8> = Vec::new();
 
         for header in headers.iter() {
-            match self.header_table.find_header((&header.0[], &header.1[])) {
+            match self.header_table.find_header((&header.0, &header.1)) {
                 None => {
                     // The name of the header is in no tables: need to encode
                     // it with both a literal name and value.
@@ -170,8 +170,8 @@ impl<'a> Encoder<'a> {
         };
 
         buf.push(mask);
-        self.encode_string_literal(&header.0[0..], buf);
-        self.encode_string_literal(&header.1[0..], buf);
+        self.encode_string_literal(&header.0, buf);
+        self.encode_string_literal(&header.1, buf);
     }
 
     /// Encodes a string literal and places the result in the given buffer
@@ -181,7 +181,7 @@ impl<'a> Encoder<'a> {
     /// produces a string literal representations, according to the HPACK spec
     /// section 5.2.
     fn encode_string_literal(&mut self, octet_str: &[u8], buf: &mut Vec<u8>) {
-        buf.push_all(&encode_integer(octet_str.len(), 7)[0..]);
+        buf.push_all(&encode_integer(octet_str.len(), 7));
         buf.push_all(octet_str);
     }
 
@@ -196,9 +196,9 @@ impl<'a> Encoder<'a> {
 
         let mut encoded_index = encode_integer(header.0, prefix);
         encoded_index[0] |= mask;
-        buf.push_all(&encoded_index[0..]);
+        buf.push_all(&encoded_index);
         // So far, we rely on just one strategy for encoding string literals.
-        self.encode_string_literal(&header.1[0..], buf);
+        self.encode_string_literal(&header.1, buf);
     }
 
     /// Encodes an indexed header (a header that is fully in the header table)
@@ -211,7 +211,7 @@ impl<'a> Encoder<'a> {
         // `1xxxxxxx` for indexed headers.
         encoded[0] |= 0x80;
 
-        buf.push_all(&encoded[0..]);
+        buf.push_all(&encoded);
     }
 }
 
@@ -239,7 +239,7 @@ mod tests {
     /// A `bool` indicating whether such a decoding can be performed.
     fn is_decodable(buf: &Vec<u8>, headers: &Vec<(Vec<u8>, Vec<u8>)>) -> bool {
         let mut decoder = Decoder::new();
-        match decoder.decode(&buf[0..]).ok() {
+        match decoder.decode(buf).ok() {
             Some(h) => h == *headers,
             None => false,
         }
