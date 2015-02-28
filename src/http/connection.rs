@@ -756,7 +756,7 @@ mod tests {
         let mut conn = build_http_conn(&vec![]);
 
         for frame in frames.into_iter() {
-            match frame {
+            let _ = match frame {
                 HttpFrame::DataFrame(frame) => conn.send_frame(frame),
                 HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
                 HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
@@ -780,7 +780,7 @@ mod tests {
         let mut conn = build_http_conn(&vec![]);
 
         for frame in frames.into_iter() {
-            match frame {
+            let _ = match frame {
                 HttpFrame::DataFrame(frame) => conn.send_frame(frame),
                 HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
                 HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
@@ -899,7 +899,7 @@ mod tests {
         let mut conn = ClientConnection::with_connection(
             build_http_conn(&vec![]), TestSession::new());
 
-        conn.send_request(req);
+        conn.send_request(req).unwrap();
         let written = conn.conn.stream.get_written();
 
         let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(written);
