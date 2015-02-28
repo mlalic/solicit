@@ -135,7 +135,7 @@ impl<'a> Encoder<'a> {
                     // The name of the header is at the given index, but the
                     // value does not match the current one: need to encode
                     // only the value as a literal.
-                    self.encode_literal(header, false, &mut encoded);
+                    self.encode_indexed_name((index, &header.1), false, &mut encoded);
                 },
                 Some((index, true)) => {
                     // The full header was found in one of the tables, so we
@@ -306,6 +306,26 @@ mod tests {
         assert_eq!(
             encoder.header_table.get_from_table(62).unwrap(),
             (&headers[0].0[..], &headers[0].1[..]));
+    }
+
+    /// Tests that when a header name is indexed, but the value isn't, the
+    /// header is represented by an index (for the name) and a literal (for
+    /// the value).
+    #[test]
+    fn test_name_indexed_value_not() {
+        let mut encoder: Encoder = Encoder::new();
+        // `:method` is in the static table, but only for GET and POST
+        let headers = vec![
+            (b":method".to_vec(), b"PUT".to_vec()),
+        ];
+
+        let result = encoder.encode(&headers);
+
+        // The first byte represents the index in the header table: first
+        // occurrence of `:method` is at index 2.
+        assert_eq!(result[0], 2);
+        // The rest of it correctly represents PUT?
+        assert_eq!(&result[1..], &[3, b'P', b'U', b'T']);
     }
 
     /// Tests that multiple headers are correctly encoded (i.e. can be decoded
