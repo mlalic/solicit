@@ -205,7 +205,7 @@ impl<S> Session for DefaultSession<S> where S: Stream {
 mod tests {
     use super::{
         Session, DefaultSession,
-        Stream, DefaultStream,
+        Stream,
     };
 
     /// Tests that a `DefaultSession` notifies the correct stream when the
