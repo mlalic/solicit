@@ -60,7 +60,7 @@ fn decode_integer(buf: &[u8], prefix_size: u8)
 
     for &b in buf[1..].iter() {
         total += 1;
-        value += ((b & 127) as usize) * (1us << m);
+        value += ((b & 127) as usize) * (1 << m);
         m += 7;
 
         if b & 128 != 128 {
@@ -405,19 +405,19 @@ mod tests {
     /// Tests that valid integer encodings are properly decoded.
     #[test]
     fn test_decode_integer() {
-        assert_eq!((10us, 1),
+        assert_eq!((10, 1),
                    decode_integer(&[10], 5).ok().unwrap());
-        assert_eq!((1337us, 3),
+        assert_eq!((1337, 3),
                    decode_integer(&[31, 154, 10], 5).ok().unwrap());
-        assert_eq!((1337us, 3),
+        assert_eq!((1337, 3),
                    decode_integer(&[31 + 32, 154, 10], 5).ok().unwrap());
-        assert_eq!((1337us, 3),
+        assert_eq!((1337, 3),
                    decode_integer(&[31 + 64, 154, 10], 5).ok().unwrap());
-        assert_eq!((1337us, 3),
+        assert_eq!((1337, 3),
                    decode_integer(&[31, 154, 10, 111, 22], 5).ok().unwrap());
 
-        assert_eq!((127us, 2), decode_integer(&[255, 0], 7).ok().unwrap());
-        assert_eq!((127us, 2), decode_integer(&[127, 0], 7).ok().unwrap());
+        assert_eq!((127, 2), decode_integer(&[255, 0], 7).ok().unwrap());
+        assert_eq!((127, 2), decode_integer(&[127, 0], 7).ok().unwrap());
     }
 
     /// A helper macro that asserts that a given `DecoderResult` represents
