@@ -418,6 +418,7 @@ mod tests {
 
         assert_eq!((127, 2), decode_integer(&[255, 0], 7).ok().unwrap());
         assert_eq!((127, 2), decode_integer(&[127, 0], 7).ok().unwrap());
+        assert_eq!((255, 3), decode_integer(&[127, 128, 1], 7).ok().unwrap());
     }
 
     /// A helper macro that asserts that a given `DecoderResult` represents

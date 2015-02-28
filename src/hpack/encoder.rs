@@ -227,6 +227,8 @@ mod tests {
         assert_eq!(encode_integer(10, 5), [10]);
         assert_eq!(encode_integer(1337, 5), [31, 154, 10]);
         assert_eq!(encode_integer(127, 7), [127, 0]);
+        assert_eq!(encode_integer(255, 8), [255, 0]);
+        assert_eq!(encode_integer(255, 7), [127, 128, 1]);
     }
 
     /// A helper function that checks whether the given buffer can be decoded
