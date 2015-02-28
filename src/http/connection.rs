@@ -530,21 +530,21 @@ mod tests {
     }
 
     impl Session for TestSession {
-        fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
+        fn new_data_chunk(&mut self, _: StreamId, data: &[u8]) {
             if !self.silent {
                 assert_eq!(&self.chunks[self.curr_chunk], &data);
             }
             self.curr_chunk += 1;
         }
 
-        fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>) {
+        fn new_headers(&mut self, _: StreamId, headers: Vec<Header>) {
             if !self.silent {
                 assert_eq!(self.headers[self.curr_header], headers);
             }
             self.curr_header += 1;
         }
 
-        fn end_of_stream(&mut self, stream_id: StreamId) {}
+        fn end_of_stream(&mut self, _: StreamId) {}
     }
 
     /// A test that makes sure that the `StubTransportStream` exhibits
