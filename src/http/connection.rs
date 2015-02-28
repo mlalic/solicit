@@ -585,7 +585,7 @@ mod tests {
                 &HttpFrame::HeadersFrame(ref frame) => frame.serialize(),
                 &HttpFrame::SettingsFrame(ref frame) => frame.serialize(),
             };
-            buf.push_all(&serialized);
+            buf.extend(serialized.into_iter());
         }
 
         buf
@@ -663,7 +663,7 @@ mod tests {
         ];
         let mut conn = build_http_conn(&{
             let mut buf: Vec<u8> = Vec::new();
-            buf.push_all(&build_stub_from_frames(&frames));
+            buf.extend(build_stub_from_frames(&frames).into_iter());
             // We add an extra trailing byte (a start of the header of another
             // frame).
             buf.push(0);
@@ -690,10 +690,10 @@ mod tests {
         ];
         let mut conn = build_http_conn(&{
             let mut buf: Vec<u8> = Vec::new();
-            buf.push_all(&build_stub_from_frames(&frames));
+            buf.extend(build_stub_from_frames(&frames).into_iter());
             // We add a header indicating that there should be 1 byte of payload
             let header = (1u32, 0u8, 0u8, 1u32);
-            buf.push_all(&pack_header(&header));
+            buf.extend(pack_header(&header).to_vec().into_iter());
             // ...but we don't add any payload!
             buf
         });
@@ -734,7 +734,7 @@ mod tests {
             let mut buf: Vec<u8> = Vec::new();
             // Frame type 10 with a payload of length 1 on stream 1
             let header = (1u32, 10u8, 0u8, 1u32);
-            buf.push_all(&pack_header(&header));
+            buf.extend(pack_header(&header).to_vec().into_iter());
             buf.push(1);
             buf
         });

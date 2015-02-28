@@ -383,16 +383,16 @@ impl Frame for DataFrame {
     fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(9 + self.payload_len() as usize);
         // First the header...
-        buf.push_all(&pack_header(&self.get_header()));
+        buf.extend(pack_header(&self.get_header()).to_vec().into_iter());
         // ...now the data, depending on whether it's wrapped or not
         if self.is_padded() {
             let pad_len = self.padding_len.unwrap_or(0);
             buf.push(pad_len);
-            buf.push_all(&self.data);
+            buf.extend(self.data.clone().into_iter());
             // The padding bytes MUST be 0
             for _ in 0..pad_len { buf.push(0); }
         } else {
-            buf.push_all(&self.data);
+            buf.extend(self.data.clone().into_iter());
         }
 
         buf
@@ -686,10 +686,10 @@ impl Frame for SettingsFrame {
     fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.payload_len() as usize);
         // First the header...
-        buf.push_all(&pack_header(&self.get_header()));
+        buf.extend(pack_header(&self.get_header()).to_vec().into_iter());
         // ...now the settings
         for setting in self.settings.iter() {
-            buf.push_all(&setting.serialize());
+            buf.extend(setting.serialize().to_vec().into_iter());
         }
 
         buf
@@ -980,7 +980,7 @@ impl Frame for HeadersFrame {
     fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.payload_len() as usize);
         // First the header...
-        buf.push_all(&pack_header(&self.get_header()));
+        buf.extend(pack_header(&self.get_header()).to_vec().into_iter());
         // Now the length of the padding, if any.
         let padded = self.is_set(HeadersFlag::Padded);
         if padded {
@@ -992,10 +992,10 @@ impl Frame for HeadersFrame {
                 Some(ref dep) => dep.serialize(),
                 None => panic!("Priority flag set, but no dependency information given"),
             };
-            buf.push_all(&dep_buf);
+            buf.extend(dep_buf.to_vec().into_iter());
         }
         // Now the actual headers fragment
-        buf.push_all(&self.header_fragment);
+        buf.extend(self.header_fragment.clone().into_iter());
         // Finally, add the trailing padding, if required
         if padded {
             for _ in 0..self.padding_len.unwrap_or(0) { buf.push(0); }
@@ -1126,7 +1126,7 @@ mod tests {
         let sz = 1 + data.len() + pad_len as usize;
         let mut payload: Vec<u8> = Vec::with_capacity(sz);
         payload.push(pad_len);
-        payload.push_all(data);
+        payload.extend(data.to_vec().into_iter());
         for _ in 0..pad_len { payload.push(0); }
 
         payload
@@ -1292,7 +1292,7 @@ mod tests {
         let expected = {
             let headers = pack_header(&(0, 0, 0, 1));
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers);
+            res.extend(headers.to_vec().into_iter());
 
             res
         };
@@ -1312,8 +1312,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&(6, 0, 0, 1));
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers);
-            res.push_all(&data);
+            res.extend(headers.to_vec().into_iter());
+            res.extend(data.into_iter());
 
             res
         };
@@ -1335,11 +1335,11 @@ mod tests {
             let headers = pack_header(&(6 + 1 + 5, 0, 8, 1));
             let mut res: Vec<u8> = Vec::new();
             // Headers
-            res.push_all(&headers);
+            res.extend(headers.to_vec().into_iter());
             // Padding len
             res.push(5);
             // Data
-            res.push_all(&data);
+            res.extend(data.into_iter());
             // Actual padding
             for _ in 0..5 { res.push(0); }
 
@@ -1363,11 +1363,11 @@ mod tests {
             let headers = pack_header(&(6 + 1, 0, 8, 1));
             let mut res: Vec<u8> = Vec::new();
             // Headers
-            res.push_all(&headers);
+            res.extend(headers.to_vec().into_iter());
             // Padding len
             res.push(0);
             // Data
-            res.push_all(&data);
+            res.extend(data.into_iter());
 
             res
         };
@@ -1514,7 +1514,7 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
 
             res
         };
@@ -1541,7 +1541,7 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
 
             res
         };
@@ -1567,9 +1567,9 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
-            res.push_all(&[0, 10, 0, 0, 0, 0]);
-            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
+            res.extend(vec![0, 10, 0, 0, 0, 0].into_iter());
+            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
 
             res
         };
@@ -1613,7 +1613,7 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.push_all(&s); }
+            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
 
             res
         };
@@ -1661,8 +1661,8 @@ mod tests {
         frame.add_setting(HttpSetting::EnablePush(0));
         let expected = {
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&pack_header(&(6, 4, 0, 0)));
-            res.push_all(&HttpSetting::EnablePush(0).serialize());
+            res.extend(pack_header(&(6, 4, 0, 0)).to_vec().into_iter());
+            res.extend(HttpSetting::EnablePush(0).serialize().to_vec().into_iter());
 
             res
         };
@@ -1681,9 +1681,9 @@ mod tests {
         frame.add_setting(HttpSetting::MaxHeaderListSize(0));
         let expected = {
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&pack_header(&(6 * 2, 4, 0, 0)));
-            res.push_all(&HttpSetting::EnablePush(0).serialize());
-            res.push_all(&HttpSetting::MaxHeaderListSize(0).serialize());
+            res.extend(pack_header(&(6 * 2, 4, 0, 0)).to_vec().into_iter());
+            res.extend(HttpSetting::EnablePush(0).serialize().to_vec().into_iter());
+            res.extend(HttpSetting::MaxHeaderListSize(0).serialize().to_vec().into_iter());
 
             res
         };
@@ -1826,8 +1826,8 @@ mod tests {
         let dep = StreamDependency::new(0, 5, true);
         let payload = {
             let mut buf: Vec<u8> = Vec::new();
-            buf.push_all(&dep.serialize());
-            buf.push_all(&data);
+            buf.extend(dep.serialize().to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
 
             buf
         };
@@ -1850,8 +1850,8 @@ mod tests {
         let dep = StreamDependency::new(0, 5, true);
         let full = {
             let mut buf: Vec<u8> = Vec::new();
-            buf.push_all(&dep.serialize());
-            buf.push_all(&data);
+            buf.extend(dep.serialize().to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
 
             buf
         };
@@ -1904,8 +1904,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers);
-            res.push_all(&payload);
+            res.extend(headers.to_vec().into_iter());
+            res.extend(payload.into_iter());
 
             res
         };
@@ -1925,8 +1925,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers);
-            res.push_all(&payload);
+            res.extend(headers.to_vec().into_iter());
+            res.extend(payload.into_iter());
 
             res
         };
@@ -1945,8 +1945,8 @@ mod tests {
         let dep = StreamDependency::new(0, 5, true);
         let payload = {
             let mut buf: Vec<u8> = Vec::new();
-            buf.push_all(&dep.serialize());
-            buf.push_all(&data);
+            buf.extend(dep.serialize().to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
 
             buf
         };
@@ -1954,8 +1954,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers);
-            res.push_all(&payload);
+            res.extend(headers.to_vec().into_iter());
+            res.extend(payload.into_iter());
 
             res
         };
@@ -1974,8 +1974,8 @@ mod tests {
         let dep = StreamDependency::new(0, 5, true);
         let full = {
             let mut buf: Vec<u8> = Vec::new();
-            buf.push_all(&dep.serialize());
-            buf.push_all(&data);
+            buf.extend(dep.serialize().to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
 
             buf
         };
@@ -1984,8 +1984,8 @@ mod tests {
         let expected = {
             let headers = pack_header(&header);
             let mut res: Vec<u8> = Vec::new();
-            res.push_all(&headers);
-            res.push_all(&payload);
+            res.extend(headers.to_vec().into_iter());
+            res.extend(payload.into_iter());
 
             res
         };
@@ -2018,8 +2018,8 @@ mod tests {
             let header = (data.len() as u32, 0x1, 0, 1);
             let buf = {
                 let mut buf = Vec::new();
-                buf.push_all(&pack_header(&header));
-                buf.push_all(&data);
+                buf.extend(pack_header(&header).to_vec().into_iter());
+                buf.extend(data.to_vec().into_iter());
                 buf
             };
 
@@ -2034,9 +2034,9 @@ mod tests {
             let header = (data.len() as u32, 0x1, 0, 1);
             let buf = {
                 let mut buf = Vec::new();
-                buf.push_all(&pack_header(&header));
-                buf.push_all(&data);
-                buf.push_all(&[1, 2, 3, 4, 5]);
+                buf.extend(pack_header(&header).to_vec().into_iter());
+                buf.extend(data.to_vec().into_iter());
+                buf.extend(vec![1, 2, 3, 4, 5].into_iter());
                 buf
             };
 
@@ -2051,8 +2051,8 @@ mod tests {
             let header = (data.len() as u32, 0x1, 0, 1);
             let buf = {
                 let mut buf = Vec::new();
-                buf.push_all(&pack_header(&header));
-                buf.push_all(&data[..2]);
+                buf.extend(pack_header(&header).to_vec().into_iter());
+                buf.extend(data[..2].to_vec().into_iter());
                 buf
             };
 
@@ -2063,7 +2063,7 @@ mod tests {
             let header = (0, 0x1, 0, 1);
             let buf = {
                 let mut buf = Vec::new();
-                buf.push_all(&pack_header(&header)[..5]);
+                buf.extend(pack_header(&header)[..5].to_vec().into_iter());
                 buf
             };
 

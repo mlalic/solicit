@@ -90,7 +90,7 @@ impl Stream for DefaultStream {
     }
 
     fn new_data_chunk(&mut self, data: &[u8]) {
-        self.body.push_all(data);
+        self.body.extend(data.to_vec().into_iter());
     }
 
     fn set_headers(&mut self, headers: Vec<Header>) {

@@ -181,8 +181,8 @@ impl<'a> Encoder<'a> {
     /// produces a string literal representations, according to the HPACK spec
     /// section 5.2.
     fn encode_string_literal(&mut self, octet_str: &[u8], buf: &mut Vec<u8>) {
-        buf.push_all(&encode_integer(octet_str.len(), 7));
-        buf.push_all(octet_str);
+        buf.extend(encode_integer(octet_str.len(), 7).into_iter());
+        buf.extend(octet_str.to_vec().into_iter());
     }
 
     /// Encodes a header whose name is indexed and places the result in the
@@ -196,7 +196,7 @@ impl<'a> Encoder<'a> {
 
         let mut encoded_index = encode_integer(header.0, prefix);
         encoded_index[0] |= mask;
-        buf.push_all(&encoded_index);
+        buf.extend(encoded_index.into_iter());
         // So far, we rely on just one strategy for encoding string literals.
         self.encode_string_literal(&header.1, buf);
     }
@@ -211,7 +211,7 @@ impl<'a> Encoder<'a> {
         // `1xxxxxxx` for indexed headers.
         encoded[0] |= 0x80;
 
-        buf.push_all(&encoded);
+        buf.extend(encoded.into_iter());
     }
 }
 
