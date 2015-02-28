@@ -302,7 +302,10 @@ mod tests {
         // - The other 7 bits decode to an integer giving the index in the full
         //   header address space.
         assert_eq!(result[0] ^ 0x80, 62);
-        // assert_eq!(encoder.header_table.get_from_table(62).unwrap(), headers[0]);
+        // The header table actually contains the header at that index?
+        assert_eq!(
+            encoder.header_table.get_from_table(62).unwrap(),
+            (&headers[0].0[..], &headers[0].1[..]));
     }
 
     /// Tests that multiple headers are correctly encoded (i.e. can be decoded
