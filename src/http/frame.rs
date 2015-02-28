@@ -37,10 +37,10 @@ pub type FrameHeader = (u32, u8, u8, u32);
 /// The frame `type` and `flags` components are returned as their original
 /// octet representation, rather than reinterpreted.
 pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
-    let length: u32 = (
+    let length: u32 =
         ((header[0] as u32) << 16) |
         ((header[1] as u32) <<  8) |
-        ((header[2] as u32) <<  0));
+        ((header[2] as u32) <<  0);
     let frame_type = header[3];
     let flags = header[4];
     let stream_id: u32 = unpack_octets_4!(header, 5, u32);
