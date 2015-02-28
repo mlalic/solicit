@@ -56,7 +56,10 @@ fn decode_integer(buf: &[u8], prefix_size: u8)
     // Already one byte used (the prefix)
     let mut total = 1;
     let mut m = 0;
-    let ARBITRARY_OCTET_LIMIT = 10;
+    // The octet limit is chosen such that the maximum allowed *value* can
+    // never overflow an unsigned 32-bit integer. The maximum value of any
+    // integer that can be encoded with 5 octets is ~2^28
+    let octet_limit = 5;
 
     for &b in buf[1..].iter() {
         total += 1;
@@ -68,11 +71,9 @@ fn decode_integer(buf: &[u8], prefix_size: u8)
             return Ok((value, total));
         }
 
-        if total == ARBITRARY_OCTET_LIMIT {
+        if total == octet_limit {
             // The spec tells us that we MUST treat situations where the
-            // encoded representation is too long (in octets) as an error. It
-            // says nothing about *exactly* how big too big is, so for now
-            // we're using an arbitrary limit.
+            // encoded representation is too long (in octets) as an error.
             return Err(
                 DecoderError::IntegerDecodingError(
                     IntegerDecodingError::TooManyOctets))
@@ -419,6 +420,10 @@ mod tests {
         assert_eq!((127, 2), decode_integer(&[255, 0], 7).ok().unwrap());
         assert_eq!((127, 2), decode_integer(&[127, 0], 7).ok().unwrap());
         assert_eq!((255, 3), decode_integer(&[127, 128, 1], 7).ok().unwrap());
+        // The largest allowed integer correctly gets decoded...
+        assert_eq!(
+            (268435710, 5),
+            decode_integer(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF - 128], 8).ok().unwrap());
     }
 
     /// A helper macro that asserts that a given `DecoderResult` represents
@@ -443,6 +448,8 @@ mod tests {
         assert_integer_err!(IntegerDecodingError::TooManyOctets,
                             decode_integer(&[0xFF, 0x80, 0x80, 0x80, 0x80,
                                              0x80, 0x80, 0x80, 0x80, 0x80], 1));
+        assert_integer_err!(IntegerDecodingError::TooManyOctets,
+                            decode_integer(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0], 8));
         assert_integer_err!(IntegerDecodingError::InvalidPrefix,
                             decode_integer(&[10], 0));
         assert_integer_err!(IntegerDecodingError::InvalidPrefix,
