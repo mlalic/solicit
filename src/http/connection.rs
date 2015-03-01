@@ -225,7 +225,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     ///
     /// Sends the client preface, followed by validating the receipt of the
     /// server preface.
-    pub fn init(&mut self) -> Result<(), HttpError> {
+    pub fn init(&mut self) -> HttpResult<()> {
         try!(self.write_preface());
         try!(self.read_preface());
         Ok(())
@@ -238,7 +238,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     ///
     /// # Returns
     /// Any error raised by the underlying connection is propagated.
-    fn write_preface(&mut self) -> Result<(), HttpError> {
+    fn write_preface(&mut self) -> HttpResult<()> {
         // The first part of the client preface is always this sequence of 24
         // raw octets.
         let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
@@ -268,7 +268,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     ///
     /// Additionally, if it is not possible to decode the server preface,
     /// it returns the `HttpError::UnableToConnect` variant.
-    fn read_preface(&mut self) -> Result<(), HttpError> {
+    fn read_preface(&mut self) -> HttpResult<()> {
         match self.conn.recv_frame() {
             Ok(HttpFrame::SettingsFrame(settings)) => {
                 debug!("Correctly received a SETTINGS frame from the server");
