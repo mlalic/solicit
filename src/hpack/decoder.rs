@@ -44,7 +44,7 @@ fn decode_integer(buf: &[u8], prefix_size: u8)
                 IntegerDecodingError::NotEnoughOctets));
     }
 
-    let mask = (1u8 << prefix_size) - 1;
+    let Wrapping(mask) = Wrapping(1u8 << prefix_size) - Wrapping(1);
     let mut value = (buf[0] & mask) as usize;
     if value < (mask as usize) {
         // Value fits in the prefix bits.
@@ -420,6 +420,10 @@ mod tests {
         assert_eq!((127, 2), decode_integer(&[255, 0], 7).ok().unwrap());
         assert_eq!((127, 2), decode_integer(&[127, 0], 7).ok().unwrap());
         assert_eq!((255, 3), decode_integer(&[127, 128, 1], 7).ok().unwrap());
+        assert_eq!((255, 2), decode_integer(&[255, 0], 8).unwrap());
+        assert_eq!((254, 1), decode_integer(&[254], 8).unwrap());
+        assert_eq!((1, 1), decode_integer(&[1], 8).unwrap());
+        assert_eq!((0, 1), decode_integer(&[0], 8).unwrap());
         // The largest allowed integer correctly gets decoded...
         assert_eq!(
             (268435710, 5),

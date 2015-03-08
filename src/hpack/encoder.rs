@@ -38,7 +38,8 @@ use super::HeaderTable;
 /// Only `prefix_size` lowest-order bits of the first byte in the
 /// array are guaranteed to be used.
 pub fn encode_integer(mut value: usize, prefix_size: u8) -> Vec<u8> {
-    let mask: usize = ((1u8 << prefix_size) - 1) as usize;
+    let Wrapping(mask) = Wrapping(1u8 << prefix_size) - Wrapping(1);
+    let mask = mask as usize;
     if value < mask {
         // Right now, the caller would need to be the one to combine
         // the other part of the prefix byte (but would know that it's
@@ -228,6 +229,9 @@ mod tests {
         assert_eq!(encode_integer(1337, 5), [31, 154, 10]);
         assert_eq!(encode_integer(127, 7), [127, 0]);
         assert_eq!(encode_integer(255, 8), [255, 0]);
+        assert_eq!(encode_integer(254, 8), [254]);
+        assert_eq!(encode_integer(1, 8), [1]);
+        assert_eq!(encode_integer(0, 8), [0]);
         assert_eq!(encode_integer(255, 7), [127, 128, 1]);
     }
 
