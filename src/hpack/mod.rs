@@ -359,7 +359,7 @@ impl<'a> HeaderTable<'a> {
                 // If only the name was valid, we continue scanning, hoping to
                 // find one where both the name and value match. We remember
                 // this one, in case such a header isn't found after all.
-                matching_name = Some(i);
+                matching_name = Some(i + 1);
             }
         }
 
@@ -670,13 +670,49 @@ mod tests {
     /// only partially in the static table (only the name), works correctly.
     #[test]
     fn test_find_header_static_partial() {
-        let table = HeaderTable::with_static_table(STATIC_TABLE);
-        let h = (b":method", b"PUT");
+        {
+            let table = HeaderTable::with_static_table(STATIC_TABLE);
+            let h = (b":method", b"PUT");
 
-        if let (index, false) = table.find_header(h).unwrap() {
-            assert_eq!(h.0, STATIC_TABLE[index - 1].0);
-        } else {
-            panic!("The header should have matched only partially");
+            if let (index, false) = table.find_header(h).unwrap() {
+                assert_eq!(h.0, STATIC_TABLE[index - 1].0);
+                // The index is the last one with the corresponding name
+                assert_eq!(3, index);
+            } else {
+                panic!("The header should have matched only partially");
+            }
+        }
+        {
+            let table = HeaderTable::with_static_table(STATIC_TABLE);
+            let h = (b":status", b"333");
+
+            if let (index, false) = table.find_header(h).unwrap() {
+                assert_eq!(h.0, STATIC_TABLE[index - 1].0);
+                // The index is the last one with the corresponding name
+                assert_eq!(14, index);
+            } else {
+                panic!("The header should have matched only partially");
+            }
+        }
+        {
+            let table = HeaderTable::with_static_table(STATIC_TABLE);
+            let h = (b":authority", b"example.com");
+
+            if let (index, false) = table.find_header(h).unwrap() {
+                assert_eq!(h.0, STATIC_TABLE[index - 1].0);
+            } else {
+                panic!("The header should have matched only partially");
+            }
+        }
+        {
+            let table = HeaderTable::with_static_table(STATIC_TABLE);
+            let h = (b"www-authenticate", b"asdf");
+
+            if let (index, false) = table.find_header(h).unwrap() {
+                assert_eq!(h.0, STATIC_TABLE[index - 1].0);
+            } else {
+                panic!("The header should have matched only partially");
+            }
         }
     }
 
@@ -693,6 +729,29 @@ mod tests {
             assert_eq!(index, STATIC_TABLE.len() + 1);
         } else {
             panic!("The header should have matched fully");
+        }
+    }
+
+    /// Tests that searching for an entry in the header table, which should be
+    /// only partially in the dynamic table (only the name), works correctly.
+    #[test]
+    fn test_find_header_dynamic_partial() {
+        let mut table = HeaderTable::with_static_table(STATIC_TABLE);
+        // First add it to the dynamic table
+        {
+            let h = (b"X-Custom-Header", b"stuff");
+            table.add_header(h.0.to_vec(), h.1.to_vec());
+        }
+        // Prepare a search
+        let h = (b"X-Custom-Header", b"different-stuff");
+
+        // It must match only partially
+        if let (index, false) = table.find_header(h).unwrap() {
+            // The index must be the first one in the dynamic table
+            // segment of the header table.
+            assert_eq!(index, STATIC_TABLE.len() + 1);
+        } else {
+            panic!("The header should have matched only partially");
         }
     }
 }

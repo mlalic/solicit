@@ -319,19 +319,36 @@ mod tests {
     /// the value).
     #[test]
     fn test_name_indexed_value_not() {
-        let mut encoder: Encoder = Encoder::new();
-        // `:method` is in the static table, but only for GET and POST
-        let headers = vec![
-            (b":method".to_vec(), b"PUT".to_vec()),
-        ];
+        {
+            let mut encoder: Encoder = Encoder::new();
+            // `:method` is in the static table, but only for GET and POST
+            let headers = vec![
+                (b":method".to_vec(), b"PUT".to_vec()),
+            ];
 
-        let result = encoder.encode(&headers);
+            let result = encoder.encode(&headers);
 
-        // The first byte represents the index in the header table: first
-        // occurrence of `:method` is at index 2.
-        assert_eq!(result[0], 2);
-        // The rest of it correctly represents PUT?
-        assert_eq!(&result[1..], &[3, b'P', b'U', b'T']);
+            // The first byte represents the index in the header table: last
+            // occurrence of `:method` is at index 3.
+            assert_eq!(result[0], 3);
+            // The rest of it correctly represents PUT?
+            assert_eq!(&result[1..], &[3, b'P', b'U', b'T']);
+        }
+        {
+            let mut encoder: Encoder = Encoder::new();
+            // `:method` is in the static table, but only for GET and POST
+            let headers = vec![
+                (b":authority".to_vec(), b"example.com".to_vec()),
+            ];
+
+            let result = encoder.encode(&headers);
+
+            assert_eq!(result[0], 1);
+            // The rest of it correctly represents PUT?
+            assert_eq!(
+                &result[1..],
+                &[11, b'e', b'x', b'a', b'm', b'p', b'l', b'e', b'.', b'c', b'o', b'm'])
+        }
     }
 
     /// Tests that multiple headers are correctly encoded (i.e. can be decoded
