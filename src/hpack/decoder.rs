@@ -1269,8 +1269,9 @@ mod tests {
 #[cfg(feature="interop_tests")]
 #[cfg(test)]
 mod interop_tests {
-    use std::str::from_utf8;
-    use std::old_io::{File, fs};
+    use std::io::Read;
+    use std::fs::{self, File};
+    use std::path::{Path, PathBuf};
     use std::collections::HashMap;
 
     use rustc_serialize::Decoder as JsonDecoder;
@@ -1413,17 +1414,12 @@ mod interop_tests {
     /// passed to the same decoder instance (since each story represents one
     /// coder context). The result returned by the decoder is compared to the
     /// headers stored for that particular block within the story file.
-    fn test_story(story_file_name: &str) {
+    fn test_story(story_file_name: PathBuf) {
         // Set up the story by parsing the given file
         let story: TestStory = {
-            let mut file = File::open(&Path::new(story_file_name));
-            let raw_story = match file.read_to_string() {
-                Ok(raw) => raw,
-                Err(_) => {
-                    panic!(format!("Could not read file {}", story_file_name));
-                }
-            };
-
+            let mut file = File::open(&story_file_name).unwrap();
+            let mut raw_story = String::new();
+            file.read_to_string(&mut raw_story).unwrap();
             json::decode(&raw_story).unwrap()
         };
         // Set up the decoder
@@ -1442,10 +1438,10 @@ mod interop_tests {
     /// It calls the `test_story` function for each file found in the given
     /// directory.
     fn test_fixture_set(fixture_dir: &str) {
-        let files = fs::readdir(&Path::new(fixture_dir)).unwrap();
+        let files = fs::read_dir(&Path::new(fixture_dir)).unwrap();
 
-        for fixture in files.iter() {
-            let file_name = fixture.as_str().unwrap();
+        for fixture in files {
+            let file_name = fixture.unwrap().path();
             debug!("Testing fixture: {:?}", file_name);
             test_story(file_name);
         }
