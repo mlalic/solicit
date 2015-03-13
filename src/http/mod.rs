@@ -2,7 +2,7 @@
 //! an API for using it.
 use std::io;
 
-use super::hpack::decoder::DecoderError;
+use hpack::decoder::DecoderError;
 
 pub mod frame;
 pub mod transport;

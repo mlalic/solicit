@@ -25,7 +25,7 @@ use super::frame::{
     HttpSetting,
     unpack_header,
 };
-use super::super::hpack;
+use hpack;
 
 /// An enum representing all frame variants that can be returned by an
 /// `HttpConnection`.
@@ -403,7 +403,7 @@ mod tests {
     use super::super::transport::TransportStream;
     use super::super::{HttpError, Request, StreamId, Header};
     use super::super::session::Session;
-    use super::super::super::hpack;
+    use hpack;
 
     /// A helper stub implementation of a `TransportStream`.
     ///
