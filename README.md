@@ -1,7 +1,9 @@
 # solicit
 [![Build Status](https://travis-ci.org/mlalic/solicit.svg?branch=master)](https://travis-ci.org/mlalic/solicit)
 
-An HTTP/2 implementation in Rust
+An HTTP/2 implementation in Rust.
+
+[API Documentation](https://mlalic.github.io/solicit/)
 
 # Goals
 
