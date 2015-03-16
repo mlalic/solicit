@@ -43,11 +43,9 @@ Some features that are implemented:
 
 - Connection establishment: only prior knowledge connections (implying a cleartext TCP
   transport-layer connection)
-- The library already provides full support for HPACK (draft-16) decoding.
-  It is tested for interoperability with libraries that have published their
-  encoding results of stories at [http2jp/hpack-test-case](https://github.com/http2jp/hpack-test-case).
-- The HPACK encoder only supports a simple encoding strategy and no Huffman-coding
-  is ever used.
+- HPACK compression and decompression: based on the
+  [`hpack-rs`](https://github.com/mlalic/hpack-rs) crate (which was extracted from
+  `solicit`).
 - The framing layer correctly handles incoming frames, discarding frame types for which
   the handling (parsing, processing) is not yet implemented.
   Handling is implemented for `DATA`, `HEADERS`, and `SETTINGS` frames.
