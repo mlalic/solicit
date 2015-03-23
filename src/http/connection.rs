@@ -242,7 +242,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
         // The first part of the client preface is always this sequence of 24
         // raw octets.
         let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-        try_io!(self.conn.stream.write(&preface));
+        try_io!(self.conn.stream.write(preface));
 
         // It is followed by the client's settings.
         let settings = {

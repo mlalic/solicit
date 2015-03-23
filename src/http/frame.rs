@@ -1806,7 +1806,7 @@ mod tests {
     #[test]
     fn test_headers_frame_parse_with_padding() {
         let data = b"123";
-        let payload = build_padded_frame_payload(&data, 6);
+        let payload = build_padded_frame_payload(data, 6);
         let header = (payload.len() as u32, 0x1, 0x08, 1);
 
         let frame = build_test_frame::<HeadersFrame>(&header, &payload);
@@ -1920,7 +1920,7 @@ mod tests {
     #[test]
     fn test_headers_frame_serialize_with_padding() {
         let data = b"123";
-        let payload = build_padded_frame_payload(&data, 6);
+        let payload = build_padded_frame_payload(data, 6);
         let header = (payload.len() as u32, 0x1, 0x08, 1);
         let expected = {
             let headers = pack_header(&header);
