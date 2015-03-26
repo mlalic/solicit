@@ -290,8 +290,8 @@ impl ClientService {
 ///         println!("The response contains the following headers:");
 ///         for header in response.headers.iter() {
 ///             println!("  {}: {}",
-///                   str::from_utf8(&header.0[]).unwrap(),
-///                   str::from_utf8(&header.1[]).unwrap());
+///                   str::from_utf8(&header.0).unwrap(),
+///                   str::from_utf8(&header.1).unwrap());
 ///         }
 ///     })
 /// }).collect();
