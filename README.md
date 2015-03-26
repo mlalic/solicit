@@ -142,6 +142,8 @@ using the `solicit::htp` API -- see:
 ### Example
 
 ```rust
+#![feature(std_misc)]
+
 use solicit::client::Client;
 use std::thread;
 use std::str;

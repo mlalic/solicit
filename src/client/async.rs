@@ -271,6 +271,7 @@ impl ClientService {
 /// # Example
 ///
 /// ```no_run
+/// #![feature(std_misc)]
 /// use solicit::client::Client;
 /// use std::thread;
 /// use std::str;
