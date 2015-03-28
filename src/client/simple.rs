@@ -54,8 +54,8 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// // response is well formed.)
 /// for header in response.headers.iter() {
 ///     println!("{}: {}",
-///         str::from_utf8(&header.0[]).unwrap(),
-///         str::from_utf8(&header.1[]).unwrap());
+///         str::from_utf8(&header.0).unwrap(),
+///         str::from_utf8(&header.1).unwrap());
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
