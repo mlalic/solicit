@@ -5,5 +5,5 @@ version = "0.0.1"
 authors = ["Marko Lalic <marko.lalic@gmail.com>"]
 
 [dependencies]
-hpack = "^0.0.1"
+hpack = "*"
 log = "^0.2"
