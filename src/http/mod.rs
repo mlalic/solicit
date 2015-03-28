@@ -1,6 +1,7 @@
 //! The module implements the client side of the HTTP/2 protocol and exposes
 //! an API for using it.
 use std::io;
+use std::error::FromError;
 
 use hpack::decoder::DecoderError;
 
@@ -28,6 +29,14 @@ pub enum HttpError {
     UnknownStreamId,
     UnableToConnect,
     MalformedResponse,
+}
+
+/// Implement the trait that allows us to automatically convert `io::Error`s
+/// into an `HttpError` by wrapping the given `io::Error` into an `HttpError::IoError` variant.
+impl FromError<io::Error> for HttpError {
+    fn from_error(err: io::Error) -> HttpError {
+        HttpError::IoError(err)
+    }
 }
 
 /// A convenience `Result` type that has the `HttpError` type as the error

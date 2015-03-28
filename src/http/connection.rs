@@ -9,8 +9,6 @@
 //! `HttpConnection`) that exposes client-specific functions of an HTTP/2
 //! connection, such as sending requests.
 
-use std::io;
-
 use super::session::Session;
 use super::{HttpError, HttpResult, Request};
 use super::transport::TransportStream;
@@ -37,26 +35,6 @@ pub enum HttpFrame {
     DataFrame(DataFrame),
     HeadersFrame(HeadersFrame),
     SettingsFrame(SettingsFrame),
-}
-
-/// A helper macro that can be used on `old_io::Result`s to either unwrap the
-/// result (the same as the `try!` macro) or else wrap the returned `io::Error`
-/// to an `HttpError::IoError` variant and do an early return with such an
-/// error.
-///
-/// This is useful so that the operations that the `HttpConnection` invokes on
-/// its underlying stream can easily be wrapped into an `HttpError` without a
-/// lot of repetitive boilerplate code.
-macro_rules! try_io {
-    ($e:expr) => (
-        match $e {
-            Ok(e) => e,
-            Err(e@io::Error { .. }) => {
-                debug!("ignored error: {:?}", e);
-                return Err(HttpError::IoError(e));
-            }
-        }
-    )
 }
 
 /// The struct implements the HTTP/2 connection level logic.
@@ -86,7 +64,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
     pub fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
         debug!("Sending frame ... {:?}", frame.get_header());
-        try_io!(self.stream.write_all(&frame.serialize()));
+        try!(self.stream.write_all(&frame.serialize()));
         Ok(())
     }
 
@@ -139,7 +117,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// `HttpError::IoError` variant and propagated upwards.
     fn read_header_bytes(&mut self) -> HttpResult<[u8; 9]> {
         let mut buf = [0; 9];
-        try_io!(self.stream.read_exact(&mut buf));
+        try!(self.stream.read_exact(&mut buf));
 
         Ok(buf)
     }
@@ -159,7 +137,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
         // This is completely safe since we *just* allocated the vector with
         // the same capacity.
         unsafe { buf.set_len(length); }
-        try_io!(self.stream.read_exact(&mut buf));
+        try!(self.stream.read_exact(&mut buf));
 
         Ok(buf)
     }
@@ -242,7 +220,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
         // The first part of the client preface is always this sequence of 24
         // raw octets.
         let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-        try_io!(self.conn.stream.write(preface));
+        try!(self.conn.stream.write(preface));
 
         // It is followed by the client's settings.
         let settings = {
