@@ -577,7 +577,7 @@ mod tests {
         ];
         let mut conn = build_http_conn(&build_stub_from_frames(&frames));
 
-        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+        let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
 
         assert_eq!(actual, frames);
@@ -594,7 +594,7 @@ mod tests {
         ];
         let mut conn = build_http_conn(&build_stub_from_frames(&frames));
 
-        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+        let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
 
         assert_eq!(actual, frames);
@@ -648,7 +648,7 @@ mod tests {
             buf
         });
 
-        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+        let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
         // The first frame is correctly read
         assert_eq!(actual, frames);
@@ -676,7 +676,7 @@ mod tests {
             buf
         });
 
-        let actual = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
+        let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
         // The first frame is correctly read
         assert_eq!(actual, frames);
