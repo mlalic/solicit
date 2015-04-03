@@ -1,7 +1,8 @@
 //! The module implements the client side of the HTTP/2 protocol and exposes
 //! an API for using it.
 use std::io;
-use std::error::FromError;
+use std::convert::From;
+use std::error::Error;
 
 use hpack::decoder::DecoderError;
 
@@ -18,8 +19,6 @@ pub type Header = (Vec<u8>, Vec<u8>);
 
 /// An enum representing errors that can arise when performing operations
 /// involving an HTTP/2 connection.
-#[derive(PartialEq)]
-#[derive(Clone)]
 #[derive(Debug)]
 pub enum HttpError {
     IoError(io::Error),
@@ -33,9 +32,30 @@ pub enum HttpError {
 
 /// Implement the trait that allows us to automatically convert `io::Error`s
 /// into an `HttpError` by wrapping the given `io::Error` into an `HttpError::IoError` variant.
-impl FromError<io::Error> for HttpError {
-    fn from_error(err: io::Error) -> HttpError {
+impl From<io::Error> for HttpError {
+    fn from(err: io::Error) -> HttpError {
         HttpError::IoError(err)
+    }
+}
+
+/// Implementation of the `PartialEq` trait as a convenience for tests.
+#[cfg(test)]
+impl PartialEq for HttpError {
+    fn eq(&self, other: &HttpError) -> bool {
+        match (self, other) {
+            (&HttpError::IoError(ref e1), &HttpError::IoError(ref e2)) => {
+                e1.kind() == e2.kind() && e1.description() == e2.description()
+            },
+            (&HttpError::UnknownFrameType, &HttpError::UnknownFrameType) => true,
+            (&HttpError::InvalidFrame, &HttpError::InvalidFrame) => true,
+            (&HttpError::CompressionError(ref e1), &HttpError::CompressionError(ref e2)) => {
+                e1 == e2
+            },
+            (&HttpError::UnknownStreamId, &HttpError::UnknownStreamId) => true,
+            (&HttpError::UnableToConnect, &HttpError::UnableToConnect) => true,
+            (&HttpError::MalformedResponse, &HttpError::MalformedResponse) => true,
+            _ => false,
+        }
     }
 }
 

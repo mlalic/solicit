@@ -432,7 +432,7 @@ mod tests {
     impl io::Read for StubTransportStream {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             if self.closed {
-                Err(io::Error::new(io::ErrorKind::Other, "Closed", None))
+                Err(io::Error::new(io::ErrorKind::Other, "Closed"))
             } else {
                 self.reader.read(buf)
             }
@@ -442,7 +442,7 @@ mod tests {
     impl io::Write for StubTransportStream {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             if self.closed {
-                Err(io::Error::new(io::ErrorKind::Other, "Closed", None))
+                Err(io::Error::new(io::ErrorKind::Other, "Closed"))
             } else {
                 self.writer.write(buf)
             }

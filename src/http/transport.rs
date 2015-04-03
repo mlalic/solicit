@@ -42,8 +42,7 @@ pub trait TransportStream: Read + Write {
                 // error since we were unable to read the minimum amount of
                 // bytes.
                 return Err(io::Error::new(io::ErrorKind::Other,
-                                          "Not enough bytes",
-                                          None));
+                                          "Not enough bytes"));
             }
             total += read;
         }
