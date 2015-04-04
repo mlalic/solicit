@@ -1,7 +1,6 @@
 //! The module contains the implementation of HTTP/2 frames.
 
 use std::mem;
-use std::raw::Repr;
 use super::StreamId;
 
 /// A helper macro that unpacks a sequence of 4 bytes found in the buffer with
@@ -188,7 +187,7 @@ impl RawFrame {
         let header = unpack_header(unsafe {
             assert!(buf.len() >= 9);
             // We just asserted that this transmute is safe.
-            mem::transmute(buf.repr().data)
+            mem::transmute(buf.as_ptr())
         });
         let payload_len = header.0 as usize;
 

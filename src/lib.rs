@@ -1,4 +1,4 @@
-#![feature(core, std_misc)]
+#![feature(std_misc)]
 
 #[macro_use] extern crate log;
 extern crate hpack;
