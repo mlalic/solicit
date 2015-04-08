@@ -63,6 +63,26 @@ impl PartialEq for HttpError {
 /// type and a generic Ok result type.
 pub type HttpResult<T> = Result<T, HttpError>;
 
+/// An enum representing the two possible HTTP schemes.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum HttpScheme {
+    /// The variant corresponding to `http://`
+    Http,
+    /// The variant corresponding to `https://`
+    Https,
+}
+
+impl HttpScheme {
+    /// Returns a byte string representing the scheme.
+    #[inline]
+    pub fn as_bytes(&self) -> &'static [u8] {
+        match *self {
+            HttpScheme::Http => b"http",
+            HttpScheme::Https => b"https",
+        }
+    }
+}
+
 /// A struct representing the full raw response received on an HTTP/2 connection.
 ///
 /// The full body of the response is included, regardless how large it may be.
@@ -145,7 +165,7 @@ pub struct Request {
 
 #[cfg(test)]
 mod tests {
-    use super::{Response, HttpError};
+    use super::{Response, HttpError, HttpScheme};
 
     /// Tests that the `Response` struct correctly parses a status code from
     /// its headers list.
@@ -184,5 +204,13 @@ mod tests {
             assert_eq!(resp.status_code().err().unwrap(),
                        HttpError::MalformedResponse);
         }
+    }
+
+    /// Tests that the `HttpScheme` enum returns the correct scheme strings for
+    /// the two variants.
+    #[test]
+    fn test_scheme_string() {
+        assert_eq!(HttpScheme::Http.as_bytes(), b"http");
+        assert_eq!(HttpScheme::Https.as_bytes(), b"https");
     }
 }
