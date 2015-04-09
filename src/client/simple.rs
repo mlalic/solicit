@@ -1,11 +1,10 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
-use std::net::TcpStream;
-
 use super::super::http::connection::ClientConnection;
 use super::super::http::connection::HttpConnection;
+use super::super::http::transport::TransportStream;
 use super::super::http::session::{DefaultSession, Stream};
-use super::super::http::{StreamId, HttpResult, HttpError, HttpScheme, Response, Header, Request};
+use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Request};
 
 
 /// A struct implementing a simple HTTP/2 client.
@@ -40,14 +39,20 @@ use super::super::http::{StreamId, HttpResult, HttpError, HttpScheme, Response, 
 /// Issue a simple GET request using the helper `get` method.
 ///
 /// ```no_run
+/// use std::net::TcpStream;
+/// use solicit::http::HttpScheme;
+/// use solicit::http::connection::HttpConnection;
 /// use solicit::client::SimpleClient;
 /// use std::str;
 ///
 /// // Connect to an HTTP/2 aware server
-/// let mut client = SimpleClient::connect("nghttp2.org", 80).ok().unwrap();
-/// let response = client.get(b"/", &[]).ok().unwrap();
+/// let conn = HttpConnection::new(TcpStream::connect(&("http2bin.org", 80)).unwrap(),
+///                                HttpScheme::Http,
+///                                "http2bin.org".into());
+/// let mut client = SimpleClient::with_connection(conn).unwrap();
+/// let response = client.get(b"/", &[]).unwrap();
 /// assert_eq!(response.stream_id, 1);
-/// assert_eq!(response.status_code().ok().unwrap(), 200);
+/// assert_eq!(response.status_code().unwrap(), 200);
 /// // Dump the headers and the response body to stdout.
 /// // They are returned as raw bytes for the user to do as they please.
 /// // (Note: in general directly decoding assuming a utf8 encoding might not
@@ -61,22 +66,22 @@ use super::super::http::{StreamId, HttpResult, HttpError, HttpScheme, Response, 
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
 #[unstable = "This is unstable"]
-pub struct SimpleClient {
+pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
-    conn: ClientConnection<TcpStream, DefaultSession>,
+    conn: ClientConnection<S, DefaultSession>,
     /// Holds the ID that can be assigned to the next stream to be opened by the
     /// client.
     next_stream_id: u32,
 }
 
-impl SimpleClient {
-    /// Establishes an HTTP/2 connection to a server, given its host name and
-    /// port number. If it is not possible to establish the connection, an error
-    /// is returned.
-    pub fn connect(host: &str, port: u16) -> HttpResult<SimpleClient> {
-        let conn = HttpConnection::new(try!(TcpStream::connect(&(host, port))),
-                                       HttpScheme::Http,
-                                       host.into());
+impl<S> SimpleClient<S> where S: TransportStream {
+    /// Create a new `SimpleClient` instance that will use the given `HttpConnection`
+    /// to communicate to the server.
+    ///
+    /// It assumes that the connection is in an uninitialized state and will try
+    /// to send the client preface and make sure it receives the server preface
+    /// before returning.
+    pub fn with_connection(conn: HttpConnection<S>) -> HttpResult<SimpleClient<S>> {
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, DefaultSession::new()),
             next_stream_id: 1,
