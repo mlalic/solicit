@@ -167,6 +167,24 @@ impl<S> HttpConnection<S> where S: TransportStream {
     }
 }
 
+/// A marker trait for errors raised by attempting to establish an HTTP/2
+/// connection.
+pub trait HttpConnectError {}
+
+/// A trait that can be implemented by structs that want to provide the
+/// functionality of establishing HTTP/2 connections.
+pub trait HttpConnect {
+    /// The type of the underlying transport stream that the `HttpConnection`s
+    /// produced by this `HttpConnect` implementation will be based on.
+    type Stream: TransportStream;
+    /// The type of the error that can be produced by trying to establish the
+    /// connection (i.e. calling the `connect` method).
+    type Err;
+
+    /// Establishes an HTTP/2 connection...
+    fn connect(self) -> Result<HttpConnection<Self::Stream>, Self::Err>;
+}
+
 /// A struct implementing the client side of an HTTP/2 connection.
 ///
 /// It builds on top of an `HttpConnection` and provides additional methods
