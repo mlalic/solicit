@@ -67,8 +67,6 @@ pub struct SimpleClient {
     /// Holds the ID that can be assigned to the next stream to be opened by the
     /// client.
     next_stream_id: u32,
-    /// Holds the domain name of the host to which the client is connected to.
-    host: Vec<u8>,
 }
 
 impl SimpleClient {
@@ -82,7 +80,6 @@ impl SimpleClient {
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, DefaultSession::new()),
             next_stream_id: 1,
-            host: host.as_bytes().to_vec(),
         };
 
         try!(client.init());
@@ -115,14 +112,11 @@ impl SimpleClient {
     pub fn request(&mut self, method: &[u8], path: &[u8], extras: &[Header])
             -> HttpResult<StreamId> {
         let stream_id = self.new_stream();
-        // Only http supported for now...
-        let scheme = b"http".to_vec();
-        let host = self.host.clone();
         let mut headers: Vec<Header> = vec![
             (b":method".to_vec(), method.to_vec()),
             (b":path".to_vec(), path.to_vec()),
-            (b":authority".to_vec(), host),
-            (b":scheme".to_vec(), scheme),
+            (b":authority".to_vec(), self.conn.host().as_bytes().to_vec()),
+            (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
         ];
         headers.extend(extras.to_vec().into_iter());
 

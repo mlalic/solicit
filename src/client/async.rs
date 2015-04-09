@@ -59,8 +59,6 @@ struct ClientService {
     /// The limit to the number of requests that can be pending (unanswered,
     /// but sent).
     limit: u32,
-    /// The host name of the host to which the client is connected to.
-    host: Vec<u8>,
     /// The connection that is used for underlying HTTP/2 communication.
     conn: ClientConnection<TcpStream, DefaultSession>,
     /// A mapping of stream IDs to the sender side of a channel that is
@@ -100,7 +98,6 @@ impl ClientService {
             next_stream_id: 1,
             outstanding_reqs: 0,
             limit: 3,
-            host: host.as_bytes().to_vec(),
             conn: conn,
             chans: HashMap::new(),
             rx: rx,
@@ -201,8 +198,8 @@ impl ClientService {
         headers.extend(vec![
             (b":method".to_vec(), method),
             (b":path".to_vec(), path),
-            (b":authority".to_vec(), self.host.clone()),
-            (b":scheme".to_vec(), b"http".to_vec()),
+            (b":authority".to_vec(), self.conn.host().as_bytes().to_vec()),
+            (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
         ].into_iter());
         headers.extend(extra_headers.into_iter());
 
