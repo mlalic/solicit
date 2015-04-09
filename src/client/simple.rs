@@ -94,6 +94,33 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
+///
+/// Issue a GET request over `https` using the `TlsConnector`
+///
+/// ```no_run
+/// use solicit::http::connection::TlsConnector;
+/// use solicit::client::SimpleClient;
+/// use std::str;
+///
+/// // Connect to an HTTP/2 aware server
+/// let path = "/path/to/certs.pem";
+/// let connector = TlsConnector::new("http2bin.org", &path);
+/// let mut client = SimpleClient::with_connector(connector).unwrap();
+/// let response = client.get(b"/get", &[]).unwrap();
+/// assert_eq!(response.stream_id, 1);
+/// assert_eq!(response.status_code().unwrap(), 200);
+/// // Dump the headers and the response body to stdout.
+/// // They are returned as raw bytes for the user to do as they please.
+/// // (Note: in general directly decoding assuming a utf8 encoding might not
+/// // always work -- this is meant as a simple example that shows that the
+/// // response is well formed.)
+/// for header in response.headers.iter() {
+///     println!("{}: {}",
+///         str::from_utf8(&header.0).unwrap(),
+///         str::from_utf8(&header.1).unwrap());
+/// }
+/// println!("{}", str::from_utf8(&response.body).unwrap());
+/// ```
 #[unstable = "This is unstable"]
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
