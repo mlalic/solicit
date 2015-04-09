@@ -17,6 +17,19 @@ pub type StreamId = u32;
 /// the tuple of byte vectors instead of going with a full struct representation.
 pub type Header = (Vec<u8>, Vec<u8>);
 
+/// A set of protocol names that the library should use to indicate that HTTP/2
+/// is supported during protocol negotiation (NPN or ALPN).
+/// We include some of the drafts' protocol names, since there is basically no
+/// difference for all intents and purposes (and some servers out there still
+/// only officially advertise draft support).
+/// TODO: Eventually only use "h2".
+pub const ALPN_PROTOCOLS: &'static [&'static [u8]] = &[
+    b"h2",
+    b"h2-16",
+    b"h2-15",
+    b"h2-14",
+];
+
 /// An enum representing errors that can arise when performing operations
 /// involving an HTTP/2 connection.
 #[derive(Debug)]
