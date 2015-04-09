@@ -7,3 +7,7 @@ authors = ["Marko Lalic <marko.lalic@gmail.com>"]
 [dependencies]
 hpack = "*"
 log = "^0.2"
+
+[dependencies.openssl]
+version = "*"
+features = ["tlsv1_2", "npn"]

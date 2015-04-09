@@ -7,6 +7,7 @@
 use std::io;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use openssl::ssl::SslStream;
 
 /// A trait that any struct that wants to provide the transport layer for
 /// HTTP/2 needs to implement.
@@ -54,3 +55,5 @@ pub trait TransportStream: Read + Write {
 /// Since `TcpStream` already implements `Read` and `Write` we do not define any
 /// additional required methods on `TransportStream`, we get this for free.
 impl TransportStream for TcpStream {}
+
+impl TransportStream for SslStream<TcpStream> {}
