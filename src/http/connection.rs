@@ -199,6 +199,18 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
         }
     }
 
+    /// Returns the host to which the underlying `HttpConnection` is established.
+    #[inline]
+    pub fn host(&self) -> &str {
+        &self.conn.host
+    }
+
+    /// Returns the scheme of the underlying `HttpConnection`.
+    #[inline]
+    pub fn scheme(&self) -> HttpScheme {
+        self.conn.scheme
+    }
+
     /// Performs the initialization of the `ClientConnection`.
     ///
     /// Sends the client preface, followed by validating the receipt of the
