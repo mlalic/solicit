@@ -9,7 +9,9 @@
 //! `HttpConnection`) that exposes client-specific functions of an HTTP/2
 //! connection, such as sending requests.
 
+use std::net::TcpStream;
 use std::borrow::Cow;
+use std::io;
 
 use super::session::Session;
 use super::{HttpError, HttpResult, Request, HttpScheme};
@@ -183,6 +185,43 @@ pub trait HttpConnect {
 
     /// Establishes an HTTP/2 connection...
     fn connect(self) -> Result<HttpConnection<Self::Stream>, Self::Err>;
+}
+
+/// A struct that establishes an HTTP/2 connection based on a prior-knowledge
+/// cleartext TCP connection. It defaults to using port 80 on the given host.
+///
+/// More information in the [spec](http://http2.github.io/http2-spec/#known-http)
+pub struct CleartextConnector<'a> {
+    /// The host to which the connection should be established
+    pub host: &'a str,
+}
+
+/// A newtype wrapping the `io::Error`, as it occurs when attempting to
+/// establish an HTTP/2 connection over cleartext TCP (with prior knowledge).
+pub struct CleartextConnectError(io::Error);
+
+/// For convenience we make sure that `io::Error`s are easily convertable to
+/// the `CleartextConnectError`, if needed.
+impl From<io::Error> for CleartextConnectError {
+    fn from(e: io::Error) -> CleartextConnectError { CleartextConnectError(e) }
+}
+
+/// The error is marked as an `HttpConnectError`
+impl HttpConnectError for CleartextConnectError {}
+
+impl<'a> HttpConnect for CleartextConnector<'a> {
+    type Stream = TcpStream;
+    type Err = CleartextConnectError;
+
+    /// Establishes a cleartext TCP-backed HTTP/2 connection to the host on
+    /// port 80.
+    /// If it is not possible, returns an `HttpError`.
+    fn connect(self) -> Result<HttpConnection<TcpStream>, CleartextConnectError> {
+        let stream = try!(TcpStream::connect((self.host, 80)));
+        let conn = HttpConnection::new(stream, HttpScheme::Http, self.host.into());
+
+        Ok(conn)
+    }
 }
 
 /// A struct implementing the client side of an HTTP/2 connection.
