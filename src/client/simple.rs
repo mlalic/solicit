@@ -2,6 +2,7 @@
 
 use super::super::http::connection::ClientConnection;
 use super::super::http::connection::HttpConnection;
+use super::super::http::connection::HttpConnect;
 use super::super::http::transport::TransportStream;
 use super::super::http::session::{DefaultSession, Stream};
 use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Request};
@@ -36,7 +37,8 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 ///
 /// # Examples
 ///
-/// Issue a simple GET request using the helper `get` method.
+/// Issue a simple GET request using the helper `get` method. Premade connection
+/// passed to the client.
 ///
 /// ```no_run
 /// use std::net::TcpStream;
@@ -50,6 +52,33 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 ///                                HttpScheme::Http,
 ///                                "http2bin.org".into());
 /// let mut client = SimpleClient::with_connection(conn).unwrap();
+/// let response = client.get(b"/", &[]).unwrap();
+/// assert_eq!(response.stream_id, 1);
+/// assert_eq!(response.status_code().unwrap(), 200);
+/// // Dump the headers and the response body to stdout.
+/// // They are returned as raw bytes for the user to do as they please.
+/// // (Note: in general directly decoding assuming a utf8 encoding might not
+/// // always work -- this is meant as a simple example that shows that the
+/// // response is well formed.)
+/// for header in response.headers.iter() {
+///     println!("{}: {}",
+///         str::from_utf8(&header.0).unwrap(),
+///         str::from_utf8(&header.1).unwrap());
+/// }
+/// println!("{}", str::from_utf8(&response.body).unwrap());
+/// ```
+///
+/// Issue a simple GET request using the helper `get` method. Pass a connector
+/// to establish a new connection.
+///
+/// ```no_run
+/// use solicit::http::connection::CleartextConnector;
+/// use solicit::client::SimpleClient;
+/// use std::str;
+///
+/// // Connect to an HTTP/2 aware server
+/// let connector = CleartextConnector { host: "http2bin.org" };
+/// let mut client = SimpleClient::with_connector(connector).unwrap();
 /// let response = client.get(b"/", &[]).unwrap();
 /// assert_eq!(response.stream_id, 1);
 /// assert_eq!(response.status_code().unwrap(), 200);
@@ -90,6 +119,19 @@ impl<S> SimpleClient<S> where S: TransportStream {
         try!(client.init());
 
         Ok(client)
+    }
+
+    /// A convenience constructor that first tries to establish an HTTP/2
+    /// connection by using the given connector instance (an implementation of
+    /// the `HttpConnect` trait).
+    ///
+    /// # Panics
+    ///
+    /// Currently, it panics if the connector returns an error.
+    pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
+            where C: HttpConnect<Stream=S> {
+        let conn = connector.connect().ok().unwrap();
+        SimpleClient::with_connection(conn)
     }
 
     /// Internal helper method that performs the initialization of the client's
