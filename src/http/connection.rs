@@ -9,8 +9,10 @@
 //! `HttpConnection`) that exposes client-specific functions of an HTTP/2
 //! connection, such as sending requests.
 
+use std::borrow::Cow;
+
 use super::session::Session;
-use super::{HttpError, HttpResult, Request};
+use super::{HttpError, HttpResult, Request, HttpScheme};
 use super::transport::TransportStream;
 use super::frame::{
     Frame,
@@ -42,15 +44,25 @@ pub enum HttpFrame {
 /// It provides an API for writing and reading HTTP/2 frames. It also takes
 /// care to validate the received frames.
 pub struct HttpConnection<S> where S: TransportStream {
+    /// The stream to which the raw bytes will be written
     stream: S,
+    /// The scheme of the connection
+    pub scheme: HttpScheme,
+    /// The host to which the connection is established
+    pub host: String,
 }
 
 impl<S> HttpConnection<S> where S: TransportStream {
     /// Creates a new `HttpConnection` that will use the given stream as its
     /// underlying transport layer.
-    pub fn with_stream(stream: S) -> HttpConnection<S> {
+    ///
+    /// The host to which the connection is established, as well as the connection
+    /// scheme are provided.
+    pub fn new<'a>(stream: S, scheme: HttpScheme, host: Cow<'a, str>) -> HttpConnection<S> {
         HttpConnection {
             stream: stream,
+            scheme: scheme,
+            host: host.into_owned(),
         }
     }
 
@@ -175,18 +187,6 @@ pub struct ClientConnection<TS, S>
 }
 
 impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
-    /// Creates a new `ClientConnection` that will use the given `stream` as its
-    /// underlying transport-layer service provider. It automatically wraps the
-    /// stream into an `HttpConnection`.
-    pub fn new(stream: TS, session: S) -> ClientConnection<TS, S> {
-        ClientConnection {
-            conn: HttpConnection::with_stream(stream),
-            encoder: hpack::Encoder::new(),
-            decoder: hpack::Decoder::new(),
-            session: session,
-        }
-    }
-
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
     pub fn with_connection(conn: HttpConnection<TS>, session: S)
@@ -379,7 +379,7 @@ mod tests {
     };
     use super::{HttpConnection, HttpFrame, ClientConnection};
     use super::super::transport::TransportStream;
-    use super::super::{HttpError, Request, StreamId, Header};
+    use super::super::{HttpError, HttpScheme, Request, StreamId, Header};
     use super::super::session::Session;
     use hpack;
 
@@ -550,6 +550,8 @@ mod tests {
     fn build_http_conn(stub_data: &Vec<u8>) -> HttpConnection<StubTransportStream> {
         HttpConnection {
             stream: StubTransportStream::with_stub_content(stub_data),
+            scheme: HttpScheme::Http,
+            host: "".to_string(),
         }
     }
 

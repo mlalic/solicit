@@ -11,8 +11,8 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
 
-use super::super::http::{StreamId, HttpError, Response, Request, Header};
-use super::super::http::connection::ClientConnection;
+use super::super::http::{StreamId, HttpError, HttpScheme, Response, Request, Header};
+use super::super::http::connection::{HttpConnection, ClientConnection};
 use super::super::http::session::{DefaultSession, DefaultStream};
 
 /// A struct representing an asynchronously dispatched request. It is used
@@ -85,8 +85,11 @@ impl ClientService {
     pub fn new(host: &str, port: u16) -> Option<(ClientService, Sender<AsyncRequest>)> {
         let (tx, rx): (Sender<AsyncRequest>, Receiver<AsyncRequest>) =
                 mpsc::channel();
-        let mut conn = ClientConnection::new(
-                TcpStream::connect(&(host, port)).unwrap(),
+        let mut conn = ClientConnection::with_connection(
+                HttpConnection::new(
+                    TcpStream::connect(&(host, port)).unwrap(),
+                    HttpScheme::Http,
+                    host.into()),
                 DefaultSession::<DefaultStream>::new());
         match conn.init() {
             Ok(_) => {},

@@ -3,8 +3,9 @@
 use std::net::TcpStream;
 
 use super::super::http::connection::ClientConnection;
+use super::super::http::connection::HttpConnection;
 use super::super::http::session::{DefaultSession, Stream};
-use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Request};
+use super::super::http::{StreamId, HttpResult, HttpError, HttpScheme, Response, Header, Request};
 
 
 /// A struct implementing a simple HTTP/2 client.
@@ -75,10 +76,11 @@ impl SimpleClient {
     /// port number. If it is not possible to establish the connection, an error
     /// is returned.
     pub fn connect(host: &str, port: u16) -> HttpResult<SimpleClient> {
+        let conn = HttpConnection::new(try!(TcpStream::connect(&(host, port))),
+                                       HttpScheme::Http,
+                                       host.into());
         let mut client = SimpleClient {
-            conn: ClientConnection::new(
-                TcpStream::connect(&(host, port)).unwrap(),
-                DefaultSession::new()),
+            conn: ClientConnection::with_connection(conn, DefaultSession::new()),
             next_stream_id: 1,
             host: host.as_bytes().to_vec(),
         };
