@@ -6,7 +6,6 @@
 use std::net::TcpStream;
 use std::collections::HashMap;
 
-use std::sync::Future;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
@@ -271,7 +270,6 @@ impl ClientService {
 /// # Example
 ///
 /// ```no_run
-/// #![feature(std_misc)]
 /// use solicit::client::Client;
 /// use std::thread;
 /// use std::str;
@@ -285,7 +283,7 @@ impl ClientService {
 ///     let this = client.clone();
 ///     thread::scoped(move || {
 ///         let resp = this.get(b"/", &[]).unwrap();
-///         let response = resp.into_inner();
+///         let response = resp.recv().unwrap();
 ///         println!("Thread {} got response ... {}", i, response.status_code().ok().unwrap());
 ///         println!("The response contains the following headers:");
 ///         for header in response.headers.iter() {
@@ -348,9 +346,10 @@ impl Client {
     /// The method itself returns immediately upon queuing the request. It does
     /// not wait for the request to be transmitted nor for the response to
     /// arrive. Once the caller is interested in the final response, they can
-    /// block on the returned `Future`.
+    /// block on the returned `Receiver` end of a channel which will receive
+    /// the response once generated.
     ///
-    /// The `Response` instance wrapped by the future contains the full
+    /// The `Response` instance that the channel receives will contain the full
     /// response body and is available only once the full response body has
     /// been received.
     ///
@@ -358,7 +357,7 @@ impl Client {
     /// underlying HTTP/2 connection to which this client is associated has
     /// failed and it returns `None`.
     pub fn request(&self, method: &[u8], path: &[u8], headers: &[Header])
-            -> Option<Future<Response>> {
+            -> Option<Receiver<Response>> {
         let (resp_tx, resp_rx): (Sender<Response>, Receiver<Response>) =
                 mpsc::channel();
         // A send can only fail if the receiver is disconnected. If the send
@@ -372,7 +371,7 @@ impl Client {
         });
 
         match res {
-            Ok(_) => Some(Future::from_receiver(resp_rx)),
+            Ok(_) => Some(resp_rx),
             Err(_) => None,
         }
     }
@@ -381,7 +380,7 @@ impl Client {
     ///
     /// A convenience wrapper around the `request` method that sets the correct
     /// method.
-    pub fn get(&self, path: &[u8], headers: &[Header]) -> Option<Future<Response>> {
+    pub fn get(&self, path: &[u8], headers: &[Header]) -> Option<Receiver<Response>> {
         self.request(b"GET", path, headers)
     }
 }
