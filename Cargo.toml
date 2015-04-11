@@ -6,7 +6,7 @@ authors = ["Marko Lalic <marko.lalic@gmail.com>"]
 
 [dependencies]
 hpack = "*"
-log = "^0.2"
+log = "^0.3"
 
 [dependencies.openssl]
 version = "*"
