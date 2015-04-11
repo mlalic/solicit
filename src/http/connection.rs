@@ -11,6 +11,7 @@
 
 use std::net::TcpStream;
 use std::convert::AsRef;
+use std::marker::MarkerTrait;
 use std::borrow::Cow;
 use std::path::Path;
 use std::io;
@@ -181,7 +182,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
 
 /// A marker trait for errors raised by attempting to establish an HTTP/2
 /// connection.
-pub trait HttpConnectError {}
+pub trait HttpConnectError: MarkerTrait {}
 
 /// A trait that can be implemented by structs that want to provide the
 /// functionality of establishing HTTP/2 connections.
