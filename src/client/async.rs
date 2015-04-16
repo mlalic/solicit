@@ -279,9 +279,9 @@ impl ClientService {
 ///
 /// // Issue 5 requests from 5 different threads concurrently and wait for all
 /// // threads to receive their response.
-/// let _: Vec<_> = (0..5).map(|i| {
+/// let threads: Vec<_> = (0..5).map(|i| {
 ///     let this = client.clone();
-///     thread::scoped(move || {
+///     thread::spawn(move || {
 ///         let resp = this.get(b"/", &[]).unwrap();
 ///         let response = resp.recv().unwrap();
 ///         println!("Thread {} got response ... {}", i, response.status_code().ok().unwrap());
@@ -293,6 +293,8 @@ impl ClientService {
 ///         }
 ///     })
 /// }).collect();
+///
+/// let _: Vec<_> = threads.into_iter().map(|thread| thread.join()).collect();
 /// ```
 #[derive(Clone)]
 pub struct Client {

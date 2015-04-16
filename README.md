@@ -193,9 +193,9 @@ let client = Client::new("nghttp2.org", 80).unwrap();
 
 // Issue 5 requests from 5 different threads concurrently and wait for all
 // threads to receive their response.
-let _: Vec<_> = (0..5).map(|i| {
+let threads: Vec<_> = (0..5).map(|i| {
     let this = client.clone();
-    thread::scoped(move || {
+    thread::spawn(move || {
         // This call returns immediately...
         let resp = this.get(b"/", &[]).unwrap();
         // ...this one blocks until the full response is ready!
@@ -209,6 +209,7 @@ let _: Vec<_> = (0..5).map(|i| {
         }
     })
 }).collect();
+let _: Vec<_> = threads.into_iter().map(|thread| thread.join()).collect();
 ```
 
 # License
