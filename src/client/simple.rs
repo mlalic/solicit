@@ -121,7 +121,6 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
-#[unstable = "This is unstable"]
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
     conn: ClientConnection<S, DefaultSession>,
