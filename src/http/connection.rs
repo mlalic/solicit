@@ -667,7 +667,11 @@ mod tests {
         }
     }
 
-    impl TransportStream for StubTransportStream {}
+    impl TransportStream for StubTransportStream {
+        fn try_split(&self) -> Result<StubTransportStream, io::Error> {
+            panic!("HttpConnection should never need to split the stream.");
+        }
+    }
 
     /// A helper struct implementing the `Session` trait, intended for testing
     /// purposes.

@@ -50,10 +50,20 @@ pub trait TransportStream: Read + Write {
 
         Ok(())
     }
+
+    /// Attempts to split the `TransportStream` instance into a new independently
+    /// owned handle to the same underlying stream.
+    fn try_split(&self) -> Result<Self, io::Error>;
 }
 
-/// Since `TcpStream` already implements `Read` and `Write` we do not define any
-/// additional required methods on `TransportStream`, we get this for free.
-impl TransportStream for TcpStream {}
+impl TransportStream for TcpStream {
+    fn try_split(&self) -> Result<TcpStream, io::Error> {
+        self.try_clone()
+    }
+}
 
-impl TransportStream for SslStream<TcpStream> {}
+impl TransportStream for SslStream<TcpStream> {
+    fn try_split(&self) -> Result<SslStream<TcpStream>, io::Error> {
+        self.try_clone()
+    }
+}
