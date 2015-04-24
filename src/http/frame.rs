@@ -202,6 +202,16 @@ impl RawFrame {
             payload: buf[9..9 + header.0 as usize].to_vec(),
         })
     }
+
+    /// Returns a `Vec` of bytes representing the serialized (on-the-wire)
+    /// representation of this raw frame.
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend(pack_header(&self.header).to_vec().into_iter());
+        buf.extend(self.payload.clone().into_iter());
+
+        buf
+    }
 }
 
 /// An enum representing the flags that a `DataFrame` can have.
@@ -2074,5 +2084,22 @@ mod tests {
         {
             assert!(RawFrame::from_buf(&[]).is_none());
         }
+    }
+
+    /// Tests that the `RawFrame::serialize` method correctly serializes a
+    /// `RawFrame`.
+    #[test]
+    fn test_raw_frame_serialize() {
+        let data = b"123";
+        let header = (data.len() as u32, 0x1, 0, 1);
+        let buf = {
+            let mut buf = Vec::new();
+            buf.extend(pack_header(&header).to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
+            buf
+        };
+        let raw = RawFrame::from_buf(&buf).unwrap();
+
+        assert_eq!(raw.serialize(), buf);
     }
 }
