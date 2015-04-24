@@ -145,6 +145,8 @@ pub trait Frame {
 /// It does not try to interpret the payload bytes, nor do any validation in
 /// terms of its validity based on the frame type given in the header.
 /// It is simply a wrapper around the two parts of an HTTP/2 frame.
+#[derive(PartialEq)]
+#[derive(Debug)]
 pub struct RawFrame {
     /// The parsed header of the frame.
     pub header: FrameHeader,
