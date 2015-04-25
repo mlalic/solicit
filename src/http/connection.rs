@@ -593,7 +593,7 @@ mod tests {
     };
     use super::{HttpConnection, HttpFrame, ClientConnection};
     use super::super::transport::TransportStream;
-    use super::super::{HttpError, HttpScheme, Request, StreamId, Header};
+    use super::super::{HttpError, HttpScheme, Request, StreamId, Header, HttpResult};
     use super::super::session::Session;
     use hpack;
 
@@ -741,6 +741,21 @@ mod tests {
         }
 
         fn end_of_stream(&mut self, _: StreamId) {}
+    }
+
+    /// A helper function that performs a `send_frame` operation on the given
+    /// `HttpConnection` by providing the frame instance wrapped in the given
+    /// `HttpFrame`.
+    ///
+    /// If the `HttpFrame` variant is `HttpFrame::UnknownFrame`, nothing will
+    /// be sent and an `Ok(())` is returned.
+    fn send_frame<TS: TransportStream>(conn: &mut HttpConnection<TS>, frame: HttpFrame)
+            -> HttpResult<()> {
+        match frame {
+            HttpFrame::DataFrame(frame) => conn.send_frame(frame),
+            HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
+            HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
+        }
     }
 
     /// A test that makes sure that the `StubTransportStream` exhibits
@@ -954,11 +969,7 @@ mod tests {
         let mut conn = build_http_conn(&vec![]);
 
         for frame in frames.into_iter() {
-            let _ = match frame {
-                HttpFrame::DataFrame(frame) => conn.send_frame(frame),
-                HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
-                HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
-            };
+            send_frame(&mut conn, frame).unwrap();
         }
 
         assert_eq!(expected, conn.stream.get_written());
@@ -978,11 +989,7 @@ mod tests {
         let mut conn = build_http_conn(&vec![]);
 
         for frame in frames.into_iter() {
-            let _ = match frame {
-                HttpFrame::DataFrame(frame) => conn.send_frame(frame),
-                HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
-                HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
-            };
+            send_frame(&mut conn, frame).unwrap();
         }
 
         assert_eq!(expected, conn.stream.get_written());
@@ -999,12 +1006,7 @@ mod tests {
         conn.stream.close();
 
         for frame in frames.into_iter() {
-            let res = match frame {
-                HttpFrame::DataFrame(frame) => conn.send_frame(frame),
-                HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
-                HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
-            };
-
+            let res = send_frame(&mut conn, frame);
             assert!(match res {
                 Err(HttpError::IoError(_)) => true,
                 _ => false,
