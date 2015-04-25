@@ -51,6 +51,33 @@ pub enum HttpFrame {
     SettingsFrame(SettingsFrame),
 }
 
+impl HttpFrame {
+    pub fn from_raw(raw_frame: RawFrame) -> HttpResult<HttpFrame> {
+        let frame = match raw_frame.header.1 {
+            0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(raw_frame))),
+            0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(raw_frame))),
+            0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(raw_frame))),
+            _ => return Err(HttpError::UnknownFrameType),
+        };
+
+        Ok(frame)
+    }
+
+    /// A helper method that parses the given `RawFrame` into the given `Frame`
+    /// implementation.
+    ///
+    /// # Returns
+    ///
+    /// Failing to decode the given `Frame` from the `raw_frame`, an
+    /// `HttpError::InvalidFrame` error is returned.
+    #[inline]
+    fn parse_frame<F: Frame>(raw_frame: RawFrame) -> HttpResult<F> {
+        // TODO: The reason behind being unable to decode the frame should be
+        //       extracted to allow an appropriate connection-level action to be
+        //       taken (e.g. responding with a PROTOCOL_ERROR).
+        Frame::from_raw(raw_frame).ok_or(HttpError::InvalidFrame)
+    }
+}
 /// The struct implements the HTTP/2 connection level logic.
 ///
 /// It provides an API for writing and reading HTTP/2 frames. It also takes
@@ -118,15 +145,9 @@ impl<S> HttpConnection<S> where S: TransportStream {
         let raw_frame = RawFrame::with_payload(header, payload);
 
         // TODO: The reason behind being unable to decode the frame should be
-        //       extracted and an appropriate connection-level action taken
-        //       (e.g. responding with a PROTOCOL_ERROR).
-        let frame = match header.1 {
-            0x0 => HttpFrame::DataFrame(try!(self.parse_frame(raw_frame))),
-            0x1 => HttpFrame::HeadersFrame(try!(self.parse_frame(raw_frame))),
-            0x4 => HttpFrame::SettingsFrame(try!(self.parse_frame(raw_frame))),
-            _ => return Err(HttpError::UnknownFrameType),
-        };
-
+        //       extracted to allow an appropriate connection-level action to be
+        //       taken (e.g. responding with a PROTOCOL_ERROR).
+        let frame = try!(HttpFrame::from_raw(raw_frame));
         Ok(frame)
     }
 
@@ -166,17 +187,6 @@ impl<S> HttpConnection<S> where S: TransportStream {
         Ok(buf)
     }
 
-    /// A helper method that parses the given `RawFrame` into the given `Frame`
-    /// implementation.
-    ///
-    /// # Returns
-    ///
-    /// Failing to decode the given `Frame` from the `raw_frame`, an
-    /// `HttpError::InvalidFrame` error is returned.
-    #[inline]
-    fn parse_frame<F: Frame>(&self, raw_frame: RawFrame) -> HttpResult<F> {
-        Frame::from_raw(raw_frame).ok_or(HttpError::InvalidFrame)
-    }
 }
 
 /// A marker trait for errors raised by attempting to establish an HTTP/2
@@ -802,6 +812,34 @@ mod tests {
         }
 
         buf
+    }
+
+    /// Tests that the `HttpFrame::from_raw` method correctly recognizes the frame
+    /// type from the header and returns the corresponding variant.
+    #[test]
+    fn test_http_frame_from_raw() {
+        fn to_raw<F: Frame>(frame: F) -> RawFrame {
+            RawFrame::from_buf(&frame.serialize()).unwrap()
+        }
+
+        assert!(match HttpFrame::from_raw(to_raw(DataFrame::new(1))) {
+            Ok(HttpFrame::DataFrame(_)) => true,
+            _ => false,
+        });
+
+        assert!(match HttpFrame::from_raw(to_raw(HeadersFrame::new(vec![], 1))) {
+            Ok(HttpFrame::HeadersFrame(_)) => true,
+            _ => false,
+        });
+
+        assert!(match HttpFrame::from_raw(to_raw(SettingsFrame::new())) {
+            Ok(HttpFrame::SettingsFrame(_)) => true,
+            _ => false,
+        });
+
+        // Invalid since it's headers on stream 0
+        let invalid_frame = HeadersFrame::new(vec![], 0);
+        assert!(HttpFrame::from_raw(to_raw(invalid_frame)).is_err());
     }
 
     /// Tests that it is possible to read a single frame from the stream.
