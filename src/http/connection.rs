@@ -49,6 +49,7 @@ pub enum HttpFrame {
     DataFrame(DataFrame),
     HeadersFrame(HeadersFrame),
     SettingsFrame(SettingsFrame),
+    UnknownFrame(RawFrame),
 }
 
 impl HttpFrame {
@@ -57,7 +58,7 @@ impl HttpFrame {
             0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(raw_frame))),
-            _ => return Err(HttpError::UnknownFrameType),
+            _ => HttpFrame::UnknownFrame(raw_frame),
         };
 
         Ok(frame)
@@ -148,7 +149,10 @@ impl<S> HttpConnection<S> where S: TransportStream {
         //       extracted to allow an appropriate connection-level action to be
         //       taken (e.g. responding with a PROTOCOL_ERROR).
         let frame = try!(HttpFrame::from_raw(raw_frame));
-        Ok(frame)
+        match frame {
+            HttpFrame::UnknownFrame(_) => Err(HttpError::UnknownFrameType),
+            _ => Ok(frame),
+        }
     }
 
     /// Reads the header bytes of the next frame from the underlying stream.
@@ -547,7 +551,14 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
             HttpFrame::SettingsFrame(frame) => {
                 debug!("Settings frame received");
                 self.handle_settings_frame(frame)
-            }
+            },
+            HttpFrame::UnknownFrame(_) => {
+                debug!("Unknown frame received");
+                // We simply drop any unknown frames...
+                // TODO Signal this to the session so that a hook is available
+                //      for implementing frame-level protocol extensions.
+                Ok(())
+            },
         }
     }
 
@@ -765,6 +776,7 @@ mod tests {
             HttpFrame::DataFrame(frame) => conn.send_frame(frame),
             HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
             HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
+            HttpFrame::UnknownFrame(_) => Ok(()),
         }
     }
 
@@ -807,6 +819,7 @@ mod tests {
                 &HttpFrame::DataFrame(ref frame) => frame.serialize(),
                 &HttpFrame::HeadersFrame(ref frame) => frame.serialize(),
                 &HttpFrame::SettingsFrame(ref frame) => frame.serialize(),
+                &HttpFrame::UnknownFrame(ref frame) => frame.serialize(),
             };
             buf.extend(serialized.into_iter());
         }
@@ -834,6 +847,19 @@ mod tests {
 
         assert!(match HttpFrame::from_raw(to_raw(SettingsFrame::new())) {
             Ok(HttpFrame::SettingsFrame(_)) => true,
+            _ => false,
+        });
+
+        let unknown_frame = RawFrame::from_buf(&{
+            let mut buf: Vec<u8> = Vec::new();
+            // Frame type 10 with a payload of length 1 on stream 1
+            let header = (1u32, 10u8, 0u8, 1u32);
+            buf.extend(pack_header(&header).to_vec().into_iter());
+            buf.push(1);
+            buf
+        }).unwrap();
+        assert!(match HttpFrame::from_raw(unknown_frame) {
+            Ok(HttpFrame::UnknownFrame(_)) => true,
             _ => false,
         });
 
