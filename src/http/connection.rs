@@ -127,8 +127,8 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// Any IO errors raised by the underlying transport layer are wrapped in a
     /// `HttpError::IoError` variant and propagated upwards.
     ///
-    /// If the frame type is unknown the `HttpError::UnknownFrameType` variant
-    /// is returned.
+    /// If the frame type is unknown the `RawFrame` is wrapped into a
+    /// `HttpFrame::UnknownFrame` variant and returned.
     ///
     /// If the frame type is recognized, but the frame cannot be successfully
     /// decoded, the `HttpError::InvalidFrame` variant is returned. For now,
@@ -149,10 +149,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
         //       extracted to allow an appropriate connection-level action to be
         //       taken (e.g. responding with a PROTOCOL_ERROR).
         let frame = try!(HttpFrame::from_raw(raw_frame));
-        match frame {
-            HttpFrame::UnknownFrame(_) => Err(HttpError::UnknownFrameType),
-            _ => Ok(frame),
-        }
+        Ok(frame)
     }
 
     /// Reads the header bytes of the next frame from the underlying stream.
@@ -524,10 +521,6 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
         debug!("Waiting for frame...");
         let frame = match self.conn.recv_frame() {
             Ok(frame) => frame,
-            Err(HttpError::UnknownFrameType) => {
-                debug!("Ignoring unknown frame type");
-                return Ok(())
-            },
             Err(e) => {
                 debug!("Encountered an HTTP/2 error, stopping.");
                 return Err(e);
@@ -1017,8 +1010,8 @@ mod tests {
         });
 
         // Unknown frame error.
-        assert!(match conn.recv_frame().err().unwrap() {
-            HttpError::UnknownFrameType => true,
+        assert!(match conn.recv_frame() {
+            Ok(HttpFrame::UnknownFrame(_)) => true,
             _ => false,
         });
     }

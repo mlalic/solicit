@@ -35,7 +35,6 @@ pub const ALPN_PROTOCOLS: &'static [&'static [u8]] = &[
 #[derive(Debug)]
 pub enum HttpError {
     IoError(io::Error),
-    UnknownFrameType,
     InvalidFrame,
     CompressionError(DecoderError),
     UnknownStreamId,
@@ -59,7 +58,6 @@ impl PartialEq for HttpError {
             (&HttpError::IoError(ref e1), &HttpError::IoError(ref e2)) => {
                 e1.kind() == e2.kind() && e1.description() == e2.description()
             },
-            (&HttpError::UnknownFrameType, &HttpError::UnknownFrameType) => true,
             (&HttpError::InvalidFrame, &HttpError::InvalidFrame) => true,
             (&HttpError::CompressionError(ref e1), &HttpError::CompressionError(ref e2)) => {
                 e1 == e2
