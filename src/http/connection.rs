@@ -389,6 +389,7 @@ pub struct ClientConnection<TS, S>
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection<TS>,
+    host: String,
     /// HPACK encoder
     encoder: hpack::Encoder<'static>,
     /// HPACK decoder
@@ -404,8 +405,10 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     /// for all its underlying HTTP/2 communication.
     pub fn with_connection(conn: HttpConnection<TS>, session: S)
             -> ClientConnection<TS, S> {
+        let host = conn.host.clone();
         ClientConnection {
             conn: conn,
+            host: host,
             encoder: hpack::Encoder::new(),
             decoder: hpack::Decoder::new(),
             session: session,
@@ -415,7 +418,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     /// Returns the host to which the underlying `HttpConnection` is established.
     #[inline]
     pub fn host(&self) -> &str {
-        &self.conn.host
+        &self.host
     }
 
     /// Returns the scheme of the underlying `HttpConnection`.
