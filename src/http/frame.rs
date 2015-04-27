@@ -148,11 +148,9 @@ pub trait Frame {
 #[derive(PartialEq)]
 #[derive(Debug)]
 pub struct RawFrame {
-    /// The parsed header of the frame.
-    pub header: FrameHeader,
-    /// The payload of the frame, as the raw byte sequence, as received on
-    /// the wire.
-    pub payload: Vec<u8>,
+    /// The raw frame representation, including both the raw header representation
+    /// (in the first 9 bytes), followed by the raw payload representation.
+    raw_content: Vec<u8>,
 }
 
 impl RawFrame {
@@ -163,10 +161,15 @@ impl RawFrame {
     }
 
     /// Creates a new `RawFrame` with the given header and payload.
+    /// Does not do any validation to determine whether the frame is in a correct
+    /// state as constructed.
     pub fn with_payload(header: FrameHeader, payload: Vec<u8>) -> RawFrame {
+        let mut raw = Vec::new();
+        raw.extend(pack_header(&header).into_iter().map(|x| *x));
+        raw.extend(payload);
+
         RawFrame {
-            header: header,
-            payload: payload,
+            raw_content: raw,
         }
     }
 
@@ -174,14 +177,11 @@ impl RawFrame {
     ///
     /// # Returns
     ///
-    /// If the first bytes of the buffer represent a valid frame, a `RawFrame`
-    /// that represents it is returned. Obviously, the buffer should contain
-    /// both the header and the payload of the frame.
+    /// A `RawFrame` instance constructed from the given buffer.
     ///
-    /// If the first bytes of the buffer cannot be interpreted as a raw frame,
-    /// `None` is returned. This includes the case where the buffer does not
-    /// contain enough data to contain the entire payload (whose length was
-    /// advertised in the header).
+    /// If the buffer cannot be parsed into a frame, which includes the payload
+    /// section having a different length than what was found in the header,
+    /// `None` is returned.
     pub fn from_buf(buf: &[u8]) -> Option<RawFrame> {
         if buf.len() < 9 {
             return None;
@@ -193,24 +193,34 @@ impl RawFrame {
         });
         let payload_len = header.0 as usize;
 
-        if buf[9..].len() < payload_len {
+        if buf[9..].len() != payload_len {
             return None;
         }
 
         Some(RawFrame {
-            header: header,
-            payload: buf[9..9 + header.0 as usize].to_vec(),
+            raw_content: buf.to_vec(),
         })
     }
 
     /// Returns a `Vec` of bytes representing the serialized (on-the-wire)
     /// representation of this raw frame.
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buf: Vec<u8> = Vec::new();
-        buf.extend(pack_header(&self.header).to_vec().into_iter());
-        buf.extend(self.payload.clone().into_iter());
+        self.raw_content.clone()
+    }
 
-        buf
+    /// Returns a `FrameHeader` instance corresponding to the headers of the
+    /// `RawFrame`.
+    pub fn header(&self) -> FrameHeader {
+        unpack_header(unsafe {
+            assert!(self.raw_content.len() >= 9);
+            // We just asserted that this transmute is safe.
+            mem::transmute(self.raw_content.as_ptr())
+        })
+    }
+
+    /// Returns a slice representing the payload of the `RawFrame`.
+    pub fn payload(&self) -> &[u8] {
+        &self.raw_content[9..]
     }
 }
 
@@ -327,7 +337,7 @@ impl Frame for DataFrame {
     /// constructed from the given `RawFrame`.
     fn from_raw(raw_frame: RawFrame) -> Option<DataFrame> {
         // Unpack the header
-        let (len, frame_type, flags, stream_id) = raw_frame.header;
+        let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
         if frame_type != 0x0 {
             return None;
@@ -335,7 +345,7 @@ impl Frame for DataFrame {
         // Check that the length given in the header matches the payload
         // length; if not, something went wrong and we do not consider this a
         // valid frame.
-        if (len as usize) != raw_frame.payload.len() {
+        if (len as usize) != raw_frame.payload().len() {
             return None;
         }
         // A DATA frame cannot be associated to the connection itself.
@@ -347,7 +357,7 @@ impl Frame for DataFrame {
         // Everything has been validated so far: try to extract the data from
         // the payload.
         let padded = (flags & DataFlag::Padded.bitmask()) != 0;
-        match DataFrame::parse_payload(&raw_frame.payload, padded) {
+        match DataFrame::parse_payload(&raw_frame.payload(), padded) {
             Some((data, Some(padding_len))) => {
                 // The data got extracted (from a padded frame)
                 Some(DataFrame {
@@ -632,7 +642,7 @@ impl Frame for SettingsFrame {
     /// Otherwise, returns a newly constructed `SettingsFrame`.
     fn from_raw(raw_frame: RawFrame) -> Option<SettingsFrame> {
         // Unpack the header
-        let (len, frame_type, flags, stream_id) = raw_frame.header;
+        let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
         if frame_type != 0x4 {
             return None;
@@ -640,7 +650,7 @@ impl Frame for SettingsFrame {
         // Check that the length given in the header matches the payload
         // length; if not, something went wrong and we do not consider this a
         // valid frame.
-        if (len as usize) != raw_frame.payload.len() {
+        if (len as usize) != raw_frame.payload().len() {
             return None;
         }
         // Check that the SETTINGS frame is associated to stream 0
@@ -660,7 +670,7 @@ impl Frame for SettingsFrame {
             }
         }
 
-        match SettingsFrame::parse_payload(&raw_frame.payload) {
+        match SettingsFrame::parse_payload(&raw_frame.payload()) {
             Some(settings) => {
                 Some(SettingsFrame {
                     settings: settings,
@@ -914,7 +924,7 @@ impl Frame for HeadersFrame {
     /// Otherwise, returns a newly constructed `HeadersFrame`.
     fn from_raw(raw_frame: RawFrame) -> Option<HeadersFrame> {
         // Unpack the header
-        let (len, frame_type, flags, stream_id) = raw_frame.header;
+        let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
         if frame_type != 0x1 {
             return None;
@@ -922,7 +932,7 @@ impl Frame for HeadersFrame {
         // Check that the length given in the header matches the payload
         // length; if not, something went wrong and we do not consider this a
         // valid frame.
-        if (len as usize) != raw_frame.payload.len() {
+        if (len as usize) != raw_frame.payload().len() {
             return None;
         }
         // Check that the HEADERS frame is not associated to stream 0
@@ -934,12 +944,12 @@ impl Frame for HeadersFrame {
         // the frame is padded.
         let padded = (flags & HeadersFlag::Padded.bitmask()) != 0;
         let (actual, pad_len) = if padded {
-            match parse_padded_payload(&raw_frame.payload) {
+            match parse_padded_payload(&raw_frame.payload()) {
                 Some((data, pad_len)) => (data, Some(pad_len)),
                 None => return None,
             }
         } else {
-            (&raw_frame.payload[..], None)
+            (raw_frame.payload(), None)
         };
 
         // From the actual payload we extract the stream dependency info, if
@@ -2019,6 +2029,44 @@ mod tests {
         assert!(frame.is_headers_end());
     }
 
+    /// Tests that the `RawFrame::with_payload` method correctly constructs a
+    /// `RawFrame` from the given parts.
+    #[test]
+    fn test_raw_frame_with_payload() {
+        // Correct frame
+        {
+            let data = b"123";
+            let header = (data.len() as u32, 0x1, 0, 1);
+
+            let raw = RawFrame::with_payload(header, data.to_vec());
+
+            assert_eq!(raw.header(), header);
+            assert_eq!(raw.payload(), data)
+        }
+        // Correct frame with trailing data
+        {
+            let data = b"123456";
+            let header = (3, 0x1, 0, 1);
+
+            let raw = RawFrame::with_payload(header, data.to_vec());
+
+            // No validation of whether the parts form a correct frame
+            assert_eq!(raw.header(), header);
+            assert_eq!(raw.payload(), data)
+        }
+        // Missing payload chunk
+        {
+            let data = b"123";
+            let header = (6, 0x1, 0, 1);
+
+            let raw = RawFrame::with_payload(header, data.to_vec());
+
+            // No validation of whether the parts form a correct frame
+            assert_eq!(raw.header(), header);
+            assert_eq!(raw.payload(), data)
+        }
+    }
+
     /// Tests that the `RawFrame::from_buf` method correctly constructs a
     /// `RawFrame` from a given buffer.
     #[test]
@@ -2036,8 +2084,8 @@ mod tests {
 
             let raw = RawFrame::from_buf(&buf).unwrap();
 
-            assert_eq!(raw.header, header);
-            assert_eq!(raw.payload, data)
+            assert_eq!(raw.header(), header);
+            assert_eq!(raw.payload(), data)
         }
         // Correct frame with trailing data
         {
@@ -2051,10 +2099,7 @@ mod tests {
                 buf
             };
 
-            let raw = RawFrame::from_buf(&buf).unwrap();
-
-            assert_eq!(raw.header, header);
-            assert_eq!(raw.payload, data)
+            assert!(RawFrame::from_buf(&buf).is_none());
         }
         // Missing payload chunk
         {

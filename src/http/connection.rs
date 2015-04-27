@@ -54,7 +54,7 @@ pub enum HttpFrame {
 
 impl HttpFrame {
     pub fn from_raw(raw_frame: RawFrame) -> HttpResult<HttpFrame> {
-        let frame = match raw_frame.header.1 {
+        let frame = match raw_frame.header().1 {
             0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(raw_frame))),
@@ -599,6 +599,7 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
 
 #[cfg(test)]
 mod tests {
+    use std::mem;
     use std::io::{Cursor, Read, Write};
     use std::io;
 
@@ -606,6 +607,7 @@ mod tests {
         Frame, DataFrame, HeadersFrame,
         SettingsFrame,
         pack_header,
+        unpack_header,
         RawFrame,
     };
     use super::{HttpConnection, HttpFrame, ClientConnection};
@@ -1080,8 +1082,10 @@ mod tests {
     ///
     /// Panics if unable to obtain such a frame.
     fn get_frame_from_buf<F: Frame>(buf: &[u8]) -> (F, usize) {
-        let raw = RawFrame::from_buf(buf).unwrap();
-        let len = raw.header.0 as usize;
+        let headers = unpack_header(unsafe { mem::transmute(buf.as_ptr()) });
+        let len = headers.0 as usize;
+
+        let raw = RawFrame::from_buf(&buf[..9 + len]).unwrap();
         let frame = Frame::from_raw(raw).unwrap();
 
         (frame, len + 9)
