@@ -224,6 +224,11 @@ impl RawFrame {
     }
 }
 
+/// Provide a conversion into a `Vec`.
+impl Into<Vec<u8>> for RawFrame {
+    fn into(self) -> Vec<u8> { self.raw_content }
+}
+
 /// An enum representing the flags that a `DataFrame` can have.
 /// The integer representation associated to each variant is that flag's
 /// bitmask.
@@ -2146,5 +2151,26 @@ mod tests {
         let raw = RawFrame::from_buf(&buf).unwrap();
 
         assert_eq!(raw.serialize(), buf);
+    }
+
+    /// Tests that converting a `RawFrame` into a `Vec` works correctly.
+    #[test]
+    fn test_raw_frame_into_vec() {
+        let data = b"123";
+        let header = (data.len() as u32, 0x1, 0, 1);
+        let buf = {
+            let mut buf = Vec::new();
+            buf.extend(pack_header(&header).to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
+            buf
+        };
+        let raw = RawFrame::from_buf(&buf).unwrap();
+
+        let serialized = raw.serialize();
+        let vec: Vec<_> = raw.into();
+        // The vector is equivalent to the original buffer?
+        assert_eq!(vec, buf);
+        // The vector and the serialized representation are also equivalent
+        assert_eq!(vec, serialized);
     }
 }
