@@ -380,6 +380,31 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
     }
 }
 
+/// Writes the client preface to the underlying HTTP/2 connection.
+///
+/// According to the HTTP/2 spec, a client preface is first a specific
+/// sequence of octets, followed by a settings frame.
+///
+/// # Returns
+/// Any error raised by the underlying connection is propagated.
+pub fn write_preface<W: io::Write>(stream: &mut W) -> Result<(), io::Error> {
+    // The first part of the client preface is always this sequence of 24
+    // raw octets.
+    let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    try!(stream.write_all(preface));
+
+    // It is followed by the client's settings.
+    let settings = {
+        let mut frame = SettingsFrame::new();
+        frame.add_setting(HttpSetting::EnablePush(0));
+        frame
+    };
+    try!(stream.write_all(&settings.serialize()));
+    debug!("Sent client preface");
+
+    Ok(())
+}
+
 /// A struct implementing the client side of an HTTP/2 connection.
 ///
 /// It builds on top of an `HttpConnection` and provides additional methods
@@ -432,33 +457,8 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     /// Sends the client preface, followed by validating the receipt of the
     /// server preface.
     pub fn init(&mut self) -> HttpResult<()> {
-        try!(self.write_preface());
+        try!(write_preface(&mut self.conn.stream));
         try!(self.read_preface());
-        Ok(())
-    }
-
-    /// Writes the client preface to the underlying HTTP/2 connection.
-    ///
-    /// According to the HTTP/2 spec, a client preface is first a specific
-    /// sequence of octets, followed by a settings frame.
-    ///
-    /// # Returns
-    /// Any error raised by the underlying connection is propagated.
-    fn write_preface(&mut self) -> HttpResult<()> {
-        // The first part of the client preface is always this sequence of 24
-        // raw octets.
-        let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-        try!(self.conn.stream.write(preface));
-
-        // It is followed by the client's settings.
-        let settings = {
-            let mut frame = SettingsFrame::new();
-            frame.add_setting(HttpSetting::EnablePush(0));
-            frame
-        };
-        try!(self.conn.send_frame(settings));
-        debug!("Sent client preface");
-
         Ok(())
     }
 
@@ -610,7 +610,7 @@ mod tests {
         unpack_header,
         RawFrame,
     };
-    use super::{HttpConnection, HttpFrame, ClientConnection};
+    use super::{HttpConnection, HttpFrame, ClientConnection, write_preface};
     use super::super::transport::TransportStream;
     use super::super::{HttpError, HttpScheme, Request, StreamId, Header, HttpResult};
     use super::super::session::Session;
@@ -864,6 +864,27 @@ mod tests {
         // Invalid since it's headers on stream 0
         let invalid_frame = HeadersFrame::new(vec![], 0);
         assert!(HttpFrame::from_raw(to_raw(invalid_frame)).is_err());
+    }
+
+    /// Tests that the `write_preface` function correctly writes a client preface to
+    /// a given `io::Write`.
+    #[test]
+    fn test_write_preface() {
+        // The buffer (`io::Write`) into which we will write the preface.
+        let mut written: Vec<u8> = Vec::new();
+
+        // Do it...
+        write_preface(&mut written).unwrap();
+
+        // The first bytes written to the underlying transport layer are the
+        // preface bytes.
+        let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+        let frames_buf = &written[preface.len()..];
+        // Immediately after that we sent a settings frame...
+        assert_eq!(preface, &written[..preface.len()]);
+        let (frame, _): (SettingsFrame, _) = get_frame_from_buf(frames_buf);
+        // ...which was not an ack, but our own settings.
+        assert!(!frame.is_ack());
     }
 
     /// Tests that it is possible to read a single frame from the stream.
