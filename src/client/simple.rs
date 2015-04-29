@@ -43,12 +43,17 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// ```no_run
 /// use std::net::TcpStream;
 /// use solicit::http::HttpScheme;
-/// use solicit::http::connection::HttpConnection;
+/// use solicit::http::connection::{HttpConnection, write_preface};
 /// use solicit::client::SimpleClient;
 /// use std::str;
 ///
+/// // Prepare a stream manually... We must write the preface ourselves in this case.
+/// // This is a more advanced way to use the client and the `HttpConnect` implementations
+/// // should usually be preferred for their convenience.
+/// let mut stream = TcpStream::connect(&("http2bin.org", 80)).unwrap();
+/// write_preface(&mut stream);
 /// // Connect to an HTTP/2 aware server
-/// let conn = HttpConnection::new(TcpStream::connect(&("http2bin.org", 80)).unwrap(),
+/// let conn = HttpConnection::new(stream,
 ///                                HttpScheme::Http,
 ///                                "http2bin.org".into());
 /// let mut client = SimpleClient::with_connection(conn).unwrap();

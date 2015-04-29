@@ -196,6 +196,11 @@ pub trait HttpConnectError {}
 
 /// A trait that can be implemented by structs that want to provide the
 /// functionality of establishing HTTP/2 connections.
+///
+/// The `HttpConnection` instance that is returned by the implementations'
+/// `connect` method needs to already have initialized the stream by writing
+/// the client preface. The helper function `write_preface` can be used for
+/// this purpose (but doesn't have to be).
 pub trait HttpConnect {
     /// The type of the underlying transport stream that the `HttpConnection`s
     /// produced by this `HttpConnect` implementation will be based on.
@@ -317,7 +322,7 @@ impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
         try!(ssl.set_hostname(self.host));
 
         // Wrap the Ssl instance into an `SslStream`
-        let ssl_stream = try!(SslStream::new_from(ssl, raw_tcp));
+        let mut ssl_stream = try!(SslStream::new_from(ssl, raw_tcp));
         // This connector only understands HTTP/2, so if that wasn't chosen in
         // NPN, we raise an error.
         let fail = match ssl_stream.get_selected_npn_protocol() {
@@ -338,6 +343,8 @@ impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
             return Err(TlsConnectError::Http2NotSupported(ssl_stream));
         }
 
+        // Now that the stream is correctly established, we write the client preface.
+        try!(write_preface(&mut ssl_stream));
         // Finally, we can wrap it all up into an `HttpConnection`
         Ok(HttpConnection::new(ssl_stream, HttpScheme::Https, self.host.into()))
     }
@@ -373,7 +380,12 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
     /// port 80.
     /// If it is not possible, returns an `HttpError`.
     fn connect(self) -> Result<HttpConnection<TcpStream>, CleartextConnectError> {
-        let stream = try!(TcpStream::connect((self.host, 80)));
+        let mut stream = try!(TcpStream::connect((self.host, 80)));
+        // Once the stream has been established, we need to write the client preface,
+        // to ensure that the connection is indeed initialized.
+        try!(write_preface(&mut stream));
+        // Now we can wrap it up into an `HttpConnection` that the client can start
+        // using.
         let conn = HttpConnection::new(stream, HttpScheme::Http, self.host.into());
 
         Ok(conn)
@@ -457,7 +469,6 @@ impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     /// Sends the client preface, followed by validating the receipt of the
     /// server preface.
     pub fn init(&mut self) -> HttpResult<()> {
-        try!(write_preface(&mut self.conn.stream));
         try!(self.read_preface());
         Ok(())
     }
@@ -1112,8 +1123,8 @@ mod tests {
         (frame, len + 9)
     }
 
-    /// Tests that a client connection is correctly initialized, by writing the
-    /// client preface and reading the server preface.
+    /// Tests that a client connection is correctly initialized, by reading the
+    /// server preface (i.e. a settings frame) as the first frame of the connection.
     #[test]
     fn test_init_client_conn() {
         let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
@@ -1122,35 +1133,22 @@ mod tests {
             build_http_conn(&server_frame_buf),
             TestSession::new());
 
-        conn.init().ok().unwrap();
-        let written = conn.conn.stream.get_written();
+        conn.init().unwrap();
 
-        // The first bytes written to the underlying transport layer are the
-        // preface bytes.
-        let preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-        let frames_buf = &written[preface.len()..];
-        // Immediately after that we sent a settings frame...
-        assert_eq!(preface, &written[..preface.len()]);
-        let len_settings = {
-            let (frame, sz): (SettingsFrame, _) = get_frame_from_buf(frames_buf);
-            // ...which was not an ack, but our own settings.
-            assert!(!frame.is_ack());
-            sz
-        };
-        // Then, we have read the server's response
+        // We have read the server's response (the settings frame only)
         assert_eq!(
             server_frame_buf.len() as u64,
             conn.conn.stream.get_read_pos());
-        // Finally, we also expect that the client has already sent a response
-        // (an ack) to this server settings frame.
+        // We also sent an ACK already.
+        let written = conn.conn.stream.get_written();
         let len_ack = {
             let (settings_frame, sz): (SettingsFrame, _) =
-                get_frame_from_buf(&frames_buf[len_settings..]);
+                get_frame_from_buf(&written);
             assert!(settings_frame.is_ack());
             sz
         };
-        // ...and we have not written anything else!
-        assert_eq!(len_settings + len_ack, frames_buf.len());
+        // ...and we didn't write anything else.
+        assert_eq!(len_ack, written.len());
     }
 
     /// Tests that a client connection fails to initialize when the server does

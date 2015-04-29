@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use super::super::http::{StreamId, HttpError, HttpScheme, Response, Request, Header};
-use super::super::http::connection::{HttpConnection, ClientConnection};
+use super::super::http::connection::{HttpConnection, ClientConnection, write_preface};
 use super::super::http::session::{DefaultSession, DefaultStream};
 
 /// A struct representing an asynchronously dispatched request. It is used
@@ -82,9 +82,15 @@ impl ClientService {
     pub fn new(host: &str, port: u16) -> Option<(ClientService, Sender<AsyncRequest>)> {
         let (tx, rx): (Sender<AsyncRequest>, Receiver<AsyncRequest>) =
                 mpsc::channel();
+        let mut stream = TcpStream::connect(&(host, port)).unwrap();
+        // The async client doesn't use the `HttpConnect` API for establishing the
+        // connection, so it has to write the preface manually.
+        // (It also just unwraps everything with no real error checking, as it's
+        // mostly a demo/proof-of-concept of an async client implementation.)
+        write_preface(&mut stream).unwrap();
         let mut conn = ClientConnection::with_connection(
                 HttpConnection::new(
-                    TcpStream::connect(&(host, port)).unwrap(),
+                    stream,
                     HttpScheme::Http,
                     host.into()),
                 DefaultSession::<DefaultStream>::new());
