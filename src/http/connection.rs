@@ -190,17 +190,25 @@ impl<S> HttpConnection<S> where S: TransportStream {
 
 }
 
+/// A convenience wrapper type that represents an established client network transport stream.
+/// It wraps the stream itself, the scheme of the protocol to be used, and the remote
+/// host name.
+pub struct ClientStream<TS: TransportStream>(pub TS, pub HttpScheme, pub String);
+
 /// A marker trait for errors raised by attempting to establish an HTTP/2
 /// connection.
 pub trait HttpConnectError {}
 
 /// A trait that can be implemented by structs that want to provide the
-/// functionality of establishing HTTP/2 connections.
+/// functionality of establishing network connections for use by HTTP/2 connections.
 ///
-/// The `HttpConnection` instance that is returned by the implementations'
-/// `connect` method needs to already have initialized the stream by writing
-/// the client preface. The helper function `write_preface` can be used for
-/// this purpose (but doesn't have to be).
+/// The `ClientStream` instance returned from the `connect` method needs to contain
+/// the `TransportStream` that can be used by an HTTP/2 connection, along with the
+/// appropriate scheme (depending on how the connection was established), and the remote
+/// host name.
+///
+/// The transport stream needs to have already been initialized by writing the client
+/// preface. The helper function `write_preface` can be used for this purpose.
 pub trait HttpConnect {
     /// The type of the underlying transport stream that the `HttpConnection`s
     /// produced by this `HttpConnect` implementation will be based on.
@@ -209,13 +217,13 @@ pub trait HttpConnect {
     /// connection (i.e. calling the `connect` method).
     type Err;
 
-    /// Establishes an HTTP/2 connection...
-    fn connect(self) -> Result<HttpConnection<Self::Stream>, Self::Err>;
+    /// Establishes a network connection that can be used by HTTP/2 connections.
+    fn connect(self) -> Result<ClientStream<Self::Stream>, Self::Err>;
 }
 
-/// A struct implementing the functionality of establishing an HTTP/2
-/// connection over a TLS-backed stream. The protocol negotiation also takes
-/// place within the TLS negotiation.
+/// A struct implementing the functionality of establishing a TLS-backed TCP stream
+/// that can be used by an HTTP/2 connection. Takes care to set all the TLS options
+/// to those allowed by the HTTP/2 spec, as well as of the protocol negotiation.
 pub struct TlsConnector<'a, 'ctx> {
     pub host: &'a str,
     // pub context: Option<&'ctx SslContext>,
@@ -306,7 +314,7 @@ impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
     type Stream = SslStream<TcpStream>;
     type Err = TlsConnectError;
 
-    fn connect(self) -> Result<HttpConnection<SslStream<TcpStream>>, TlsConnectError> {
+    fn connect(self) -> Result<ClientStream<SslStream<TcpStream>>, TlsConnectError> {
         // First, create a TCP connection to port 443
         let raw_tcp = try!(TcpStream::connect(&(self.host, 443)));
         // Now build the SSL instance, depending on which SSL context should be
@@ -345,13 +353,17 @@ impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
 
         // Now that the stream is correctly established, we write the client preface.
         try!(write_preface(&mut ssl_stream));
-        // Finally, we can wrap it all up into an `HttpConnection`
-        Ok(HttpConnection::new(ssl_stream, HttpScheme::Https, self.host.into()))
+
+        // All done.
+        Ok(ClientStream(ssl_stream, HttpScheme::Https, self.host.into()))
     }
 }
 
-/// A struct that establishes an HTTP/2 connection based on a prior-knowledge
-/// cleartext TCP connection. It defaults to using port 80 on the given host.
+/// A struct that establishes a cleartext TCP connection that can be used by an HTTP/2
+/// connection. Defaults to using port 80.
+///
+/// It assumes that the connection is based on prior knowledge of the server's
+/// support for HTTP/2.
 ///
 /// More information in the [spec](http://http2.github.io/http2-spec/#known-http)
 pub struct CleartextConnector<'a> {
@@ -376,19 +388,16 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
     type Stream = TcpStream;
     type Err = CleartextConnectError;
 
-    /// Establishes a cleartext TCP-backed HTTP/2 connection to the host on
-    /// port 80.
+    /// Establishes a cleartext TCP connection to the host on port 80.
     /// If it is not possible, returns an `HttpError`.
-    fn connect(self) -> Result<HttpConnection<TcpStream>, CleartextConnectError> {
+    fn connect(self) -> Result<ClientStream<TcpStream>, CleartextConnectError> {
         let mut stream = try!(TcpStream::connect((self.host, 80)));
         // Once the stream has been established, we need to write the client preface,
         // to ensure that the connection is indeed initialized.
         try!(write_preface(&mut stream));
-        // Now we can wrap it up into an `HttpConnection` that the client can start
-        // using.
-        let conn = HttpConnection::new(stream, HttpScheme::Http, self.host.into());
 
-        Ok(conn)
+        // All done.
+        Ok(ClientStream(stream, HttpScheme::Http, self.host.into()))
     }
 }
 
