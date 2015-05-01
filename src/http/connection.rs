@@ -92,6 +92,19 @@ pub struct HttpConnection<S> where S: TransportStream {
     pub host: String,
 }
 
+/// A trait that should be implemented by types that can provide the functionality
+/// of sending HTTP/2 frames.
+pub trait SendFrame {
+    /// Sends the given raw frame.
+    fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()>;
+    /// Sends the given concrete frame.
+    ///
+    /// A default implementation based on the `send_raw_frame` method is provided.
+    fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
+        self.send_raw_frame(RawFrame::from(frame.serialize()))
+    }
+}
+
 impl<S> HttpConnection<S> where S: TransportStream {
     /// Creates a new `HttpConnection` that will use the given stream as its
     /// underlying transport layer.
