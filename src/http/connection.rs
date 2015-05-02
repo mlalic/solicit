@@ -652,6 +652,8 @@ mod tests {
     use std::mem;
     use std::io::{Cursor, Read, Write};
     use std::io;
+    use std::cell::{RefCell, Cell};
+    use std::rc::Rc;
 
     use super::super::frame::{
         Frame, DataFrame, HeadersFrame,
@@ -677,10 +679,11 @@ mod tests {
     ///
     /// It is possible to "close" the stream (both ends at once) so that
     /// aftwerwards any read or write attempt returns an `io::Error`;
+    #[derive(Clone)]
     struct StubTransportStream {
-        reader: Cursor<Vec<u8>>,
-        writer: Cursor<Vec<u8>>,
-        closed: bool,
+        reader: Rc<RefCell<Cursor<Vec<u8>>>>,
+        writer: Rc<RefCell<Cursor<Vec<u8>>>>,
+        closed: Rc<Cell<bool>>,
     }
 
     impl StubTransportStream {
@@ -688,57 +691,57 @@ mod tests {
         /// the bytes that will be read from the stream.
         fn with_stub_content(stub: &Vec<u8>) -> StubTransportStream {
             StubTransportStream {
-                reader: Cursor::new(stub.clone()),
-                writer: Cursor::new(Vec::new()),
-                closed: false,
+                reader: Rc::new(RefCell::new(Cursor::new(stub.clone()))),
+                writer: Rc::new(RefCell::new(Cursor::new(Vec::new()))),
+                closed: Rc::new(Cell::new(false)),
             }
         }
 
         /// Returns a slice representing the bytes already written to the
         /// stream.
-        fn get_written(&self) -> &[u8] {
-            self.writer.get_ref()
+        fn get_written(&self) -> Vec<u8> {
+            self.writer.borrow().get_ref().to_vec()
         }
 
         /// Returns the position up to which the stream has been read.
         fn get_read_pos(&self) -> u64 {
-            self.reader.position()
+            self.reader.borrow().position()
         }
 
         /// Closes the stream, making any read or write operation return an
         /// `io::Error` from there on out.
         fn close(&mut self) {
-            self.closed = true;
+            self.closed.set(true);
         }
     }
 
     impl io::Read for StubTransportStream {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            if self.closed {
+            if self.closed.get() {
                 Err(io::Error::new(io::ErrorKind::Other, "Closed"))
             } else {
-                self.reader.read(buf)
+                self.reader.borrow_mut().read(buf)
             }
         }
     }
 
     impl io::Write for StubTransportStream {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            if self.closed {
+            if self.closed.get() {
                 Err(io::Error::new(io::ErrorKind::Other, "Closed"))
             } else {
-                self.writer.write(buf)
+                self.writer.borrow_mut().write(buf)
             }
         }
 
         fn flush(&mut self) -> io::Result<()> {
-            self.writer.flush()
+            self.writer.borrow_mut().flush()
         }
     }
 
     impl TransportStream for StubTransportStream {
         fn try_split(&self) -> Result<StubTransportStream, io::Error> {
-            panic!("HttpConnection should never need to split the stream.");
+            Ok(self.clone())
         }
     }
 
@@ -843,6 +846,30 @@ mod tests {
         {
             let mut stream = StubTransportStream::with_stub_content(&vec![]);
             stream.close();
+            assert!(stream.write(&[1]).is_err());
+            assert!(stream.read(&mut [0; 5]).is_err());
+        }
+        // A stream can be split
+        {
+            let mut stream = StubTransportStream::with_stub_content(&vec![3, 4]);
+            let mut other = stream.try_split().unwrap();
+            // Write something using both of them
+            stream.write(&[1]).unwrap();
+            other.write(&[2]).unwrap();
+            assert_eq!(&[1, 2], &stream.get_written()[..]);
+            assert_eq!(&[1, 2], &other.get_written()[..]);
+            // Try reading independently...
+            let mut buf = [0];
+            stream.read(&mut buf).unwrap();
+            assert_eq!(&[3], &buf);
+            other.read(&mut buf).unwrap();
+            assert_eq!(&[4], &buf);
+        }
+        // Closing one handle of the stream closes all handles
+        {
+            let mut stream = StubTransportStream::with_stub_content(&vec![3, 4]);
+            let mut other = stream.try_split().unwrap();
+            other.close();
             assert!(stream.write(&[1]).is_err());
             assert!(stream.read(&mut [0; 5]).is_err());
         }
@@ -1304,7 +1331,7 @@ mod tests {
         conn.send_request(req).unwrap();
         let written = conn.conn.stream.get_written();
 
-        let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(written);
+        let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
         // We sent a headers frame with end of headers and end of stream flags
         assert!(frame.is_headers_end());
         assert!(frame.is_end_of_stream());
