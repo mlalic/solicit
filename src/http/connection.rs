@@ -131,6 +131,45 @@ pub trait ReceiveFrame {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame>;
 }
 
+/// A blanket implementation of the trait for `TransportStream`s.
+impl<TS> ReceiveFrame for TS where TS: TransportStream {
+    fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
+        // A helper function that reads the header of an HTTP/2 frame.
+        // Simply reads the next 9 octets (and no more than 9).
+        let read_header_bytes = |stream: &mut TS| -> HttpResult<[u8; 9]> {
+            let mut buf = [0; 9];
+            try!(stream.read_exact(&mut buf));
+
+            Ok(buf)
+        };
+        // A helper function that reads the payload of a frame with the given length.
+        // Reads exactly the length of the frame from the given stream.
+        let read_payload = |stream: &mut TS, len: u32| -> HttpResult<Vec<u8>> {
+            debug!("Trying to read {} bytes of frame payload", len);
+            let length = len as usize;
+            let mut buf: Vec<u8> = Vec::with_capacity(length);
+            // This is completely safe since we *just* allocated the vector with
+            // the same capacity.
+            unsafe { buf.set_len(length); }
+            try!(stream.read_exact(&mut buf));
+
+            Ok(buf)
+        };
+
+        let header = unpack_header(&try!(read_header_bytes(self)));
+        debug!("Received frame header {:?}", header);
+
+        let payload = try!(read_payload(self, header.0));
+        let raw_frame = RawFrame::with_payload(header, payload);
+
+        // TODO: The reason behind being unable to decode the frame should be
+        //       extracted to allow an appropriate connection-level action to be
+        //       taken (e.g. responding with a PROTOCOL_ERROR).
+        let frame = try!(HttpFrame::from_raw(raw_frame));
+        Ok(frame)
+    }
+}
+
 impl<S> HttpConnection<S> where S: TransportStream {
     /// Creates a new `HttpConnection` that will use the given stream as its
     /// underlying transport layer.
@@ -673,7 +712,7 @@ mod tests {
         unpack_header,
         RawFrame,
     };
-    use super::{HttpConnection, HttpFrame, ClientConnection, write_preface, SendFrame};
+    use super::{HttpConnection, HttpFrame, ClientConnection, write_preface, SendFrame, ReceiveFrame};
     use super::super::transport::TransportStream;
     use super::super::{HttpError, HttpScheme, Request, StreamId, Header, HttpResult};
     use super::super::session::Session;
@@ -990,6 +1029,34 @@ mod tests {
             assert_eq!(&writeable[previous..], &frame_serialized[..]);
             previous = writeable.len();
         }
+    }
+
+    /// Tests that the implementation of `ReceiveFrame` for `TransportStream` types
+    /// works correctly.
+    #[test]
+    fn test_recv_frame_for_transport_stream() {
+        let unknown_frame = RawFrame::from_buf(&{
+            let mut buf: Vec<u8> = Vec::new();
+            // Frame type 10 with a payload of length 1 on stream 1
+            let header = (1u32, 10u8, 0u8, 1u32);
+            buf.extend(pack_header(&header).to_vec().into_iter());
+            buf.push(1);
+            buf
+        }).unwrap();
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+            HttpFrame::DataFrame(DataFrame::new(1)),
+            HttpFrame::DataFrame(DataFrame::new(3)),
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
+            HttpFrame::UnknownFrame(unknown_frame),
+        ];
+        let mut stream = StubTransportStream::with_stub_content(&build_stub_from_frames(&frames));
+
+        for frame in frames.into_iter() {
+            assert_eq!(frame, stream.recv_frame().unwrap());
+        }
+        // Attempting to read after EOF yields an error
+        assert!(stream.recv_frame().is_err());
     }
 
     /// Tests that the `HttpFrame::from_raw` method correctly recognizes the frame
