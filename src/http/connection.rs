@@ -84,8 +84,9 @@ impl HttpFrame {
 /// It provides an API for writing and reading HTTP/2 frames. It also takes
 /// care to validate the received frames.
 pub struct HttpConnection<S> where S: TransportStream {
-    /// The stream to which the raw bytes will be written
     stream: S,
+    /// The instance handling the writing of frames.
+    sender: S,
     /// The scheme of the connection
     pub scheme: HttpScheme,
     /// The host to which the connection is established
@@ -129,8 +130,10 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// The host to which the connection is established, as well as the connection
     /// scheme are provided.
     pub fn new<'a>(stream: S, scheme: HttpScheme, host: Cow<'a, str>) -> HttpConnection<S> {
+        let sender = stream.try_split().unwrap();
         HttpConnection {
             stream: stream,
+            sender: sender,
             scheme: scheme,
             host: host.into_owned(),
         }
@@ -144,10 +147,10 @@ impl<S> HttpConnection<S> where S: TransportStream {
     /// `HttpError::IoError` variant and propagated upwards.
     ///
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
+    #[inline]
     pub fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
         debug!("Sending frame ... {:?}", frame.get_header());
-        try!(self.stream.write_all(&frame.serialize()));
-        Ok(())
+        self.sender.send_frame(frame)
     }
 
     /// Reads a new frame from the transport layer.
@@ -878,11 +881,10 @@ mod tests {
     /// A helper function that creates an `HttpConnection` with a `StubTransportStream`
     /// where the content of the stream is defined by the given `stub_data`
     fn build_http_conn(stub_data: &Vec<u8>) -> HttpConnection<StubTransportStream> {
-        HttpConnection {
-            stream: StubTransportStream::with_stub_content(stub_data),
-            scheme: HttpScheme::Http,
-            host: "".to_string(),
-        }
+        HttpConnection::new(
+            StubTransportStream::with_stub_content(stub_data),
+            HttpScheme::Http,
+            "".into())
     }
 
     /// A helper function that builds a buffer of bytes from the given `Vec` of
