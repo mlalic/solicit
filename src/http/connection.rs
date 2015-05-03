@@ -123,6 +123,14 @@ impl<W> SendFrame for W where W: io::Write {
     }
 }
 
+/// A trait that should be implemented by types that can provide the functionality
+/// of receiving HTTP/2 frames.
+pub trait ReceiveFrame {
+    /// Return a new `HttpFrame` instance. Unknown frames can be wrapped in the
+    /// `HttpFrame::UnknownFrame` variant (i.e. their `RawFrame` representation).
+    fn recv_frame(&mut self) -> HttpResult<HttpFrame>;
+}
+
 impl<S> HttpConnection<S> where S: TransportStream {
     /// Creates a new `HttpConnection` that will use the given stream as its
     /// underlying transport layer.
