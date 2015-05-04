@@ -4,6 +4,14 @@ name = "solicit"
 version = "0.0.1"
 authors = ["Marko Lalic <marko.lalic@gmail.com>"]
 
+description = "A library implementation of HTTP/2"
+repository = "https://github.com/mlalic/solicit"
+homepage = "https://github.com/mlalic/solicit"
+readme = "README.md"
+license = "MIT"
+keywords = ["http2", "protocol", "solicit"]
+documentation = "https://mlalic.github.io/solicit/solicit/index.html"
+
 [dependencies]
 hpack = "*"
 log = "^0.3"
