@@ -53,7 +53,8 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// let mut stream = TcpStream::connect(&("http2bin.org", 80)).unwrap();
 /// write_preface(&mut stream);
 /// // Connect to an HTTP/2 aware server
-/// let conn = HttpConnection::new(stream,
+/// let conn = HttpConnection::<TcpStream, TcpStream>::new(
+///                                stream,
 ///                                HttpScheme::Http,
 ///                                "http2bin.org".into());
 /// let mut client = SimpleClient::with_connection(conn).unwrap();
@@ -141,7 +142,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// It assumes that the connection is in an uninitialized state and will try
     /// to send the client preface and make sure it receives the server preface
     /// before returning.
-    pub fn with_connection(conn: HttpConnection<S>) -> HttpResult<SimpleClient<S>> {
+    pub fn with_connection(conn: HttpConnection<S, S>) -> HttpResult<SimpleClient<S>> {
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, DefaultSession::new()),
             next_stream_id: 1,
@@ -162,7 +163,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
             where C: HttpConnect<Stream=S> {
         let stream = connector.connect().ok().unwrap();
-        let conn = HttpConnection::new(stream.0, stream.1, stream.2.into());
+        let conn = HttpConnection::<S, S>::new(stream.0, stream.1, stream.2.into());
         SimpleClient::with_connection(conn)
     }
 

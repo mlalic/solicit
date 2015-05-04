@@ -83,9 +83,9 @@ impl HttpFrame {
 ///
 /// It provides an API for writing and reading HTTP/2 frames. It also takes
 /// care to validate the received frames.
-pub struct HttpConnection<S> where S: TransportStream {
+pub struct HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// The instance handling the reading of frames.
-    receiver: S,
+    receiver: R,
     /// The instance handling the writing of frames.
     sender: S,
     /// The scheme of the connection
@@ -171,13 +171,14 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
     }
 }
 
-impl<S> HttpConnection<S> where S: TransportStream {
+impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// Creates a new `HttpConnection` that will use the given stream as its
     /// underlying transport layer.
     ///
     /// The host to which the connection is established, as well as the connection
     /// scheme are provided.
-    pub fn new<'a>(stream: S, scheme: HttpScheme, host: Cow<'a, str>) -> HttpConnection<S> {
+    pub fn new<'a, TS>(stream: TS, scheme: HttpScheme, host: Cow<'a, str>)
+            -> HttpConnection<TS, TS> where TS: TransportStream {
         let sender = stream.try_split().unwrap();
         HttpConnection {
             receiver: stream,
@@ -469,7 +470,7 @@ pub struct ClientConnection<TS, S>
         where TS: TransportStream, S: Session {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
-    conn: HttpConnection<TS>,
+    conn: HttpConnection<TS, TS>,
     host: String,
     /// HPACK encoder
     encoder: hpack::Encoder<'static>,
@@ -484,7 +485,7 @@ pub struct ClientConnection<TS, S>
 impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
-    pub fn with_connection(conn: HttpConnection<TS>, session: S)
+    pub fn with_connection(conn: HttpConnection<TS, TS>, session: S)
             -> ClientConnection<TS, S> {
         let host = conn.host.clone();
         ClientConnection {
@@ -826,7 +827,7 @@ mod tests {
     ///
     /// If the `HttpFrame` variant is `HttpFrame::UnknownFrame`, nothing will
     /// be sent and an `Ok(())` is returned.
-    fn send_frame<TS: TransportStream>(conn: &mut HttpConnection<TS>, frame: HttpFrame)
+    fn send_frame<S: SendFrame, R: ReceiveFrame>(conn: &mut HttpConnection<S, R>, frame: HttpFrame)
             -> HttpResult<()> {
         match frame {
             HttpFrame::DataFrame(frame) => conn.send_frame(frame),
@@ -882,8 +883,9 @@ mod tests {
 
     /// A helper function that creates an `HttpConnection` with a `StubTransportStream`
     /// where the content of the stream is defined by the given `stub_data`
-    fn build_http_conn(stub_data: &Vec<u8>) -> HttpConnection<StubTransportStream> {
-        HttpConnection::new(
+    fn build_http_conn(stub_data: &Vec<u8>)
+            -> HttpConnection<StubTransportStream, StubTransportStream> {
+        HttpConnection::<StubTransportStream, StubTransportStream>::new(
             StubTransportStream::with_stub_content(stub_data),
             HttpScheme::Http,
             "".into())
