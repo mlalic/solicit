@@ -9,7 +9,11 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
+use std::io;
 
+use http::connection::{SendFrame};
+use http::HttpResult;
+use http::frame::RawFrame;
 use super::super::http::{StreamId, HttpError, HttpScheme, Response, Request, Header};
 use super::super::http::connection::{HttpConnection, ClientConnection, write_preface};
 use super::super::http::session::{DefaultSession, DefaultStream};
@@ -27,6 +31,78 @@ struct AsyncRequest {
     /// The sender side of a channel where the response to this request should
     /// be delivered.
     tx: Sender<Response>,
+}
+
+/// A struct that buffers `RawFrame`s in an internal `mpsc` channel and sends them using the
+/// wrapped `SendFrame` instance when the `send_next` method is called.
+///
+/// Additionally, it provides a `ChannelFrameSenderHandle` instance that implements the `SendFrame`
+/// trait and as such can be passed to the `HttpConnection`. This handler simply queues the frame
+/// into the internal channel, without ever blocking.
+///
+/// As such, this is a convenience struct that makes it possible to provide non-blocking writes
+/// from within `HttpConnection`s, while handling the actual writes using a `SendFrame`
+/// implementation that will block until the frame is sent on a separate thread.
+struct ChannelFrameSender<S> where S: SendFrame {
+    /// The receiving end of the channel. Buffers the frames that are to be sent.
+    rx: Receiver<RawFrame>,
+    /// The `SendFrame` instance that will perform the actual writes from within the `send_next`
+    /// method.
+    inner: S,
+}
+
+impl<S> ChannelFrameSender<S> where S: SendFrame {
+    /// Creates a new `ChannelFrameSender` that will use the provided `SendFrame` instance within
+    /// the `send_next` method in order to perform the final send to the remote peer.
+    /// The `ChannelFrameSenderHandle` that is returned can be used to queue frames for sending
+    /// from within `HttpConnection`s, as it implements the `SendFrame` trait.
+    fn new(inner: S) -> (ChannelFrameSender<S>, ChannelFrameSenderHandle) {
+        let (send, recv) = mpsc::channel();
+
+        let handle = ChannelFrameSenderHandle { tx: send };
+        let sender = ChannelFrameSender {
+            rx: recv,
+            inner: inner,
+        };
+        (sender, handle)
+    }
+
+    /// Performs the send of the next frame that is buffered in the internal channel of the struct.
+    ///
+    /// If there is no frame in the channel, it will block until there is one there.
+    ///
+    /// If the channel becomes disconnected from all senders, indicating that all handles to the
+    /// sender have been dropped, the mehod will return an error.
+    fn send_next(&mut self) -> HttpResult<()> {
+        let frame = try!(
+            self.rx.recv()
+                   .map_err(|_| {
+                       io::Error::new(io::ErrorKind::Other, "Unable to send frame")
+                   })
+        );
+        debug!("Performing the actual send frame IO");
+        self.inner.send_raw_frame(frame)
+    }
+}
+
+/// A handle to the `ChannelFrameSender` and an implementation of the `SendFrame` trait. It simply
+/// queues the given frames into the send queue of the `ChannelFrameSender` without ever blocking.
+/// (Except possibly to allocate some memory, as per the `mpsc::channel` specification.)
+struct ChannelFrameSenderHandle {
+    /// The sender side of the channel that buffers the frames to be written. Allows the handle to
+    /// queue the frame for future writing without blocking on the IO.
+    tx: Sender<RawFrame>,
+}
+
+impl SendFrame for ChannelFrameSenderHandle {
+    fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
+        try!(self.tx.send(frame)
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::Other, "Unable to send frame")
+                    }));
+        debug!("Queued the frame for sending...");
+        Ok(())
+    }
 }
 
 /// An enum that represents errors that can be raised by the operation of a
