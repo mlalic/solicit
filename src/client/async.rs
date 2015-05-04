@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
-use http::connection::{SendFrame};
+use http::connection::{SendFrame, ReceiveFrame, HttpFrame};
 use http::HttpResult;
 use http::frame::RawFrame;
 use super::super::http::{StreamId, HttpError, HttpScheme, Response, Request, Header};
@@ -102,6 +102,76 @@ impl SendFrame for ChannelFrameSenderHandle {
                     }));
         debug!("Queued the frame for sending...");
         Ok(())
+    }
+}
+
+/// A struct that buffers `HttpFrame`s read by the wrapped `ReceiveFrame` instance in an internal
+/// `mpsc` channel. The reads from the wrapped `ReceiveFrame` instance are triggered by calls to
+/// the `read_next` method.
+///
+/// Additionally, it provides a `ChannelFrameReceiverHandle` instance that implements the
+/// `ReceiveFrame` trait, such that it pops the next available frame from the internal channel.
+/// If there are no available frames, it will block, so care must be taken to trigger the
+/// connection's frame handling only when there are buffered frames, if it is not to block.
+///
+/// As such, this is a convenience struct that makes it possible to provide non-blocking reads
+/// from within `HttpConnection`s, while handling the actual reads using a `ReceiveFrame`
+/// implementation that can block. (Predicated on triggering a single frame handle operation on
+/// the connection for each successfully executed `read_next`.)
+struct ChannelFrameReceiver<R> where R: ReceiveFrame {
+    /// The sender side of the channel. Buffers the frames read by the wrapped `ReceiveFrame`
+    /// instance for future consumation by the associated `ChannelFrameReceiverHandle`.
+    tx: Sender<HttpFrame>,
+    /// The `ReceiveFrame` instance that performs the actual reading of the frame, used from within
+    /// the `read_next` method.
+    inner: R,
+}
+
+impl<R> ChannelFrameReceiver<R> where R: ReceiveFrame {
+    /// Creates a new `ChannelFrameReceiver`, as well as the associated
+    /// `ChannelFrameReceiverHandle`.
+    fn new(inner: R) -> (ChannelFrameReceiver<R>, ChannelFrameReceiverHandle) {
+        let (send, recv) = mpsc::channel();
+
+        let handle = ChannelFrameReceiverHandle { rx: recv };
+        let receiver = ChannelFrameReceiver {
+            tx: send,
+            inner: inner,
+        };
+        (receiver, handle)
+    }
+
+    /// Performs a `recv_frame` operation on the wrapped `ReceiveFrame` instance, possibly blocking
+    /// the thread in the process, depending on the implementation of the trait. Once a frame is
+    /// returned, it will buffer it within the internal channel.
+    fn read_next(&mut self) -> HttpResult<()> {
+        let frame = try!(self.inner.recv_frame());
+        try!(self.tx.send(frame)
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::Other, "Unable to read frame")
+                    }));
+        Ok(())
+    }
+}
+
+/// A handle to the `ChannelFrameReceiver` and an implementation of the `ReceiveFrame` trait.
+/// It simply pops the next frame from the internal channel that buffers the frames read by the
+/// `ReceiveFrame` instance wrapped by the associated `ChannelFrameReceiver`. If there are no
+/// frames currently buffered, it blocks until there is one. Therefore, the `handle_next_frame`
+/// method of the `HttpConnection` that relies on the IO provided by this `ReceiveFrame`
+/// implementation should be triggered only when sure that there are buffered frames, if blocking
+/// handles are to be avoided.
+struct ChannelFrameReceiverHandle {
+    /// The receiver end of the channel that buffers the received frames.
+    rx: Receiver<HttpFrame>,
+}
+
+impl ReceiveFrame for ChannelFrameReceiverHandle {
+    fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
+        self.rx.recv()
+            .map_err(|_| {
+                HttpError::from(io::Error::new(io::ErrorKind::Other, "Unable to read frame"))
+            })
     }
 }
 
