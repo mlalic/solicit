@@ -3,7 +3,7 @@
 //! It allows users to make requests to the same underlying connection from
 //! different threads concurrently, as well as to receive the response
 //! asynchronously.
-use std::net::TcpStream;
+use std::net::{TcpStream, Shutdown};
 use std::collections::HashMap;
 
 use std::sync::mpsc::{Sender, Receiver};
@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
+use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame};
 use http::HttpResult;
 use http::frame::RawFrame;
@@ -185,17 +186,52 @@ enum ClientServiceErr {
     Http(HttpError),
 }
 
+/// An enum representing the types of work that the `ClientService` can perform from within its
+/// `run_once` method.
+enum WorkItem {
+    /// Queue a new request to the HTTP/2 connection.
+    Request(AsyncRequest),
+    /// Trigger a new `handle_next_frame`. The work item should be queued only when there is a
+    /// frame to be handled to avoid blocking the `run_once` call.
+    HandleFrame,
+    /// Signals to the service that a new client is connected. Helps it keep track of whether there
+    /// are clients that would expect a response.
+    NewClient,
+    /// Signals to the service that a client has disconnected. Helps it keep track of whether there
+    /// are clients that would expect a response.
+    ClientLeft,
+}
+
 /// An internal struct encapsulating a service that lets multiple clients
 /// issue concurrent requests to the same HTTP/2 connection.
 ///
-/// The service handles issuing requests that it receives on a channel (the
-/// receiving end of it is `rx`) to the server and relaying the requests to
-/// the corresponding channel (the one given in the `AsyncRequest` instance
-/// that was read off the requests channel).
+/// The service maintains an internal queue of `WorkItem`s that indicate what the operations that
+/// it should perform. The next operation from the queue is performed on each `run_once` method
+/// call.
 ///
-/// The service does not automatically start running in a background thread.
-/// The user needs to start that explicitly and decide how they want to handle
-/// running the `run_once` method.
+/// It handles issuing new requests (corresponding to `WorkItem::Request` work item), handling the
+/// next received frame (when indicated by the `WorkItem::HandleFrame`), and tracks the number of
+/// connected clients (`run_once` returns an error once there are no more clients connected to the
+/// service).
+///
+/// If there is no work in the queue, the `run_once` method blocks.
+///
+/// Essentially, this represents a simplified event loop that handles events queued on the work
+/// queue (blocking to wait for new work when none is available; does not spin). Therefore, the
+/// user of the `ClientService` needs to provide a dedicated thread in which to run the `run_once`
+/// event loop handler.
+///
+/// Additionally, the client needs to make sure to perform the actual socket IO (which is fully
+/// blocking, without even timeout support currently in Rust) in threads dedicated for that, by
+/// calling the `send_next` or `read_next` methods of the `ChannelFrameSender` or
+/// `ChannelFrameReceiver`, which are returned from the `ClientService` constructor.
+///
+/// TODO: Technically, the `run_once` method could take a `WorkItem`, so a single event loop could
+///       dispatch work items to a corresponding service, removing the need for the
+///       thread-per-service requirement. However, at that point we're nearing a reimplementation
+///       of a real event loop, which is slightly out of scope of the `solicit` library, as
+///       imagined; the async client is (for now) supposed to be a proof-of-concept
+///       implementation of a high-level async/concurrent HTTP/2 client.
 struct ClientService {
     /// The ID that will be assigned to the next client-initiated stream.
     next_stream_id: StreamId,
@@ -205,14 +241,27 @@ struct ClientService {
     /// but sent).
     limit: u32,
     /// The connection that is used for underlying HTTP/2 communication.
-    conn: ClientConnection<TcpStream, TcpStream, DefaultSession>,
+    conn: ClientConnection<ChannelFrameSenderHandle, ChannelFrameReceiverHandle, DefaultSession>,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
     chans: HashMap<StreamId, Sender<Response>>,
-    /// The receiver end of a channel to which requests that clients wish to
-    /// issue are queued.
-    rx: Receiver<AsyncRequest>,
+    /// The receiver end of a channel to which work items for the service are
+    /// queued. Work items include the variants of the `WorkItem` enum.
+    work_queue: Receiver<WorkItem>,
+    /// The queue of `AsyncRequest`s that haven't yet been sent to the server.
+    request_queue: Vec<AsyncRequest>,
+    /// Tracks the number of currently connected clients -- once it reaches 0, the `run_once`
+    /// method returns an error.
+    client_count: i32,
 }
+
+/// A helper wrapper around the components of the `ClientService` that are returned from its
+/// constructor.
+struct Service(
+    ClientService,
+    Sender<WorkItem>,
+    ChannelFrameReceiver<TcpStream>,
+    ChannelFrameSender<TcpStream>);
 
 impl ClientService {
     /// Creates a new `ClientService` that will communicate over a new HTTP/2
@@ -220,13 +269,22 @@ impl ClientService {
     ///
     /// # Returns
     ///
-    /// Returns the newly created `ClientService` and the sender side of the
-    /// channel on which the new service instance expects requests to arrive.
+    /// Returns all the relevant components of the newly created `ClientService`:
+    ///
+    /// - The `ClientService` itself -- processes events (`WorkItem`s) on each `run_once` call.
+    /// - The sender-side of the work queue -- allows `WorkItem`s to be queued into the
+    ///   `ClientService`'s simplified event loop.
+    /// - The `ChannelFrameReceiver` -- the instance that wraps the actual socket that performs
+    ///   the blocking read IO. Allows the caller to block on the IO in a customized manner (e.g.
+    ///   in a separate dedicated thread).
+    /// - The `ChannelFrameSender` -- the instance that wraps the actual socket that performs the
+    ///   blocking write IO. Allows the caller to block on the IO in a customized manner (e.g. in
+    ///   a separate thread).
     ///
     /// If no HTTP/2 connection can be established to the given host on the
     /// given port, returns `None`.
-    pub fn new(host: &str, port: u16) -> Option<(ClientService, Sender<AsyncRequest>)> {
-        let (tx, rx): (Sender<AsyncRequest>, Receiver<AsyncRequest>) =
+    pub fn new(host: &str, port: u16) -> Option<Service> {
+        let (tx, rx): (Sender<WorkItem>, Receiver<WorkItem>) =
                 mpsc::channel();
         let mut stream = TcpStream::connect(&(host, port)).unwrap();
         // The async client doesn't use the `HttpConnect` API for establishing the
@@ -234,16 +292,23 @@ impl ClientService {
         // (It also just unwraps everything with no real error checking, as it's
         // mostly a demo/proof-of-concept of an async client implementation.)
         write_preface(&mut stream).unwrap();
-        let mut conn = ClientConnection::with_connection(
-                HttpConnection::<TcpStream, TcpStream>::with_stream(
-                    stream,
+
+        // Manually split the stream into the write/read ends, so that we can...
+        let sender = stream.try_split().unwrap();
+        let receiver = stream;
+        // ...wrap them into the adapters...
+        let (recv_frame, recv_handle) = ChannelFrameReceiver::new(receiver);
+        let (send_frame, send_handle) = ChannelFrameSender::new(sender);
+
+        // ...and pass the non-blocking/buffering ends into the `HttpConnect` instead of the
+        // blocking socket itself.
+        let conn = ClientConnection::with_connection(
+                HttpConnection::new(
+                    send_handle,
+                    recv_handle,
                     HttpScheme::Http,
                     host.into()),
                 DefaultSession::<DefaultStream>::new());
-        match conn.init() {
-            Ok(_) => {},
-            Err(_) => return None,
-        };
 
         let service = ClientService {
             next_stream_id: 1,
@@ -251,30 +316,36 @@ impl ClientService {
             limit: 3,
             conn: conn,
             chans: HashMap::new(),
-            rx: rx,
+            work_queue: rx,
+            request_queue: Vec::new(),
+            client_count: 0,
         };
 
-        Some((service, tx))
+        // Returns the handles to the channel sender/receiver, so that the client can use them to
+        // perform the real IO somewhere.
+        Some(Service(service, tx, recv_frame, send_frame))
     }
 
     /// Performs one iteration of the service.
     ///
-    /// If there are no currently oustanding requests (sent, but yet no full
-    /// response received), the function blocks until a new request is received.
-    /// Once there is a new request, it will be sent to the server in its
-    /// entirety.
+    /// One iteration corresponds to running the next `WorkItem` that the service
+    /// has queued in its `work_queue`. Essentially, this is a poor-man's event
+    /// loop implementation. If there is no work queued for the service, it will
+    /// *block*, until there is. As such, embedding calls to this method into a
+    /// real event loop should not be done.
     ///
-    /// If there is an outstanding request, the function tries to handle the
-    /// response-related payload incoming on the HTTP/2 connection. This could
-    /// be more than one HTTP/2 frame since `SETTINGS` or other frames might be
-    /// interleaved with `DATA` and `HEADERS` frames representing the responses.
+    /// For `WorkItem::Request` work items, the service will queue the received
+    /// `AsyncRequest` for sending. It will also attempt to queue it for
+    /// transmission to the server, unless the concurrent requests limit has been
+    /// exceeded, in which case the request is kept in an internal FIFO queue and
+    /// will be sent when its time comes.
     ///
-    /// Any received responses after handling the first payload are sent to the
-    /// corresponding channel that is expecting the particular response.
-    ///
-    /// Finally, an additional request is sent (in its entirety) if the limit
-    /// to the number of concurrent requests was not reached and there are
-    /// queued requests from clients.
+    /// For `WorkItem::HandleFrame` work items, the service will perform a single
+    /// `handle_next_frame` call on its underlying `ClientConnection` instance.
+    /// Since the item is queued only when the connection actually has frames to
+    /// process, this call will never block. If a response got finalized by the
+    /// handling of the frame, it is shipped to the channel that expects it and
+    /// a new request from the request queue sent.
     ///
     /// # Returns
     ///
@@ -288,22 +359,46 @@ impl ClientService {
     /// Any HTTP/2 error is propagated (wrapped into a ClientServiceErr::Http
     /// variant).
     pub fn run_once(&mut self) -> Result<(), ClientServiceErr> {
-        // If there are no responses that we should read, block until there's
-        // a new request. This precludes handling server pushes, pings, or
-        // settings changes that may happen in the mean time until there's a
-        // new request, since nothing is reading from the connection until then.
-        if self.outstanding_reqs == 0 {
-            debug!("Service thread blocking until there's a new request...");
-            let async_req = match self.rx.recv() {
-                Ok(req) => req,
-                // The receive operation can only fail if the sender has
-                // disconnected implying no further receives are possible.
-                // At that point, we make sure to gracefully stop the service.
-                Err(_) => return Err(ClientServiceErr::Done),
-            };
-            self.send_request(async_req);
-        }
+        let work_item = match self.work_queue.recv() {
+            Ok(item) => item,
+            // The receive operation can only fail if the sender has
+            // disconnected implying no further receives are possible.
+            // At that point, we make sure to gracefully stop the service.
+            Err(_) => return Err(ClientServiceErr::Done),
+        };
 
+        // Dispatch the work to the corresponding method...
+        match work_item {
+            WorkItem::Request(async_req) => {
+                debug!("Queuing request");
+                self.request_queue.push(async_req);
+                self.queue_next_request();
+                Ok(())
+            },
+            WorkItem::HandleFrame => {
+                self.handle_frame()
+            },
+            WorkItem::NewClient => {
+                self.client_count += 1;
+                Ok(())
+            },
+            WorkItem::ClientLeft => {
+                self.client_count -= 1;
+                if self.client_count == 0 {
+                    Err(ClientServiceErr::Done)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// A private convenience method that performs the handling of the next received frame.
+    ///
+    /// It calls the underlying connection's `handle_next_frame` method and then inspects the
+    /// changes made to the session, notifying clients of completed requests or queueing new ones,
+    /// if available.
+    fn handle_frame(&mut self) -> Result<(), ClientServiceErr> {
         // Handles the next frame...
         debug!("Handling next frame");
         match self.conn.handle_next_frame() {
@@ -407,7 +502,8 @@ impl ClientService {
             // Try to queue another request since we haven't gone over
             // the (arbitrary) limit.
             debug!("Not over the limit yet. Checking for more requests...");
-            if let Ok(async_req) = self.rx.try_recv() {
+            if self.request_queue.len() > 0 {
+                let async_req = self.request_queue.remove(0);
                 self.send_request(async_req);
             }
         }
@@ -448,11 +544,25 @@ impl ClientService {
 ///
 /// let _: Vec<_> = threads.into_iter().map(|thread| thread.join()).collect();
 /// ```
-#[derive(Clone)]
 pub struct Client {
     /// The sender side of a channel on which a running `ClientService` expects
     /// to receive new requests, which are to be sent to the server.
-    sender: Sender<AsyncRequest>,
+    sender: Sender<WorkItem>,
+}
+
+impl Clone for Client {
+    fn clone(&self) -> Client {
+        self.sender.send(WorkItem::NewClient).unwrap();
+        Client {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.sender.send(WorkItem::ClientLeft);
+    }
 }
 
 impl Client {
@@ -475,14 +585,43 @@ impl Client {
     ///
     /// If the HTTP/2 connection cannot be initialized returns `None`.
     pub fn new(host: &str, port: u16) -> Option<Client> {
-        let (mut service, rx) = match ClientService::new(host, port) {
-            Some((service, rx)) => (service, rx),
+        let service = match ClientService::new(host, port) {
+            Some(service) => service,
             None => return None,
         };
+        let Service(mut service, rx, mut recv_frame, mut send_frame) = service;
+
+        if let Err(_) = rx.send(WorkItem::NewClient) {
+            return None;
+        }
+
+        // Keep a handle to the work queue to notify the service of newly read frames, making it so
+        // that it never blocks on waiting for frames to read.
+        let read_notify = rx.clone();
+        // Keep a socket handle in order to shut it down once the service stops. This is required
+        // because if the service decides to stop (due to all clients disconnecting) while the
+        // socket is still open and the read thread waiting, it can happen that the read thread
+        // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
+        // decides to close it), effectively leaking the socket and thread.
+        let sck = recv_frame.inner.try_clone().unwrap();
 
         thread::spawn(move || {
             while let Ok(_) = service.run_once() {}
             debug!("Service thread halting");
+            // This is the one place where it's okay to unwrap, as if the shutdown fails, there's
+            // really nothing we can do to recover at this point...
+            // This forces the reader thread to stop, as the socket is no longer operational.
+            sck.shutdown(Shutdown::Both).unwrap();
+        });
+        thread::spawn(move || {
+            while let Ok(_) = send_frame.send_next() {}
+            debug!("Sender thread halting");
+        });
+        thread::spawn(move || {
+            while let Ok(_) = recv_frame.read_next() {
+                read_notify.send(WorkItem::HandleFrame).unwrap();
+            }
+            debug!("Reader thread halting");
         });
 
         Some(Client {
@@ -517,12 +656,12 @@ impl Client {
         // A send can only fail if the receiver is disconnected. If the send
         // fails here, it means that the service hit an error on the underlying
         // HTTP/2 connection and will never come alive again.
-        let res = self.sender.send(AsyncRequest {
+        let res = self.sender.send(WorkItem::Request(AsyncRequest {
             method: method.to_vec(),
             path: path.to_vec(),
             headers: headers.to_vec(),
             tx: resp_tx,
-        });
+        }));
 
         match res {
             Ok(_) => Some(resp_rx),
