@@ -1,5 +1,4 @@
-//! The module implements the client side of the HTTP/2 protocol and exposes
-//! an API for using it.
+//! The module implements the framing layer of HTTP/2 and exposes an API for using it.
 use std::io;
 use std::convert::From;
 use std::error::Error;
