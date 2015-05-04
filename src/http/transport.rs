@@ -7,6 +7,7 @@
 use std::io;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::net::Shutdown;
 use openssl::ssl::SslStream;
 
 /// A trait that any struct that wants to provide the transport layer for
@@ -54,16 +55,30 @@ pub trait TransportStream: Read + Write {
     /// Attempts to split the `TransportStream` instance into a new independently
     /// owned handle to the same underlying stream.
     fn try_split(&self) -> Result<Self, io::Error>;
+
+    /// Attempts to shutdown both ends of the transport stream.
+    ///
+    /// If successful, all handles to the stream created by the `try_split` operation will start
+    /// receiving an error for any IO operations.
+    fn close(&self) -> Result<(), io::Error>;
 }
 
 impl TransportStream for TcpStream {
     fn try_split(&self) -> Result<TcpStream, io::Error> {
         self.try_clone()
     }
+
+    fn close(&self) -> Result<(), io::Error> {
+        self.shutdown(Shutdown::Both)
+    }
 }
 
 impl TransportStream for SslStream<TcpStream> {
     fn try_split(&self) -> Result<SslStream<TcpStream>, io::Error> {
         self.try_clone()
+    }
+
+    fn close(&self) -> Result<(), io::Error> {
+        self.get_ref().shutdown(Shutdown::Both)
     }
 }

@@ -724,12 +724,6 @@ mod tests {
         fn get_read_pos(&self) -> u64 {
             self.reader.borrow().position()
         }
-
-        /// Closes the stream, making any read or write operation return an
-        /// `io::Error` from there on out.
-        fn close(&mut self) {
-            self.closed.set(true);
-        }
     }
 
     impl io::Read for StubTransportStream {
@@ -759,6 +753,13 @@ mod tests {
     impl TransportStream for StubTransportStream {
         fn try_split(&self) -> Result<StubTransportStream, io::Error> {
             Ok(self.clone())
+        }
+
+        /// Closes the stream, making any read or write operation return an
+        /// `io::Error` from there on out.
+        fn close(&self) -> io::Result<()> {
+            self.closed.set(true);
+            Ok(())
         }
     }
 
