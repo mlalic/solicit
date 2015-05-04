@@ -466,11 +466,11 @@ pub fn write_preface<W: io::Write>(stream: &mut W) -> Result<(), io::Error> {
 ///
 /// It builds on top of an `HttpConnection` and provides additional methods
 /// that are only used by clients.
-pub struct ClientConnection<TS, S>
-        where TS: TransportStream, S: Session {
+pub struct ClientConnection<S, R, Sess>
+        where S: SendFrame, R: ReceiveFrame, Sess: Session {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
-    conn: HttpConnection<TS, TS>,
+    conn: HttpConnection<S, R>,
     host: String,
     /// HPACK encoder
     encoder: hpack::Encoder<'static>,
@@ -479,14 +479,14 @@ pub struct ClientConnection<TS, S>
     /// The `Session` associated with this connection. It is essentially a set
     /// of callbacks that are triggered by the connection when different states
     /// in the HTTP/2 communication arise.
-    pub session: S,
+    pub session: Sess,
 }
 
-impl<TS, S> ClientConnection<TS, S> where TS: TransportStream, S: Session {
+impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFrame, Sess: Session {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
-    pub fn with_connection(conn: HttpConnection<TS, TS>, session: S)
-            -> ClientConnection<TS, S> {
+    pub fn with_connection(conn: HttpConnection<S, R>, session: Sess)
+            -> ClientConnection<S, R, Sess> {
         let host = conn.host.clone();
         ClientConnection {
             conn: conn,

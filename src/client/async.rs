@@ -59,7 +59,7 @@ struct ClientService {
     /// but sent).
     limit: u32,
     /// The connection that is used for underlying HTTP/2 communication.
-    conn: ClientConnection<TcpStream, DefaultSession>,
+    conn: ClientConnection<TcpStream, TcpStream, DefaultSession>,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
     chans: HashMap<StreamId, Sender<Response>>,

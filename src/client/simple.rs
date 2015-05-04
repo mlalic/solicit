@@ -129,7 +129,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// ```
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
-    conn: ClientConnection<S, DefaultSession>,
+    conn: ClientConnection<S, S, DefaultSession>,
     /// Holds the ID that can be assigned to the next stream to be opened by the
     /// client.
     next_stream_id: u32,
