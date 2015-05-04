@@ -172,20 +172,31 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
 }
 
 impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
+    /// Creates a new `HttpConnection` that will use the given sender and receiver instances
+    /// for writing and reading frames, respectively.
+    pub fn new<'a>(sender: S, receiver: R, scheme: HttpScheme, host: Cow<'a, str>)
+            -> HttpConnection<S, R> {
+        HttpConnection {
+            receiver: receiver,
+            sender: sender,
+            scheme: scheme,
+            host: host.into_owned(),
+        }
+    }
+
     /// Creates a new `HttpConnection` that will use the given stream as its
     /// underlying transport layer.
+    ///
+    /// This constructor is provided as a convenience when the underlying IO of the
+    /// HTTP/2 connection should be based on the `TransportStream` interface.
     ///
     /// The host to which the connection is established, as well as the connection
     /// scheme are provided.
     pub fn with_stream<'a, TS>(stream: TS, scheme: HttpScheme, host: Cow<'a, str>)
             -> HttpConnection<TS, TS> where TS: TransportStream {
         let sender = stream.try_split().unwrap();
-        HttpConnection {
-            receiver: stream,
-            sender: sender,
-            scheme: scheme,
-            host: host.into_owned(),
-        }
+        let receiver = stream;
+        HttpConnection::new(sender, receiver, scheme, host)
     }
 
     /// Sends the given frame to the peer.
