@@ -1,8 +1,12 @@
 //! The module contains implementations of the transport layer functionality
 //! that HTTP/2 requires. It exposes APIs that allow the HTTP/2 connection to
 //! use the transport layer without requiring it to know which exact
-//! implementation they are using (i.e. a clear-text TCP connection, a TLS
+//! implementation they are using (e.g. a clear-text TCP connection, a TLS
 //! protected connection, or even a mock implementation).
+//!
+//! The types provided here are purely for convenience in being able to easily
+//! plug in the native Rust socket IO primitives into the HTTP/2 connection API
+//! without having to write too much boilerplate around them.
 
 use std::io;
 use std::io::{Read, Write};
