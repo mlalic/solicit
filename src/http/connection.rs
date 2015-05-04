@@ -177,7 +177,7 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     ///
     /// The host to which the connection is established, as well as the connection
     /// scheme are provided.
-    pub fn new<'a, TS>(stream: TS, scheme: HttpScheme, host: Cow<'a, str>)
+    pub fn with_stream<'a, TS>(stream: TS, scheme: HttpScheme, host: Cow<'a, str>)
             -> HttpConnection<TS, TS> where TS: TransportStream {
         let sender = stream.try_split().unwrap();
         HttpConnection {
@@ -885,7 +885,7 @@ mod tests {
     /// where the content of the stream is defined by the given `stub_data`
     fn build_http_conn(stub_data: &Vec<u8>)
             -> HttpConnection<StubTransportStream, StubTransportStream> {
-        HttpConnection::<StubTransportStream, StubTransportStream>::new(
+        HttpConnection::<StubTransportStream, StubTransportStream>::with_stream(
             StubTransportStream::with_stub_content(stub_data),
             HttpScheme::Http,
             "".into())

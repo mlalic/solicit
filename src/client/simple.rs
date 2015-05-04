@@ -53,7 +53,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// let mut stream = TcpStream::connect(&("http2bin.org", 80)).unwrap();
 /// write_preface(&mut stream);
 /// // Connect to an HTTP/2 aware server
-/// let conn = HttpConnection::<TcpStream, TcpStream>::new(
+/// let conn = HttpConnection::<TcpStream, TcpStream>::with_stream(
 ///                                stream,
 ///                                HttpScheme::Http,
 ///                                "http2bin.org".into());
@@ -163,7 +163,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
             where C: HttpConnect<Stream=S> {
         let stream = connector.connect().ok().unwrap();
-        let conn = HttpConnection::<S, S>::new(stream.0, stream.1, stream.2.into());
+        let conn = HttpConnection::<S, S>::with_stream(stream.0, stream.1, stream.2.into());
         SimpleClient::with_connection(conn)
     }
 

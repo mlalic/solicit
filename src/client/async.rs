@@ -89,7 +89,7 @@ impl ClientService {
         // mostly a demo/proof-of-concept of an async client implementation.)
         write_preface(&mut stream).unwrap();
         let mut conn = ClientConnection::with_connection(
-                HttpConnection::<TcpStream, TcpStream>::new(
+                HttpConnection::<TcpStream, TcpStream>::with_stream(
                     stream,
                     HttpScheme::Http,
                     host.into()),
