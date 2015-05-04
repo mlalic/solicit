@@ -84,7 +84,8 @@ impl HttpFrame {
 /// It provides an API for writing and reading HTTP/2 frames. It also takes
 /// care to validate the received frames.
 pub struct HttpConnection<S> where S: TransportStream {
-    stream: S,
+    /// The instance handling the reading of frames.
+    receiver: S,
     /// The instance handling the writing of frames.
     sender: S,
     /// The scheme of the connection
@@ -179,7 +180,7 @@ impl<S> HttpConnection<S> where S: TransportStream {
     pub fn new<'a>(stream: S, scheme: HttpScheme, host: Cow<'a, str>) -> HttpConnection<S> {
         let sender = stream.try_split().unwrap();
         HttpConnection {
-            stream: stream,
+            receiver: stream,
             sender: sender,
             scheme: scheme,
             host: host.into_owned(),
@@ -218,56 +219,10 @@ impl<S> HttpConnection<S> where S: TransportStream {
     ///
     /// If a frame is successfully read and parsed, returns the frame wrapped
     /// in the appropriate variant of the `HttpFrame` enum.
+    #[inline]
     pub fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
-        let header = unpack_header(&try!(self.read_header_bytes()));
-        debug!("Received frame header {:?}", header);
-
-        let payload = try!(self.read_payload(header.0));
-        let raw_frame = RawFrame::with_payload(header, payload);
-
-        // TODO: The reason behind being unable to decode the frame should be
-        //       extracted to allow an appropriate connection-level action to be
-        //       taken (e.g. responding with a PROTOCOL_ERROR).
-        let frame = try!(HttpFrame::from_raw(raw_frame));
-        Ok(frame)
+        self.receiver.recv_frame()
     }
-
-    /// Reads the header bytes of the next frame from the underlying stream.
-    ///
-    /// # Returns
-    ///
-    /// Since each frame header is exactly 9 octets long, returns an array of
-    /// 9 bytes if the frame header is successfully read.
-    ///
-    /// Any IO errors raised by the underlying transport layer are wrapped in a
-    /// `HttpError::IoError` variant and propagated upwards.
-    fn read_header_bytes(&mut self) -> HttpResult<[u8; 9]> {
-        let mut buf = [0; 9];
-        try!(self.stream.read_exact(&mut buf));
-
-        Ok(buf)
-    }
-
-    /// Reads the payload of an HTTP/2 frame with the given length.
-    ///
-    /// # Returns
-    ///
-    /// A newly allocated buffer containing the entire payload of the frame.
-    ///
-    /// Any IO errors raised by the underlying transport layer are wrapped in a
-    /// `HttpError::IoError` variant and propagated upwards.
-    fn read_payload(&mut self, len: u32) -> HttpResult<Vec<u8>> {
-        debug!("Trying to read {} bytes of frame payload", len);
-        let length = len as usize;
-        let mut buf: Vec<u8> = Vec::with_capacity(length);
-        // This is completely safe since we *just* allocated the vector with
-        // the same capacity.
-        unsafe { buf.set_len(length); }
-        try!(self.stream.read_exact(&mut buf));
-
-        Ok(buf)
-    }
-
 }
 
 /// A convenience wrapper type that represents an established client network transport stream.
@@ -1289,7 +1244,7 @@ mod tests {
             send_frame(&mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, conn.stream.get_written());
+        assert_eq!(expected, conn.sender.get_written());
     }
 
 
@@ -1309,7 +1264,7 @@ mod tests {
             send_frame(&mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, conn.stream.get_written());
+        assert_eq!(expected, conn.sender.get_written());
     }
 
     /// Tests that a write to a closed stream fails with an IoError.
@@ -1320,7 +1275,7 @@ mod tests {
         ];
         let mut conn = build_http_conn(&vec![]);
         // Close the underlying stream!
-        conn.stream.close();
+        conn.sender.close();
 
         for frame in frames.into_iter() {
             let res = send_frame(&mut conn, frame);
@@ -1361,9 +1316,9 @@ mod tests {
         // We have read the server's response (the settings frame only)
         assert_eq!(
             server_frame_buf.len() as u64,
-            conn.conn.stream.get_read_pos());
+            conn.conn.receiver.get_read_pos());
         // We also sent an ACK already.
-        let written = conn.conn.stream.get_written();
+        let written = conn.conn.sender.get_written();
         let len_ack = {
             let (settings_frame, sz): (SettingsFrame, _) =
                 get_frame_from_buf(&written);
@@ -1406,7 +1361,7 @@ mod tests {
             build_http_conn(&vec![]), TestSession::new());
 
         conn.send_request(req).unwrap();
-        let written = conn.conn.stream.get_written();
+        let written = conn.conn.sender.get_written();
 
         let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
         // We sent a headers frame with end of headers and end of stream flags
