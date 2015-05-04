@@ -863,7 +863,7 @@ mod tests {
         // A closed stream always returns an io::Error
         {
             let mut stream = StubTransportStream::with_stub_content(&vec![]);
-            stream.close();
+            stream.close().unwrap();
             assert!(stream.write(&[1]).is_err());
             assert!(stream.read(&mut [0; 5]).is_err());
         }
@@ -886,8 +886,8 @@ mod tests {
         // Closing one handle of the stream closes all handles
         {
             let mut stream = StubTransportStream::with_stub_content(&vec![3, 4]);
-            let mut other = stream.try_split().unwrap();
-            other.close();
+            let other = stream.try_split().unwrap();
+            other.close().unwrap();
             assert!(stream.write(&[1]).is_err());
             assert!(stream.read(&mut [0; 5]).is_err());
         }
@@ -1289,7 +1289,7 @@ mod tests {
         ];
         let mut conn = build_http_conn(&vec![]);
         // Close the underlying stream!
-        conn.sender.close();
+        conn.sender.close().unwrap();
 
         for frame in frames.into_iter() {
             let res = send_frame(&mut conn, frame);
