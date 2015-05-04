@@ -3,7 +3,6 @@
 //! It allows users to make requests to the same underlying connection from
 //! different threads concurrently, as well as to receive the response
 //! asynchronously.
-use std::net::{TcpStream, Shutdown};
 use std::collections::HashMap;
 
 use std::sync::mpsc::{Sender, Receiver};
@@ -12,11 +11,11 @@ use std::thread;
 use std::io;
 
 use http::transport::TransportStream;
-use http::connection::{SendFrame, ReceiveFrame, HttpFrame};
+use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnect, ClientStream};
 use http::HttpResult;
 use http::frame::RawFrame;
-use super::super::http::{StreamId, HttpError, HttpScheme, Response, Request, Header};
-use super::super::http::connection::{HttpConnection, ClientConnection, write_preface};
+use super::super::http::{StreamId, HttpError, Response, Request, Header};
+use super::super::http::connection::{HttpConnection, ClientConnection};
 use super::super::http::session::{DefaultSession, DefaultStream};
 
 /// A struct representing an asynchronously dispatched request. It is used
@@ -257,15 +256,18 @@ struct ClientService {
 
 /// A helper wrapper around the components of the `ClientService` that are returned from its
 /// constructor.
-struct Service(
+struct Service<S>(
     ClientService,
     Sender<WorkItem>,
-    ChannelFrameReceiver<TcpStream>,
-    ChannelFrameSender<TcpStream>);
+    ChannelFrameReceiver<S>,
+    ChannelFrameSender<S>) where S: TransportStream;
 
 impl ClientService {
-    /// Creates a new `ClientService` that will communicate over a new HTTP/2
-    /// connection to the server found at the given host and port combination.
+    /// Creates a new `ClientService` that will use the provided `ClientStream` for its underlying
+    /// network communication. A handle is returned for both the read, as well as the write end of
+    /// the socket that allows the client that creates the `ClientService` to perform the blocking
+    /// IO without influencing the `ClientService` (i.e. without having its `run_once` method
+    /// block).
     ///
     /// # Returns
     ///
@@ -283,15 +285,11 @@ impl ClientService {
     ///
     /// If no HTTP/2 connection can be established to the given host on the
     /// given port, returns `None`.
-    pub fn new(host: &str, port: u16) -> Option<Service> {
+    pub fn new<S>(client_stream: ClientStream<S>) -> Option<Service<S>>
+            where S: TransportStream {
         let (tx, rx): (Sender<WorkItem>, Receiver<WorkItem>) =
                 mpsc::channel();
-        let mut stream = TcpStream::connect(&(host, port)).unwrap();
-        // The async client doesn't use the `HttpConnect` API for establishing the
-        // connection, so it has to write the preface manually.
-        // (It also just unwraps everything with no real error checking, as it's
-        // mostly a demo/proof-of-concept of an async client implementation.)
-        write_preface(&mut stream).unwrap();
+        let ClientStream(stream, scheme, host) = client_stream;
 
         // Manually split the stream into the write/read ends, so that we can...
         let sender = stream.try_split().unwrap();
@@ -306,7 +304,7 @@ impl ClientService {
                 HttpConnection::new(
                     send_handle,
                     recv_handle,
-                    HttpScheme::Http,
+                    scheme,
                     host.into()),
                 DefaultSession::<DefaultStream>::new());
 
@@ -519,11 +517,13 @@ impl ClientService {
 ///
 /// ```no_run
 /// use solicit::client::Client;
+/// use solicit::http::connection::CleartextConnector;
 /// use std::thread;
 /// use std::str;
 ///
 /// // Connect to a server that supports HTTP/2
-/// let client = Client::new("nghttp2.org", 80).unwrap();
+/// let connector = CleartextConnector { host: "http2bin.org" };
+/// let client = Client::with_connector(connector).unwrap();
 ///
 /// // Issue 5 requests from 5 different threads concurrently and wait for all
 /// // threads to receive their response.
@@ -584,8 +584,18 @@ impl Client {
     /// the thread to exit.
     ///
     /// If the HTTP/2 connection cannot be initialized returns `None`.
-    pub fn new(host: &str, port: u16) -> Option<Client> {
-        let service = match ClientService::new(host, port) {
+    pub fn with_connector<C, S>(connector: C) -> Option<Client>
+            where C: HttpConnect<Stream=S>, S: TransportStream + Send + 'static {
+        // Use the provided connector to establish a network connection...
+        let client_stream = connector.connect().ok().unwrap();
+        // Keep a socket handle in order to shut it down once the service stops. This is required
+        // because if the service decides to stop (due to all clients disconnecting) while the
+        // socket is still open and the read thread waiting, it can happen that the read thread
+        // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
+        // decides to close it), effectively leaking the socket and thread.
+        let sck = client_stream.0.try_split().unwrap();
+
+        let service = match ClientService::new(client_stream) {
             Some(service) => service,
             None => return None,
         };
@@ -598,12 +608,6 @@ impl Client {
         // Keep a handle to the work queue to notify the service of newly read frames, making it so
         // that it never blocks on waiting for frames to read.
         let read_notify = rx.clone();
-        // Keep a socket handle in order to shut it down once the service stops. This is required
-        // because if the service decides to stop (due to all clients disconnecting) while the
-        // socket is still open and the read thread waiting, it can happen that the read thread
-        // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
-        // decides to close it), effectively leaking the socket and thread.
-        let sck = recv_frame.inner.try_clone().unwrap();
 
         thread::spawn(move || {
             while let Ok(_) = service.run_once() {}
@@ -611,7 +615,7 @@ impl Client {
             // This is the one place where it's okay to unwrap, as if the shutdown fails, there's
             // really nothing we can do to recover at this point...
             // This forces the reader thread to stop, as the socket is no longer operational.
-            sck.shutdown(Shutdown::Both).unwrap();
+            sck.close().unwrap();
         });
         thread::spawn(move || {
             while let Ok(_) = send_frame.send_next() {}
