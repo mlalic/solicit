@@ -31,7 +31,6 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// # Notes
 ///
 /// - For now (temporarily) no requests with bodies are supported.
-/// - For now, only HTTP/2 over a cleartext TCP connection is supported.
 /// - A direct HTTP/2 connection is used (not an upgrade of an HTTP/1.1
 ///   connection)
 ///
