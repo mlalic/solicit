@@ -1306,7 +1306,10 @@ mod tests {
     ///
     /// Panics if unable to obtain such a frame.
     fn get_frame_from_buf<F: Frame>(buf: &[u8]) -> (F, usize) {
-        let headers = unpack_header(unsafe { mem::transmute(buf.as_ptr()) });
+        let headers = unpack_header(unsafe {
+            assert!(buf.len() >= 9);
+            mem::transmute(buf.as_ptr())
+        });
         let len = headers.0 as usize;
 
         let raw = RawFrame::from_buf(&buf[..9 + len]).unwrap();
