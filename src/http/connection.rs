@@ -22,6 +22,10 @@ use openssl::ssl::SSL_OP_NO_COMPRESSION;
 use openssl::ssl::error::SslError;
 use openssl::ssl::SslMethod;
 
+use http::{
+    Header,
+    StreamId,
+};
 use super::session::Session;
 use super::ALPN_PROTOCOLS;
 use super::{HttpError, HttpResult, Request, HttpScheme};
@@ -88,6 +92,8 @@ pub struct HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     receiver: R,
     /// The instance handling the writing of frames.
     sender: S,
+    /// The HPACK encoder used to encode headers before sending them on this connection.
+    encoder: hpack::Encoder<'static>,
     /// The scheme of the connection
     pub scheme: HttpScheme,
     /// The host to which the connection is established
@@ -180,6 +186,7 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
             receiver: receiver,
             sender: sender,
             scheme: scheme,
+            encoder: hpack::Encoder::new(),
             host: host.into_owned(),
         }
     }
@@ -234,6 +241,43 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     #[inline]
     pub fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
         self.receiver.recv_frame()
+    }
+
+    /// A helper function that inserts the frames required to send the given headers onto the
+    /// `SendFrame` stream.
+    ///
+    /// The `HttpConnection` performs the HPACK encoding of the header block using an internal
+    /// encoder.
+    ///
+    /// # Parameters
+    ///
+    /// - `headers` - a headers list that should be sent.
+    /// - `stream_id` - the ID of the stream on which the headers will be sent. The connection
+    ///   performs no checks as to whether the stream is a valid identifier.
+    /// - `end_stream` - whether the stream should be closed from the peer's side immediately
+    ///   after sending the headers
+    pub fn send_headers<H: Into<Vec<Header>>>(&mut self,
+                                              headers: H,
+                                              stream_id: StreamId,
+                                              end_stream: bool) -> HttpResult<()> {
+        self.send_headers_inner(headers.into(), stream_id, end_stream)
+    }
+
+    /// A private helper method: the non-generic implementation of the `send_headers` method.
+    fn send_headers_inner(&mut self, headers: Vec<Header>, stream_id: StreamId, end_stream: bool)
+            -> HttpResult<()> {
+        let headers_fragment = self.encoder.encode(&headers);
+        // For now, sending header fragments larger than 16kB is not supported
+        // (i.e. the encoded representation cannot be split into CONTINUATION
+        // frames).
+        let mut frame = HeadersFrame::new(headers_fragment, stream_id);
+        frame.set_flag(HeadersFlag::EndHeaders);
+
+        if end_stream {
+            frame.set_flag(HeadersFlag::EndStream);
+        }
+
+        self.send_frame(frame)
     }
 }
 
@@ -483,8 +527,6 @@ pub struct ClientConnection<S, R, Sess>
     /// communication.
     conn: HttpConnection<S, R>,
     host: String,
-    /// HPACK encoder
-    encoder: hpack::Encoder<'static>,
     /// HPACK decoder
     decoder: hpack::Decoder<'static>,
     /// The `Session` associated with this connection. It is essentially a set
@@ -502,7 +544,6 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
         ClientConnection {
             conn: conn,
             host: host,
-            encoder: hpack::Encoder::new(),
             decoder: hpack::Decoder::new(),
             session: session,
         }
@@ -565,22 +606,7 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
     ///
     /// Request body is ignored for now.
     pub fn send_request(&mut self, req: Request) -> HttpResult<()> {
-        let headers_fragment = self.encoder.encode(&req.headers);
-        // For now, sending header fragments larger than 16kB is not supported
-        // (i.e. the encoded representation cannot be split into CONTINUATION
-        // frames).
-        let mut frame = HeadersFrame::new(headers_fragment, req.stream_id);
-        frame.set_flag(HeadersFlag::EndHeaders);
-        // Since we are not supporting methods which require request bodies to
-        // be sent, we end the stream from this side already.
-        // TODO: Support bodies!
-        frame.set_flag(HeadersFlag::EndStream);
-
-        // Sending this HEADER frame opens the new stream and is equivalent to
-        // sending the given request to the server.
-        try!(self.conn.send_frame(frame));
-
-        Ok(())
+        self.conn.send_headers(req.headers, req.stream_id, true)
     }
 
     /// Fully handle the next incoming frame, blocking to read it from the
@@ -1297,6 +1323,67 @@ mod tests {
                 Err(HttpError::IoError(_)) => true,
                 _ => false,
             });
+        }
+    }
+
+    /// Tests that `HttpConnection::send_headers` correctly sends the given headers when they can
+    /// fit into a single frame's payload.
+    #[test]
+    fn test_send_headers_single_frame() {
+        fn assert_correct_headers(headers: &[(Vec<u8>, Vec<u8>)], frame: &HeadersFrame) {
+            let buf = &frame.header_fragment;
+            let frame_headers = hpack::Decoder::new().decode(buf).unwrap();
+            assert_eq!(headers, &frame_headers[..]);
+        }
+        let headers: Vec<(Vec<u8>, Vec<u8>)> = vec![
+            (b":method".to_vec(), b"GET".to_vec()),
+            (b":scheme".to_vec(), b"http".to_vec()),
+        ];
+        {
+            let mut conn = build_http_conn(&vec![]);
+
+            // Headers when the stream should be closed
+            conn.send_headers(&headers[..], 1, true).unwrap();
+
+            let written = conn.sender.get_written();
+            let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+            // We sent a headers frame with end of headers and end of stream flags
+            assert!(frame.is_headers_end());
+            assert!(frame.is_end_of_stream());
+            // ...and nothing else!
+            assert_eq!(sz, written.len());
+            assert_correct_headers(&headers, &frame);
+        }
+        {
+            let mut conn = build_http_conn(&vec![]);
+
+            // Headers when the stream should be left open
+            conn.send_headers(&headers[..], 1, false).unwrap();
+
+            let written = conn.sender.get_written();
+            let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+            // We sent a headers frame...
+            assert!(frame.is_headers_end());
+            // ...but it's not the end of the stream
+            assert!(!frame.is_end_of_stream());
+            // ...and nothing else!
+            assert_eq!(sz, written.len());
+            assert_correct_headers(&headers, &frame);
+        }
+        {
+            let mut conn = build_http_conn(&vec![]);
+
+            // Make sure it's all peachy when we give a `Vec` instead of a slice
+            conn.send_headers(headers.clone(), 1, true).unwrap();
+
+            let written = conn.sender.get_written();
+            let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+            // We sent a headers frame with end of headers and end of stream flags
+            assert!(frame.is_headers_end());
+            assert!(frame.is_end_of_stream());
+            // ...and nothing else!
+            assert_eq!(sz, written.len());
+            assert_correct_headers(&headers, &frame);
         }
     }
 
