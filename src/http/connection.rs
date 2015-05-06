@@ -279,6 +279,37 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
 
         self.send_frame(frame)
     }
+
+    /// A helper function that inserts a frame representing the given data into the `SendFrame`
+    /// stream.
+    ///
+    /// The `HttpConnection` itself does not track the flow control window and will happily send
+    /// data that exceeds a particular stream's or the connection's flow control window size.
+    ///
+    /// # Parameters
+    ///
+    /// - `data` - the data that should be sent on the connection
+    /// - `stream_id` - the ID of the stream on which the data will be sent
+    /// - `end_stream` - whether the stream should be closed from the peer's side immediately after
+    ///   sending the data (i.e. the last data frame closes the stream).
+    pub fn send_data<D: Into<Vec<u8>>>(&mut self, data: D, stream_id: StreamId, end_stream: bool)
+            -> HttpResult<()> {
+        self.send_data_inner(data.into(), stream_id, end_stream)
+    }
+
+    /// A private helepr method: the non-generic implementation of the `send_data` method.
+    fn send_data_inner(&mut self, data: Vec<u8>, stream_id: StreamId, end_stream: bool)
+            -> HttpResult<()>{
+        // TODO Validate that the given data can fit into the maximum frame size allowed by the
+        //      current settings.
+        let mut frame = DataFrame::new(stream_id);
+        frame.data.extend(data);
+        if end_stream {
+            frame.set_flag(DataFlag::EndStream);
+        }
+
+        self.send_frame(frame)
+    }
 }
 
 /// A convenience wrapper type that represents an established client network transport stream.
@@ -1387,6 +1418,48 @@ mod tests {
             // ...and nothing else!
             assert_eq!(sz, written.len());
             assert_correct_headers(&headers, &frame);
+        }
+    }
+
+    /// Tests that `HttpConnection::send_data` correctly sends the given data when it can fit into
+    /// a single frame's payload.
+    #[test]
+    fn test_send_data_single_frame() {
+        {
+            // Data shouldn't end the stream...
+            let mut conn = build_http_conn(&vec![]);
+            let data: &[u8] = b"1234";
+
+            conn.send_data(data, 1, false).unwrap();
+
+            let written = conn.sender.get_written();
+            let (frame, _): (DataFrame, _) = get_frame_from_buf(&written);
+            assert_eq!(&frame.data[..], data);
+            assert!(!frame.is_end_of_stream());
+        }
+        {
+            // Data should end the stream...
+            let mut conn = build_http_conn(&vec![]);
+            let data: &[u8] = b"1234";
+
+            conn.send_data(data, 1, true).unwrap();
+
+            let written = conn.sender.get_written();
+            let (frame, _): (DataFrame, _) = get_frame_from_buf(&written);
+            assert_eq!(&frame.data[..], data);
+            assert!(frame.is_end_of_stream());
+        }
+        {
+            // given a `Vec` we're good too?
+            let mut conn = build_http_conn(&vec![]);
+            let data: &[u8] = b"1234";
+
+            conn.send_data(data.to_vec(), 1, true).unwrap();
+
+            let written = conn.sender.get_written();
+            let (frame, _): (DataFrame, _) = get_frame_from_buf(&written);
+            assert_eq!(&frame.data[..], data);
+            assert!(frame.is_end_of_stream());
         }
     }
 
