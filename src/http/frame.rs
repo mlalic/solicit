@@ -297,6 +297,11 @@ impl DataFrame {
         self.is_set(DataFlag::Padded)
     }
 
+    /// Returns whther this frame ends the stream it is associated with.
+    pub fn is_end_of_stream(&self) -> bool {
+        self.is_set(DataFlag::EndStream)
+    }
+
     /// Sets the number of bytes that should be used as padding for this
     /// frame.
     pub fn set_padding(&mut self, pad_len: u8) {
@@ -1181,6 +1186,16 @@ mod tests {
         assert_eq!(&frame.data, &data);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
+    }
+
+    /// Tests that the `DataFrame` struct correctly knows when it represents the end of the
+    /// corresponding stream.
+    #[test]
+    fn test_data_frame_is_end_of_stream() {
+        let mut frame = DataFrame::new(1);
+        assert!(!frame.is_end_of_stream());
+        frame.set_flag(DataFlag::EndStream);
+        assert!(frame.is_end_of_stream());
     }
 
     /// Tests that the `DataFrame` struct correctly interprets a DATA frame
