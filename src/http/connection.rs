@@ -789,6 +789,10 @@ mod tests {
         }
     }
 
+    /// A convenience type alias for an `HttpConnection` with both send and receive ends being a
+    /// stub transport stream.
+    type StubHttpConnection = HttpConnection<StubTransportStream, StubTransportStream>;
+
     /// A helper struct implementing the `Session` trait, intended for testing
     /// purposes.
     ///
@@ -921,8 +925,7 @@ mod tests {
 
     /// A helper function that creates an `HttpConnection` with a `StubTransportStream`
     /// where the content of the stream is defined by the given `stub_data`
-    fn build_http_conn(stub_data: &Vec<u8>)
-            -> HttpConnection<StubTransportStream, StubTransportStream> {
+    fn build_http_conn(stub_data: &Vec<u8>) -> StubHttpConnection {
         HttpConnection::<StubTransportStream, StubTransportStream>::with_stream(
             StubTransportStream::with_stub_content(stub_data),
             HttpScheme::Http,
