@@ -594,8 +594,8 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
 
     /// Performs the initialization of the `ClientConnection`.
     ///
-    /// Sends the client preface, followed by validating the receipt of the
-    /// server preface.
+    /// This means that it expects the next frame that it receives to be the server preface -- i.e.
+    /// a `SETTINGS` frame. Returns an `HttpError` if this is not the case.
     pub fn init(&mut self) -> HttpResult<()> {
         try!(self.read_preface());
         Ok(())

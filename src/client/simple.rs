@@ -138,9 +138,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// Create a new `SimpleClient` instance that will use the given `HttpConnection`
     /// to communicate to the server.
     ///
-    /// It assumes that the connection is in an uninitialized state and will try
-    /// to send the client preface and make sure it receives the server preface
-    /// before returning.
+    /// It assumes that the connection stream is initialized and will *not* automatically write the
+    /// client preface.
     pub fn with_connection(conn: HttpConnection<S, S>) -> HttpResult<SimpleClient<S>> {
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, DefaultSession::new()),
