@@ -188,7 +188,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// response.
     ///
     /// Any IO errors are propagated.
-    pub fn request(&mut self, method: &[u8], path: &[u8], extras: &[Header])
+    pub fn request(&mut self, method: &[u8], path: &[u8], extras: &[Header], body: Option<Vec<u8>>)
             -> HttpResult<StreamId> {
         let stream_id = self.new_stream();
         let mut headers: Vec<Header> = vec![
@@ -202,7 +202,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
         try!(self.conn.send_request(Request {
             stream_id: stream_id,
             headers: headers,
-            body: Vec::new(),
+            body: body.unwrap_or(Vec::new()),
         }));
 
         Ok(stream_id)
@@ -240,7 +240,14 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// calling `request` followed by `get_response` for the returned stream ID.
     pub fn get(&mut self, path: &[u8], extra_headers: &[Header])
             -> HttpResult<Response> {
-        let stream_id = try!(self.request(b"GET", path, extra_headers));
+        let stream_id = try!(self.request(b"GET", path, extra_headers, None));
+        self.get_response(stream_id)
+    }
+
+    /// Performs a POST request on the given path.
+    pub fn post(&mut self, path: &[u8], extra_headers: &[Header], body: Vec<u8>)
+            -> HttpResult<Response> {
+        let stream_id = try!(self.request(b"POST", path, extra_headers, Some(body)));
         self.get_response(stream_id)
     }
 
