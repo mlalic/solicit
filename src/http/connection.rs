@@ -632,12 +632,18 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
     /// The method blocks until the entire request has been sent.
     ///
     /// All errors are propagated.
-    ///
-    /// # Note
-    ///
-    /// Request body is ignored for now.
     pub fn send_request(&mut self, req: Request) -> HttpResult<()> {
-        self.conn.send_headers(req.headers, req.stream_id, true)
+        let end_of_stream = req.body.len() == 0;
+        try!(self.conn.send_headers(req.headers, req.stream_id, end_of_stream));
+        if !end_of_stream {
+            // Queue the entire request body for transfer now...
+            // Also assumes that the entire body fits into a single frame.
+            // TODO Stash the body locally (associated to a stream) and send it out depending on a
+            //      pluggable stream prioritization strategy.
+            try!(self.conn.send_data(req.body, req.stream_id, true));
+        }
+
+        Ok(())
     }
 
     /// Fully handle the next incoming frame, blocking to read it from the
@@ -1549,6 +1555,42 @@ mod tests {
         assert!(frame.is_end_of_stream());
         // ...and nothing else!
         assert_eq!(sz, written.len());
+    }
+
+    /// Tests that a `ClientConnection` correctly sends a `Request` with a small body (i.e. a body
+    /// that fits into a single HTTP/2 DATA frame).
+    #[test]
+    fn test_client_conn_send_request_with_small_body() {
+        let body = vec![1, 2, 3];
+        let req = Request {
+            stream_id: 1,
+            // An incomplete header list, but this does not matter for this test.
+            headers: vec![
+                (b":method".to_vec(), b"GET".to_vec()),
+                (b":path".to_vec(), b"/".to_vec()),
+             ],
+            body: body.clone(),
+        };
+        let mut conn = ClientConnection::with_connection(
+            build_http_conn(&vec![]), TestSession::new());
+
+        conn.send_request(req).unwrap();
+        let written = conn.conn.sender.get_written();
+
+        let (frame, total_sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+        // The headers were sent, but didn't close the stream
+        assert!(frame.is_headers_end());
+        assert!(!frame.is_end_of_stream());
+        // A single data frame is found that *did* close the stream
+        let (frame, total_sz): (DataFrame, _) = {
+            let (frame, sz) = get_frame_from_buf(&written[total_sz..]);
+            (frame, total_sz + sz)
+        };
+        assert!(frame.is_end_of_stream());
+        // The data bore the correct payload
+        assert_eq!(frame.data, body);
+        // ...and nothing else was sent!
+        assert_eq!(total_sz, written.len());
     }
 
     /// Tests that the `ClientConnection` correctly notifies the session on a
