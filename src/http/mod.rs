@@ -12,7 +12,7 @@ pub mod session;
 
 /// An alias for the type that represents the ID of an HTTP/2 stream
 pub type StreamId = u32;
-/// An alias for the type that represents HTTP/2 haders. For now we only alias
+/// An alias for the type that represents HTTP/2 headers. For now we only alias
 /// the tuple of byte vectors instead of going with a full struct representation.
 pub type Header = (Vec<u8>, Vec<u8>);
 
