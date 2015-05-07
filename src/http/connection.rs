@@ -83,15 +83,25 @@ impl HttpFrame {
         Frame::from_raw(raw_frame).ok_or(HttpError::InvalidFrame)
     }
 }
+
 /// The struct implements the HTTP/2 connection level logic.
 ///
-/// It provides an API for writing and reading HTTP/2 frames. It also takes
-/// care to validate the received frames.
+/// This means that the struct is a bridge between the low level raw frame reads/writes (i.e. what
+/// the `SendFrame` and `ReceiveFrame` traits do) and the higher session-level logic.
+///
+/// Therefore, it provides an API that exposes higher-level write operations, such as writing
+/// headers or data, that take care of all the underlying frame construction that is required.
+///
+/// Similarly, it provides an API for handling events that arise from receiving frames, without
+/// requiring the higher level to directly look at the frames themselves, rather only the semantic
+/// content within the frames.
 pub struct HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// The instance handling the reading of frames.
     receiver: R,
     /// The instance handling the writing of frames.
     sender: S,
+    /// HPACK decoder used to decode incoming headers before passing them on to the session.
+    decoder: hpack::Decoder<'static>,
     /// The HPACK encoder used to encode headers before sending them on this connection.
     encoder: hpack::Encoder<'static>,
     /// The scheme of the connection
@@ -186,6 +196,7 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
             receiver: receiver,
             sender: sender,
             scheme: scheme,
+            decoder: hpack::Decoder::new(),
             encoder: hpack::Encoder::new(),
             host: host.into_owned(),
         }
@@ -309,6 +320,95 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
         }
 
         self.send_frame(frame)
+    }
+
+    /// Handles the next frame incoming on the `ReceiveFrame` instance.
+    ///
+    /// The `HttpConnection` takes care of parsing the frame and extracting the semantics behind it
+    /// and passes this on to the higher level by invoking (possibly multiple) callbacks on the
+    /// given `Session` instance. For information on which events can be passed to the session,
+    /// check out the `Session` trait.
+    ///
+    /// If the handling is successful, a unit `Ok` is returned; all HTTP and IO errors are
+    /// propagated.
+    pub fn handle_next_frame<Sess: Session>(&mut self, session: &mut Sess) -> HttpResult<()> {
+        debug!("Waiting for frame...");
+        let frame = match self.recv_frame() {
+            Ok(frame) => frame,
+            Err(e) => {
+                debug!("Encountered an HTTP/2 error, stopping.");
+                return Err(e);
+            },
+        };
+
+        self.handle_frame(frame, session)
+    }
+
+    /// Private helper method that actually handles a received frame.
+    fn handle_frame<Sess: Session>(&mut self, frame: HttpFrame, session: &mut Sess)
+            -> HttpResult<()> {
+        match frame {
+            HttpFrame::DataFrame(frame) => {
+                debug!("Data frame received");
+                self.handle_data_frame(frame, session)
+            },
+            HttpFrame::HeadersFrame(frame) => {
+                debug!("Headers frame received");
+                self.handle_headers_frame(frame, session)
+            },
+            HttpFrame::SettingsFrame(frame) => {
+                debug!("Settings frame received");
+                self.handle_settings_frame::<Sess>(frame, session)
+            },
+            HttpFrame::UnknownFrame(_) => {
+                debug!("Unknown frame received");
+                // We simply drop any unknown frames...
+                // TODO Signal this to the session so that a hook is available
+                //      for implementing frame-level protocol extensions.
+                Ok(())
+            },
+        }
+    }
+
+    /// Private helper method that handles a received `DataFrame`.
+    fn handle_data_frame<Sess: Session>(&mut self, frame: DataFrame, session: &mut Sess)
+            -> HttpResult<()> {
+        session.new_data_chunk(frame.get_stream_id(), &frame.data);
+
+        if frame.is_set(DataFlag::EndStream) {
+            debug!("End of stream {}", frame.get_stream_id());
+            session.end_of_stream(frame.get_stream_id())
+        }
+
+        Ok(())
+    }
+
+    /// Private helper method that handles a received `HeadersFrame`.
+    fn handle_headers_frame<Sess: Session>(&mut self, frame: HeadersFrame, session: &mut Sess)
+            -> HttpResult<()> {
+        let headers = try!(self.decoder.decode(&frame.header_fragment)
+                                       .map_err(|e| HttpError::CompressionError(e)));
+        session.new_headers(frame.get_stream_id(), headers);
+
+        if frame.is_end_of_stream() {
+            debug!("End of stream {}", frame.get_stream_id());
+            session.end_of_stream(frame.get_stream_id());
+        }
+
+        Ok(())
+    }
+
+    /// Private helper method that handles a received `SettingsFrame`.
+    fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, _session: &mut Session)
+            -> HttpResult<()> {
+        if !frame.is_ack() {
+            // TODO: Actually handle the settings change before sending out the ACK
+            //       sending out the ACK.
+            debug!("Sending a SETTINGS ack");
+            try!(self.send_frame(SettingsFrame::new_ack()));
+        }
+
+        Ok(())
     }
 }
 
@@ -558,8 +658,6 @@ pub struct ClientConnection<S, R, Sess>
     /// communication.
     conn: HttpConnection<S, R>,
     host: String,
-    /// HPACK decoder
-    decoder: hpack::Decoder<'static>,
     /// The `Session` associated with this connection. It is essentially a set
     /// of callbacks that are triggered by the connection when different states
     /// in the HTTP/2 communication arise.
@@ -575,7 +673,6 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
         ClientConnection {
             conn: conn,
             host: host,
-            decoder: hpack::Decoder::new(),
             session: session,
         }
     }
@@ -617,7 +714,7 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
         match self.conn.recv_frame() {
             Ok(HttpFrame::SettingsFrame(settings)) => {
                 debug!("Correctly received a SETTINGS frame from the server");
-                try!(self.handle_settings_frame(settings));
+                try!(self.conn.handle_settings_frame::<Sess>(settings, &mut self.session));
             },
             // Wrong frame received...
             Ok(_) => return Err(HttpError::UnableToConnect),
@@ -646,84 +743,11 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
         Ok(())
     }
 
-    /// Fully handle the next incoming frame, blocking to read it from the
-    /// underlying transport stream if not available yet.
-    ///
-    /// All communication errors are propagated.
+    /// Fully handles the next incoming frame. Events are passed on to the internal `session`
+    /// instance.
+    #[inline]
     pub fn handle_next_frame(&mut self) -> HttpResult<()> {
-        debug!("Waiting for frame...");
-        let frame = match self.conn.recv_frame() {
-            Ok(frame) => frame,
-            Err(e) => {
-                debug!("Encountered an HTTP/2 error, stopping.");
-                return Err(e);
-            },
-        };
-
-        self.handle_frame(frame)
-    }
-
-    /// Private helper method that actually handles a received frame.
-    fn handle_frame(&mut self, frame: HttpFrame) -> HttpResult<()> {
-        match frame {
-            HttpFrame::DataFrame(frame) => {
-                debug!("Data frame received");
-                self.handle_data_frame(frame)
-            },
-            HttpFrame::HeadersFrame(frame) => {
-                debug!("Headers frame received");
-                self.handle_headers_frame(frame)
-            },
-            HttpFrame::SettingsFrame(frame) => {
-                debug!("Settings frame received");
-                self.handle_settings_frame(frame)
-            },
-            HttpFrame::UnknownFrame(_) => {
-                debug!("Unknown frame received");
-                // We simply drop any unknown frames...
-                // TODO Signal this to the session so that a hook is available
-                //      for implementing frame-level protocol extensions.
-                Ok(())
-            },
-        }
-    }
-
-    /// Private helper method that handles a received `DataFrame`.
-    fn handle_data_frame(&mut self, frame: DataFrame) -> HttpResult<()> {
-        self.session.new_data_chunk(frame.get_stream_id(), &frame.data);
-
-        if frame.is_set(DataFlag::EndStream) {
-            debug!("End of stream {}", frame.get_stream_id());
-            self.session.end_of_stream(frame.get_stream_id())
-        }
-
-        Ok(())
-    }
-
-    /// Private helper method that handles a received `HeadersFrame`.
-    fn handle_headers_frame(&mut self, frame: HeadersFrame) -> HttpResult<()> {
-        let headers = try!(self.decoder.decode(&frame.header_fragment)
-                                       .map_err(|e| HttpError::CompressionError(e)));
-        self.session.new_headers(frame.get_stream_id(), headers);
-
-        if frame.is_end_of_stream() {
-            debug!("End of stream {}", frame.get_stream_id());
-            self.session.end_of_stream(frame.get_stream_id());
-        }
-
-        Ok(())
-    }
-
-    /// Private helper method that handles a received `SettingsFrame`.
-    fn handle_settings_frame(&mut self, frame: SettingsFrame) -> HttpResult<()> {
-        if !frame.is_ack() {
-            // TODO: Actually handle the settings change before
-            //       sending out the ACK.
-            debug!("Sending a SETTINGS ack");
-            try!(self.conn.send_frame(SettingsFrame::new_ack()));
-        }
-
-        Ok(())
+        self.conn.handle_next_frame(&mut self.session)
     }
 }
 
