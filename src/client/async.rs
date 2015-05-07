@@ -252,6 +252,8 @@ struct ClientService {
     /// Tracks the number of currently connected clients -- once it reaches 0, the `run_once`
     /// method returns an error.
     client_count: i32,
+    /// The name of the host the connection is established to.
+    host: Vec<u8>,
 }
 
 /// A helper wrapper around the components of the `ClientService` that are returned from its
@@ -304,8 +306,7 @@ impl ClientService {
                 HttpConnection::new(
                     send_handle,
                     recv_handle,
-                    scheme,
-                    host.into()),
+                    scheme),
                 DefaultSession::<DefaultStream>::new());
 
         let service = ClientService {
@@ -317,6 +318,7 @@ impl ClientService {
             work_queue: rx,
             request_queue: Vec::new(),
             client_count: 0,
+            host: host.as_bytes().to_vec(),
         };
 
         // Returns the handles to the channel sender/receiver, so that the client can use them to
@@ -442,7 +444,7 @@ impl ClientService {
         headers.extend(vec![
             (b":method".to_vec(), method),
             (b":path".to_vec(), path),
-            (b":authority".to_vec(), self.conn.host().as_bytes().to_vec()),
+            (b":authority".to_vec(), self.host.clone()),
             (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
         ].into_iter());
         headers.extend(extra_headers.into_iter());

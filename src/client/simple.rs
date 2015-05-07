@@ -54,9 +54,8 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// // Connect to an HTTP/2 aware server
 /// let conn = HttpConnection::<TcpStream, TcpStream>::with_stream(
 ///                                stream,
-///                                HttpScheme::Http,
-///                                "http2bin.org".into());
-/// let mut client = SimpleClient::with_connection(conn).unwrap();
+///                                HttpScheme::Http);
+/// let mut client = SimpleClient::with_connection(conn, "http2bin.org".into()).unwrap();
 /// let response = client.get(b"/", &[]).unwrap();
 /// assert_eq!(response.stream_id, 1);
 /// assert_eq!(response.status_code().unwrap(), 200);
@@ -132,6 +131,8 @@ pub struct SimpleClient<S> where S: TransportStream {
     /// Holds the ID that can be assigned to the next stream to be opened by the
     /// client.
     next_stream_id: u32,
+    /// The name of the host to which the client is connected to.
+    host: Vec<u8>,
 }
 
 impl<S> SimpleClient<S> where S: TransportStream {
@@ -140,10 +141,12 @@ impl<S> SimpleClient<S> where S: TransportStream {
     ///
     /// It assumes that the connection stream is initialized and will *not* automatically write the
     /// client preface.
-    pub fn with_connection(conn: HttpConnection<S, S>) -> HttpResult<SimpleClient<S>> {
+    pub fn with_connection(conn: HttpConnection<S, S>, host: String)
+            -> HttpResult<SimpleClient<S>> {
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, DefaultSession::new()),
             next_stream_id: 1,
+            host: host.as_bytes().to_vec(),
         };
 
         try!(client.init());
@@ -161,8 +164,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
     pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
             where C: HttpConnect<Stream=S> {
         let stream = connector.connect().ok().unwrap();
-        let conn = HttpConnection::<S, S>::with_stream(stream.0, stream.1, stream.2.into());
-        SimpleClient::with_connection(conn)
+        let conn = HttpConnection::<S, S>::with_stream(stream.0, stream.1);
+        SimpleClient::with_connection(conn, stream.2)
     }
 
     /// Internal helper method that performs the initialization of the client's
@@ -193,7 +196,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
         let mut headers: Vec<Header> = vec![
             (b":method".to_vec(), method.to_vec()),
             (b":path".to_vec(), path.to_vec()),
-            (b":authority".to_vec(), self.conn.host().as_bytes().to_vec()),
+            (b":authority".to_vec(), self.host.clone()),
             (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
         ];
         headers.extend(extras.to_vec().into_iter());

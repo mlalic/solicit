@@ -106,8 +106,6 @@ pub struct HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     encoder: hpack::Encoder<'static>,
     /// The scheme of the connection
     pub scheme: HttpScheme,
-    /// The host to which the connection is established
-    pub host: String,
 }
 
 /// A trait that should be implemented by types that can provide the functionality
@@ -190,15 +188,13 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
 impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// Creates a new `HttpConnection` that will use the given sender and receiver instances
     /// for writing and reading frames, respectively.
-    pub fn new<'a>(sender: S, receiver: R, scheme: HttpScheme, host: Cow<'a, str>)
-            -> HttpConnection<S, R> {
+    pub fn new(sender: S, receiver: R, scheme: HttpScheme) -> HttpConnection<S, R> {
         HttpConnection {
             receiver: receiver,
             sender: sender,
             scheme: scheme,
             decoder: hpack::Decoder::new(),
             encoder: hpack::Encoder::new(),
-            host: host.into_owned(),
         }
     }
 
@@ -208,13 +204,12 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// This constructor is provided as a convenience when the underlying IO of the
     /// HTTP/2 connection should be based on the `TransportStream` interface.
     ///
-    /// The host to which the connection is established, as well as the connection
-    /// scheme are provided.
-    pub fn with_stream<'a, TS>(stream: TS, scheme: HttpScheme, host: Cow<'a, str>)
-            -> HttpConnection<TS, TS> where TS: TransportStream {
+    /// The scheme of the connection is also provided.
+    pub fn with_stream<TS>(stream: TS, scheme: HttpScheme) -> HttpConnection<TS, TS>
+            where TS: TransportStream {
         let sender = stream.try_split().unwrap();
         let receiver = stream;
-        HttpConnection::new(sender, receiver, scheme, host)
+        HttpConnection::new(sender, receiver, scheme)
     }
 
     /// Sends the given frame to the peer.
@@ -657,7 +652,6 @@ pub struct ClientConnection<S, R, Sess>
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection<S, R>,
-    host: String,
     /// The `Session` associated with this connection. It is essentially a set
     /// of callbacks that are triggered by the connection when different states
     /// in the HTTP/2 communication arise.
@@ -669,18 +663,10 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
     /// for all its underlying HTTP/2 communication.
     pub fn with_connection(conn: HttpConnection<S, R>, session: Sess)
             -> ClientConnection<S, R, Sess> {
-        let host = conn.host.clone();
         ClientConnection {
             conn: conn,
-            host: host,
             session: session,
         }
-    }
-
-    /// Returns the host to which the underlying `HttpConnection` is established.
-    #[inline]
-    pub fn host(&self) -> &str {
-        &self.host
     }
 
     /// Returns the scheme of the underlying `HttpConnection`.
@@ -989,8 +975,7 @@ mod tests {
     fn build_http_conn(stub_data: &Vec<u8>) -> StubHttpConnection {
         HttpConnection::<StubTransportStream, StubTransportStream>::with_stream(
             StubTransportStream::with_stub_content(stub_data),
-            HttpScheme::Http,
-            "".into())
+            HttpScheme::Http)
     }
 
     /// A helper function that builds a buffer of bytes from the given `Vec` of
