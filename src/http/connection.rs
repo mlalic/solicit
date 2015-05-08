@@ -1602,72 +1602,69 @@ mod tests {
         assert_eq!(total_sz, written.len());
     }
 
-    /// Tests that the `ClientConnection` correctly notifies the session on a
-    /// new data chunk.
+    /// Tests that the `HttpConnection` correctly notifies the session on a
+    /// new headers frame, with no continuation.
     #[test]
-    fn test_client_conn_notifies_session_header() {
+    fn test_http_conn_notifies_session_header() {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let mut conn = ClientConnection::with_connection(
-            build_http_conn(&build_stub_from_frames(&frames)),
-            TestSession::new());
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut session = TestSession::new();
 
-        conn.handle_next_frame().ok().unwrap();
+        conn.handle_next_frame(&mut session).unwrap();
 
         // A poor man's mock...
         // The header callback was called
-        assert_eq!(conn.session.curr_header, 1);
+        assert_eq!(session.curr_header, 1);
         // ...no chunks were seen.
-        assert_eq!(conn.session.curr_chunk, 0);
+        assert_eq!(session.curr_chunk, 0);
     }
 
-    /// Tests that the `ClientConnection` correctly notifies the session on
+    /// Tests that the `HttpConnection` correctly notifies the session on
     /// a new data chunk.
     #[test]
-    fn test_client_conn_notifies_session_data() {
+    fn test_http_conn_notifies_session_data() {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::DataFrame(DataFrame::new(1)),
         ];
-        let mut conn = ClientConnection::with_connection(
-            build_http_conn(&build_stub_from_frames(&frames)),
-            TestSession::new());
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut session = TestSession::new();
 
-        conn.handle_next_frame().ok().unwrap();
+        conn.handle_next_frame(&mut session).unwrap();
 
         // A poor man's mock...
         // The header callback was not called
-        assert_eq!(conn.session.curr_header, 0);
+        assert_eq!(session.curr_header, 0);
         // and exactly one chunk seen.
-        assert_eq!(conn.session.curr_chunk, 1);
+        assert_eq!(session.curr_chunk, 1);
     }
 
     /// Tests that there is no notification for an invalid headers frame.
     #[test]
-    fn test_client_conn_invalid_frame_no_notification() {
+    fn test_http_conn_invalid_frame_no_notification() {
         let frames: Vec<HttpFrame> = vec![
             // Associated to stream 0!
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 0)),
         ];
-        let mut conn = ClientConnection::with_connection(
-            build_http_conn(&build_stub_from_frames(&frames)),
-            TestSession::new());
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut session = TestSession::new();
 
         // We get an invalid frame error back...
         assert_eq!(
-            conn.handle_next_frame().err().unwrap(),
+            conn.handle_next_frame(&mut session).err().unwrap(),
             HttpError::InvalidFrame);
 
         // A poor man's mock...
         // No callbacks triggered
-        assert_eq!(conn.session.curr_header, 0);
-        assert_eq!(conn.session.curr_chunk, 0);
+        assert_eq!(session.curr_header, 0);
+        assert_eq!(session.curr_chunk, 0);
     }
 
     /// Tests that the session gets the correct values for the headers and data
-    /// from the `ClientConnection`.
+    /// from the `HttpConnection` when multiple frames are handled.
     #[test]
-    fn test_client_conn_session_gets_headers_data_values() {
+    fn test_http_conn_session_gets_headers_data_values() {
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(
@@ -1679,18 +1676,17 @@ mod tests {
                 HttpFrame::DataFrame(frame)
             },
         ];
-        let mut conn = ClientConnection::with_connection(
-            build_http_conn(&build_stub_from_frames(&frames)),
-            TestSession::new_verify(
+        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut session = TestSession::new_verify(
                 vec![headers],
-                vec![b"".to_vec(), b"1234".to_vec()]));
+                vec![b"".to_vec(), b"1234".to_vec()]);
 
-        conn.handle_next_frame().ok().unwrap();
-        conn.handle_next_frame().ok().unwrap();
-        conn.handle_next_frame().ok().unwrap();
+        conn.handle_next_frame(&mut session).unwrap();
+        conn.handle_next_frame(&mut session).unwrap();
+        conn.handle_next_frame(&mut session).unwrap();
 
         // Two chunks and one header processed?
-        assert_eq!(conn.session.curr_chunk, 2);
-        assert_eq!(conn.session.curr_header, 1);
+        assert_eq!(session.curr_chunk, 2);
+        assert_eq!(session.curr_header, 1);
     }
 }
