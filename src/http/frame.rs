@@ -147,6 +147,7 @@ pub trait Frame {
 /// It is simply a wrapper around the two parts of an HTTP/2 frame.
 #[derive(PartialEq)]
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct RawFrame {
     /// The raw frame representation, including both the raw header representation
     /// (in the first 9 bytes), followed by the raw payload representation.
@@ -262,6 +263,7 @@ impl Flag for DataFlag {
 /// spec, section 6.1.
 #[derive(PartialEq)]
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct DataFrame {
     /// The data found in the frame as an opaque byte sequence. It never
     /// includes padding bytes.
@@ -567,6 +569,7 @@ impl Flag for SettingsFlag {
 /// 1.
 #[derive(PartialEq)]
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct SettingsFrame {
     /// Contains all the settings that are currently set in the frame. It is
     /// safe to access this field (to read, add, or remove settings), even
@@ -848,6 +851,7 @@ impl StreamDependency {
 /// HTTP/2 spec, section 6.2.
 #[derive(PartialEq)]
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct HeadersFrame {
     /// The header fragment bytes stored within the frame.
     pub header_fragment: Vec<u8>,

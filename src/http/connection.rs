@@ -49,6 +49,7 @@ use hpack;
 /// The variants wrap the appropriate `Frame` implementation.
 #[derive(PartialEq)]
 #[derive(Debug)]
+#[derive(Clone)]
 pub enum HttpFrame {
     DataFrame(DataFrame),
     HeadersFrame(HeadersFrame),
