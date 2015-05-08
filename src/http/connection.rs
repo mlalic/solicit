@@ -11,7 +11,6 @@
 
 use std::net::TcpStream;
 use std::convert::AsRef;
-use std::borrow::Cow;
 use std::path::Path;
 use std::io;
 use std::str;
@@ -746,6 +745,8 @@ mod tests {
     use std::cell::{RefCell, Cell};
     use std::rc::Rc;
 
+    use http::tests::common::build_mock_http_conn;
+
     use super::super::frame::{
         Frame, DataFrame, HeadersFrame,
         SettingsFrame,
@@ -755,7 +756,7 @@ mod tests {
     };
     use super::{HttpConnection, HttpFrame, ClientConnection, write_preface, SendFrame, ReceiveFrame};
     use super::super::transport::TransportStream;
-    use super::super::{HttpError, HttpScheme, Request, StreamId, Header, HttpResult};
+    use super::super::{HttpError, Request, StreamId, Header, HttpResult};
     use super::super::session::Session;
     use hpack;
 
@@ -792,11 +793,6 @@ mod tests {
         /// stream.
         fn get_written(&self) -> Vec<u8> {
             self.writer.borrow().get_ref().to_vec()
-        }
-
-        /// Returns the position up to which the stream has been read.
-        fn get_read_pos(&self) -> u64 {
-            self.reader.borrow().position()
         }
     }
 
@@ -836,10 +832,6 @@ mod tests {
             Ok(())
         }
     }
-
-    /// A convenience type alias for an `HttpConnection` with both send and receive ends being a
-    /// stub transport stream.
-    type StubHttpConnection = HttpConnection<StubTransportStream, StubTransportStream>;
 
     /// A helper struct implementing the `Session` trait, intended for testing
     /// purposes.
@@ -969,14 +961,6 @@ mod tests {
             assert!(stream.write(&[1]).is_err());
             assert!(stream.read(&mut [0; 5]).is_err());
         }
-    }
-
-    /// A helper function that creates an `HttpConnection` with a `StubTransportStream`
-    /// where the content of the stream is defined by the given `stub_data`
-    fn build_http_conn(stub_data: &Vec<u8>) -> StubHttpConnection {
-        HttpConnection::<StubTransportStream, StubTransportStream>::with_stream(
-            StubTransportStream::with_stub_content(stub_data),
-            HttpScheme::Http)
     }
 
     /// A helper function that builds a buffer of bytes from the given `Vec` of
@@ -1220,7 +1204,7 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut conn = build_mock_http_conn(frames.clone());
 
         let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
@@ -1237,7 +1221,7 @@ mod tests {
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
         ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut conn = build_mock_http_conn(frames.clone());
 
         let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
@@ -1249,7 +1233,7 @@ mod tests {
     /// an `IoError` is returned.
     #[test]
     fn test_read_no_data() {
-        let mut conn = build_http_conn(&vec![]);
+        let mut conn = build_mock_http_conn(vec![]);
 
         let res = conn.recv_frame();
 
@@ -1265,7 +1249,7 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut conn = build_mock_http_conn(frames.clone());
 
         let _: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
                                       .collect();
@@ -1277,92 +1261,21 @@ mod tests {
         });
     }
 
-    /// Tests that when reading off a stream that doesn't have a complete frame
-    /// header causes a graceful failure.
-    #[test]
-    fn test_read_invalid_stream_incomplete_frame() {
-        let frames: Vec<HttpFrame> = vec![
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
-        ];
-        let mut conn = build_http_conn(&{
-            let mut buf: Vec<u8> = Vec::new();
-            buf.extend(build_stub_from_frames(&frames).into_iter());
-            // We add an extra trailing byte (a start of the header of another
-            // frame).
-            buf.push(0);
-            buf
-        });
-
-        let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
-                                      .collect();
-        // The first frame is correctly read
-        assert_eq!(actual, frames);
-        // ...but now we get an error
-        assert!(match conn.recv_frame().err().unwrap() {
-            HttpError::IoError(_) => true,
-            _ => false,
-        });
-    }
-
-    /// Tests that when reading off a stream that doesn't have a frame payload
-    /// (when it should) causes a graceful failure.
-    #[test]
-    fn test_read_invalid_stream_incomplete_payload() {
-        let frames: Vec<HttpFrame> = vec![
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
-        ];
-        let mut conn = build_http_conn(&{
-            let mut buf: Vec<u8> = Vec::new();
-            buf.extend(build_stub_from_frames(&frames).into_iter());
-            // We add a header indicating that there should be 1 byte of payload
-            let header = (1u32, 0u8, 0u8, 1u32);
-            buf.extend(pack_header(&header).to_vec().into_iter());
-            // ...but we don't add any payload!
-            buf
-        });
-
-        let actual: Vec<_> = (0..frames.len()).map(|_| conn.recv_frame().ok().unwrap())
-                                      .collect();
-        // The first frame is correctly read
-        assert_eq!(actual, frames);
-        // ...but now we get an error
-        assert!(match conn.recv_frame().err().unwrap() {
-            HttpError::IoError(_) => true,
-            _ => false,
-        });
-    }
-
-    /// Tests that when reading off a stream that contains an invalid frame
-    /// returns an appropriate indicator.
-    #[test]
-    fn test_read_invalid_frame() {
-        // A DATA header which is attached to stream 0
-        let frames: Vec<HttpFrame> = vec![
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 0)),
-        ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
-
-        // An error indicating that the frame is invalid.
-        assert!(match conn.recv_frame().err().unwrap() {
-            HttpError::InvalidFrame => true,
-            _ => false,
-        });
-    }
-
-    /// Tests that when reading a frame with a header that indicates an
-    /// unknown frame type, an appropriate error is returned.
+    /// Tests that when reading a frame with a header that indicates an unknown frame type, the
+    /// frame is still returned wrapped in an `HttpFrame::UnknownFrame` variant.
     #[test]
     fn test_read_unknown_frame() {
-        let mut conn = build_http_conn(&{
+        let unknown_frame = RawFrame::from_buf(&{
             let mut buf: Vec<u8> = Vec::new();
             // Frame type 10 with a payload of length 1 on stream 1
             let header = (1u32, 10u8, 0u8, 1u32);
             buf.extend(pack_header(&header).to_vec().into_iter());
             buf.push(1);
             buf
-        });
+        }).unwrap();
+        let mut conn = build_mock_http_conn(vec![HttpFrame::UnknownFrame(unknown_frame)]);
 
-        // Unknown frame error.
+        // Unknown frame
         assert!(match conn.recv_frame() {
             Ok(HttpFrame::UnknownFrame(_)) => true,
             _ => false,
@@ -1375,14 +1288,14 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let expected = build_stub_from_frames(&frames);
-        let mut conn = build_http_conn(&vec![]);
+        let expected = frames.clone();
+        let mut conn = build_mock_http_conn(vec![]);
 
         for frame in frames.into_iter() {
             send_frame(&mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, conn.sender.get_written());
+        assert_eq!(expected, conn.sender.sent);
     }
 
 
@@ -1395,33 +1308,14 @@ mod tests {
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
         ];
-        let expected = build_stub_from_frames(&frames);
-        let mut conn = build_http_conn(&vec![]);
+        let expected = frames.clone();
+        let mut conn = build_mock_http_conn(vec![]);
 
         for frame in frames.into_iter() {
             send_frame(&mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, conn.sender.get_written());
-    }
-
-    /// Tests that a write to a closed stream fails with an IoError.
-    #[test]
-    fn test_write_to_closed_stream() {
-        let frames: Vec<HttpFrame> = vec![
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
-        ];
-        let mut conn = build_http_conn(&vec![]);
-        // Close the underlying stream!
-        conn.sender.close().unwrap();
-
-        for frame in frames.into_iter() {
-            let res = send_frame(&mut conn, frame);
-            assert!(match res {
-                Err(HttpError::IoError(_)) => true,
-                _ => false,
-            });
-        }
+        assert_eq!(expected, conn.sender.sent);
     }
 
     /// Tests that `HttpConnection::send_headers` correctly sends the given headers when they can
@@ -1438,49 +1332,59 @@ mod tests {
             (b":scheme".to_vec(), b"http".to_vec()),
         ];
         {
-            let mut conn = build_http_conn(&vec![]);
+            let mut conn = build_mock_http_conn(vec![]);
 
             // Headers when the stream should be closed
             conn.send_headers(&headers[..], 1, true).unwrap();
 
-            let written = conn.sender.get_written();
-            let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+            // Only 1 frame sent?
+            assert_eq!(conn.sender.sent.len(), 1);
+            // The headers frame?
+            let frame = match conn.sender.sent.remove(0) {
+                HttpFrame::HeadersFrame(frame) => frame,
+                _ => panic!("Headers frame not sent"),
+            };
             // We sent a headers frame with end of headers and end of stream flags
             assert!(frame.is_headers_end());
             assert!(frame.is_end_of_stream());
-            // ...and nothing else!
-            assert_eq!(sz, written.len());
+            // And the headers were also correct -- just for good measure.
             assert_correct_headers(&headers, &frame);
         }
         {
-            let mut conn = build_http_conn(&vec![]);
+            let mut conn = build_mock_http_conn(vec![]);
 
             // Headers when the stream should be left open
             conn.send_headers(&headers[..], 1, false).unwrap();
 
-            let written = conn.sender.get_written();
-            let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
-            // We sent a headers frame...
+            // Only 1 frame sent?
+            assert_eq!(conn.sender.sent.len(), 1);
+            // The headers frame?
+            let frame = match conn.sender.sent.remove(0) {
+                HttpFrame::HeadersFrame(frame) => frame,
+                _ => panic!("Headers frame not sent"),
+            };
             assert!(frame.is_headers_end());
             // ...but it's not the end of the stream
             assert!(!frame.is_end_of_stream());
-            // ...and nothing else!
-            assert_eq!(sz, written.len());
             assert_correct_headers(&headers, &frame);
         }
         {
-            let mut conn = build_http_conn(&vec![]);
+            let mut conn = build_mock_http_conn(vec![]);
 
             // Make sure it's all peachy when we give a `Vec` instead of a slice
             conn.send_headers(headers.clone(), 1, true).unwrap();
 
-            let written = conn.sender.get_written();
-            let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+            // Only 1 frame sent?
+            assert_eq!(conn.sender.sent.len(), 1);
+            // The headers frame?
+            let frame = match conn.sender.sent.remove(0) {
+                HttpFrame::HeadersFrame(frame) => frame,
+                _ => panic!("Headers frame not sent"),
+            };
             // We sent a headers frame with end of headers and end of stream flags
             assert!(frame.is_headers_end());
             assert!(frame.is_end_of_stream());
-            // ...and nothing else!
-            assert_eq!(sz, written.len());
+            // And the headers were also correct -- just for good measure.
             assert_correct_headers(&headers, &frame);
         }
     }
@@ -1491,37 +1395,52 @@ mod tests {
     fn test_send_data_single_frame() {
         {
             // Data shouldn't end the stream...
-            let mut conn = build_http_conn(&vec![]);
+            let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
             conn.send_data(data, 1, false).unwrap();
 
-            let written = conn.sender.get_written();
-            let (frame, _): (DataFrame, _) = get_frame_from_buf(&written);
+            // Only 1 frame sent?
+            assert_eq!(conn.sender.sent.len(), 1);
+            // A data frame?
+            let frame = match conn.sender.sent.remove(0) {
+                HttpFrame::DataFrame(frame) => frame,
+                _ => panic!("Data frame not sent"),
+            };
             assert_eq!(&frame.data[..], data);
             assert!(!frame.is_end_of_stream());
         }
         {
             // Data should end the stream...
-            let mut conn = build_http_conn(&vec![]);
+            let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
             conn.send_data(data, 1, true).unwrap();
 
-            let written = conn.sender.get_written();
-            let (frame, _): (DataFrame, _) = get_frame_from_buf(&written);
+            // Only 1 frame sent?
+            assert_eq!(conn.sender.sent.len(), 1);
+            // A data frame?
+            let frame = match conn.sender.sent.remove(0) {
+                HttpFrame::DataFrame(frame) => frame,
+                _ => panic!("Data frame not sent"),
+            };
             assert_eq!(&frame.data[..], data);
             assert!(frame.is_end_of_stream());
         }
         {
             // given a `Vec` we're good too?
-            let mut conn = build_http_conn(&vec![]);
+            let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
             conn.send_data(data.to_vec(), 1, true).unwrap();
 
-            let written = conn.sender.get_written();
-            let (frame, _): (DataFrame, _) = get_frame_from_buf(&written);
+            // Only 1 frame sent?
+            assert_eq!(conn.sender.sent.len(), 1);
+            // A data frame?
+            let frame = match conn.sender.sent.remove(0) {
+                HttpFrame::DataFrame(frame) => frame,
+                _ => panic!("Data frame not sent"),
+            };
             assert_eq!(&frame.data[..], data);
             assert!(frame.is_end_of_stream());
         }
@@ -1550,27 +1469,21 @@ mod tests {
     #[test]
     fn test_init_client_conn() {
         let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
-        let server_frame_buf = build_stub_from_frames(&frames);
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&server_frame_buf),
+            build_mock_http_conn(frames),
             TestSession::new());
 
         conn.init().unwrap();
 
-        // We have read the server's response (the settings frame only)
-        assert_eq!(
-            server_frame_buf.len() as u64,
-            conn.conn.receiver.get_read_pos());
+        // We have read the server's response (the settings frame only, since no panic
+        // ocurred)
+        assert_eq!(conn.conn.receiver.recv_list.len(), 0);
         // We also sent an ACK already.
-        let written = conn.conn.sender.get_written();
-        let len_ack = {
-            let (settings_frame, sz): (SettingsFrame, _) =
-                get_frame_from_buf(&written);
-            assert!(settings_frame.is_ack());
-            sz
+        let frame = match conn.conn.sender.sent.remove(0) {
+            HttpFrame::SettingsFrame(frame) => frame,
+            _ => panic!("ACK not sent!"),
         };
-        // ...and we didn't write anything else.
-        assert_eq!(len_ack, written.len());
+        assert!(frame.is_ack());
     }
 
     /// Tests that a client connection fails to initialize when the server does
@@ -1578,9 +1491,8 @@ mod tests {
     #[test]
     fn test_init_client_conn_no_settings() {
         let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
-        let server_frame_buf = build_stub_from_frames(&frames);
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&server_frame_buf),
+            build_mock_http_conn(frames),
             TestSession::new());
 
         // We get an error since the first frame sent by the server was not
@@ -1602,17 +1514,19 @@ mod tests {
             body: Vec::new(),
         };
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&vec![]), TestSession::new());
+            build_mock_http_conn(vec![]), TestSession::new());
 
         conn.send_request(req).unwrap();
-        let written = conn.conn.sender.get_written();
 
-        let (frame, sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+        let frame = match conn.conn.sender.sent.remove(0) {
+            HttpFrame::HeadersFrame(frame) => frame,
+            _ => panic!("Headers not sent!"),
+        };
         // We sent a headers frame with end of headers and end of stream flags
         assert!(frame.is_headers_end());
         assert!(frame.is_end_of_stream());
         // ...and nothing else!
-        assert_eq!(sz, written.len());
+        assert_eq!(conn.conn.sender.sent.len(), 0);
     }
 
     /// Tests that a `ClientConnection` correctly sends a `Request` with a small body (i.e. a body
@@ -1630,25 +1544,27 @@ mod tests {
             body: body.clone(),
         };
         let mut conn = ClientConnection::with_connection(
-            build_http_conn(&vec![]), TestSession::new());
+            build_mock_http_conn(vec![]), TestSession::new());
 
         conn.send_request(req).unwrap();
-        let written = conn.conn.sender.get_written();
 
-        let (frame, total_sz): (HeadersFrame, _) = get_frame_from_buf(&written);
+        let frame = match conn.conn.sender.sent.remove(0) {
+            HttpFrame::HeadersFrame(frame) => frame,
+            _ => panic!("Headers not sent!"),
+        };
         // The headers were sent, but didn't close the stream
         assert!(frame.is_headers_end());
         assert!(!frame.is_end_of_stream());
         // A single data frame is found that *did* close the stream
-        let (frame, total_sz): (DataFrame, _) = {
-            let (frame, sz) = get_frame_from_buf(&written[total_sz..]);
-            (frame, total_sz + sz)
+        let frame = match conn.conn.sender.sent.remove(0) {
+            HttpFrame::DataFrame(frame) => frame,
+            _ => panic!("Headers not sent!"),
         };
         assert!(frame.is_end_of_stream());
         // The data bore the correct payload
         assert_eq!(frame.data, body);
         // ...and nothing else was sent!
-        assert_eq!(total_sz, written.len());
+        assert_eq!(conn.conn.sender.sent.len(), 0);
     }
 
     /// Tests that the `HttpConnection` correctly notifies the session on a
@@ -1658,7 +1574,7 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut conn = build_mock_http_conn(frames);
         let mut session = TestSession::new();
 
         conn.handle_next_frame(&mut session).unwrap();
@@ -1677,7 +1593,7 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::DataFrame(DataFrame::new(1)),
         ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut conn = build_mock_http_conn(frames);
         let mut session = TestSession::new();
 
         conn.handle_next_frame(&mut session).unwrap();
@@ -1687,27 +1603,6 @@ mod tests {
         assert_eq!(session.curr_header, 0);
         // and exactly one chunk seen.
         assert_eq!(session.curr_chunk, 1);
-    }
-
-    /// Tests that there is no notification for an invalid headers frame.
-    #[test]
-    fn test_http_conn_invalid_frame_no_notification() {
-        let frames: Vec<HttpFrame> = vec![
-            // Associated to stream 0!
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 0)),
-        ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
-        let mut session = TestSession::new();
-
-        // We get an invalid frame error back...
-        assert_eq!(
-            conn.handle_next_frame(&mut session).err().unwrap(),
-            HttpError::InvalidFrame);
-
-        // A poor man's mock...
-        // No callbacks triggered
-        assert_eq!(session.curr_header, 0);
-        assert_eq!(session.curr_chunk, 0);
     }
 
     /// Tests that the session gets the correct values for the headers and data
@@ -1725,7 +1620,7 @@ mod tests {
                 HttpFrame::DataFrame(frame)
             },
         ];
-        let mut conn = build_http_conn(&build_stub_from_frames(&frames));
+        let mut conn = build_mock_http_conn(frames);
         let mut session = TestSession::new_verify(
                 vec![headers],
                 vec![b"".to_vec(), b"1234".to_vec()]);
