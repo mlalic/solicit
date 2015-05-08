@@ -780,9 +780,9 @@ mod tests {
     impl StubTransportStream {
         /// Initializes the stream with the given byte vector representing
         /// the bytes that will be read from the stream.
-        fn with_stub_content(stub: &Vec<u8>) -> StubTransportStream {
+        fn with_stub_content(stub: &[u8]) -> StubTransportStream {
             StubTransportStream {
-                reader: Rc::new(RefCell::new(Cursor::new(stub.clone()))),
+                reader: Rc::new(RefCell::new(Cursor::new(stub.to_vec()))),
                 writer: Rc::new(RefCell::new(Cursor::new(Vec::new()))),
                 closed: Rc::new(Cell::new(false)),
             }
@@ -1102,6 +1102,42 @@ mod tests {
         }
         // Attempting to read after EOF yields an error
         assert!(stream.recv_frame().is_err());
+    }
+
+    /// Tests that the implementation of `ReceiveFrame` for `TransportStream` types
+    /// works correctly when faced with an incomplete frame.
+    #[test]
+    fn test_recv_frame_for_transport_stream_incomplete_frame() {
+        let frame = {
+            let mut frame = DataFrame::new(1);
+            frame.data = vec![1, 2, 3];
+            frame
+        };
+        let serialized: Vec<u8> = frame.serialize();
+
+        {
+            // Incomplete header
+            let mut stream = StubTransportStream::with_stub_content(&serialized[..5]);
+
+            assert!(stream.recv_frame().is_err());
+        }
+        {
+            // Incomplete data
+            let mut stream = StubTransportStream::with_stub_content(&serialized[..10]);
+
+            assert!(stream.recv_frame().is_err());
+        }
+    }
+
+    /// Tests that when an invalid, yet syntactically correct, frame is read from the stream,
+    /// a corresponding error is returned.
+    #[test]
+    fn test_recv_frame_invalid() {
+        // A DATA header which is attached to stream 0
+        let serialized = HeadersFrame::new(vec![], 0).serialize();
+        let mut stream = StubTransportStream::with_stub_content(&serialized);
+
+        assert_eq!(stream.recv_frame().err().unwrap(), HttpError::InvalidFrame);
     }
 
     /// Tests that the `HttpFrame::from_raw` method correctly recognizes the frame
