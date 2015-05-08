@@ -1076,6 +1076,18 @@ mod tests {
         }
     }
 
+    /// Tests that trying to send a frame on a closed transport stream results in an error.
+    /// (i.e. an error returned by the underlying `io::Write` is propagated).
+    #[test]
+    fn test_send_frame_closed_stream() {
+        let mut stream = StubTransportStream::with_stub_content(&vec![]);
+        stream.close().unwrap();
+
+        let res = stream.send_frame(HeadersFrame::new(vec![], 1));
+
+        assert!(res.is_err());
+    }
+
     /// Tests that the implementation of `ReceiveFrame` for `TransportStream` types
     /// works correctly.
     #[test]
