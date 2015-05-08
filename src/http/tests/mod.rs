@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub mod common;
+
 /// Tests for the structs defined in the root of the `solicit::http` module.
 #[cfg(test)]
 mod root_tests {
