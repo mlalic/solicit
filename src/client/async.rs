@@ -10,13 +10,14 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
+use http::client::{ClientConnection, ClientSession};
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnect, ClientStream};
 use http::HttpResult;
 use http::frame::RawFrame;
 use super::super::http::{StreamId, HttpError, Response, Request, Header};
-use super::super::http::connection::{HttpConnection, ClientConnection};
-use super::super::http::session::{ClientSession, DefaultStream};
+use super::super::http::connection::HttpConnection;
+use super::super::http::session::DefaultStream;
 
 /// A struct representing an asynchronously dispatched request. It is used
 /// internally be the `ClientService` and `Client` structs.
