@@ -317,6 +317,29 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
         self.send_frame(frame)
     }
 
+    /// The method processes the next incoming frame, expecting it to be a SETTINGS frame.
+    /// Additionally, the frame cannot be an ACK settings frame, but rather it should contain the
+    /// peer's settings.
+    ///
+    /// The method can be used when the receipt of the peer's preface needs to be asserted.
+    ///
+    /// If the received frame is not a SETTINGS frame, an `HttpError::UnableToConnect` variant is
+    /// returned. (TODO: Change this variant's name, as it is a byproduct of this method's legacy)
+    pub fn expect_settings<Sess: Session>(&mut self, session: &mut Sess) -> HttpResult<()> {
+        let frame = self.recv_frame();
+        match frame {
+            Ok(HttpFrame::SettingsFrame(ref settings)) if !settings.is_ack() => {
+                debug!("Correctly received a SETTINGS frame from the server");
+            },
+            // Wrong frame received...
+            Ok(_) => return Err(HttpError::UnableToConnect),
+            // Already an error -- propagate that.
+            Err(e) => return Err(e),
+        };
+        try!(self.handle_frame(frame.unwrap(), session));
+        Ok(())
+    }
+
     /// Handles the next frame incoming on the `ReceiveFrame` instance.
     ///
     /// The `HttpConnection` takes care of parsing the frame and extracting the semantics behind it
@@ -697,17 +720,7 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
     /// Additionally, if it is not possible to decode the server preface,
     /// it returns the `HttpError::UnableToConnect` variant.
     fn read_preface(&mut self) -> HttpResult<()> {
-        match self.conn.recv_frame() {
-            Ok(HttpFrame::SettingsFrame(settings)) => {
-                debug!("Correctly received a SETTINGS frame from the server");
-                try!(self.conn.handle_settings_frame::<Sess>(settings, &mut self.session));
-            },
-            // Wrong frame received...
-            Ok(_) => return Err(HttpError::UnableToConnect),
-            // Already an error -- propagate that.
-            Err(e) => return Err(e),
-        }
-        Ok(())
+        self.conn.expect_settings(&mut self.session)
     }
 
     /// A method that sends the given `Request` to the server.
@@ -1428,5 +1441,28 @@ mod tests {
         // Two chunks and one header processed?
         assert_eq!(session.curr_chunk, 2);
         assert_eq!(session.curr_header, 1);
+    }
+
+    /// Tests that the `HttpConnection::expect_settings` method works correctly.
+    #[test]
+    fn test_http_conn_expect_settings() {
+        {
+            // The next frame is indeed a settings frame.
+            let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
+            let mut conn = build_mock_http_conn(frames);
+            assert!(conn.expect_settings(&mut TestSession::new()).is_ok());
+        }
+        {
+            // The next frame is a data frame...
+            let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
+            let mut conn = build_mock_http_conn(frames);
+            assert!(conn.expect_settings(&mut TestSession::new()).is_err());
+        }
+        {
+            // The next frame is an ACK settings frame
+            let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new_ack())];
+            let mut conn = build_mock_http_conn(frames);
+            assert!(conn.expect_settings(&mut TestSession::new()).is_err());
+        }
     }
 }
