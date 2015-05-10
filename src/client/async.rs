@@ -16,7 +16,7 @@ use http::HttpResult;
 use http::frame::RawFrame;
 use super::super::http::{StreamId, HttpError, Response, Request, Header};
 use super::super::http::connection::{HttpConnection, ClientConnection};
-use super::super::http::session::{DefaultSession, DefaultStream};
+use super::super::http::session::{ClientSession, DefaultStream};
 
 /// A struct representing an asynchronously dispatched request. It is used
 /// internally be the `ClientService` and `Client` structs.
@@ -240,7 +240,7 @@ struct ClientService {
     /// but sent).
     limit: u32,
     /// The connection that is used for underlying HTTP/2 communication.
-    conn: ClientConnection<ChannelFrameSenderHandle, ChannelFrameReceiverHandle, DefaultSession>,
+    conn: ClientConnection<ChannelFrameSenderHandle, ChannelFrameReceiverHandle, ClientSession>,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
     chans: HashMap<StreamId, Sender<Response>>,
@@ -307,7 +307,7 @@ impl ClientService {
                     send_handle,
                     recv_handle,
                     scheme),
-                DefaultSession::<DefaultStream>::new());
+                ClientSession::<DefaultStream>::new());
 
         let service = ClientService {
             next_stream_id: 1,

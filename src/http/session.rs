@@ -3,7 +3,7 @@
 //! HTTP/2 connection in order to handle events arising on the connection.
 //!
 //! It also provides a default implementation of this interface, the
-//! `DefaultSession`. This implementation is based on keeping a mapping of
+//! `ClientSession`. This implementation is based on keeping a mapping of
 //! valid stream IDs to instances of `Stream` objects. When the session
 //! receives a callback for a particular stream ID, it first validates that
 //! it represents a valid stream ID and then delegates to the appropriate
@@ -214,9 +214,7 @@ impl Stream for DefaultStream {
 
 /// A simple implementation of the `Session` trait.
 ///
-/// Keeps track of which streams are currently active by holding a `HashMap`
-/// of stream IDs to `Stream` instances. Callbacks delegate to the corresponding
-/// stream instance, after validating the received stream ID.
+/// Relies on the `DefaultSessionState` to keep track of its currently open streams.
 ///
 /// The purpose of the type is to make it easier for client implementations to
 /// only handle stream-level events by providing a `Stream` implementation,
@@ -227,20 +225,20 @@ impl Stream for DefaultStream {
 /// a client that streams responses directly into a file on the local file system,
 /// instead of keeping it in memory (like the `DefaultStream` does), without
 /// having to change any HTTP/2-specific logic.
-pub struct DefaultSession<S=DefaultStream> where S: Stream {
+pub struct ClientSession<S=DefaultStream> where S: Stream {
     state: DefaultSessionState<S>,
 }
 
-impl<S> DefaultSession<S> where S: Stream {
-    /// Returns a new `DefaultSession` with no active streams.
-    pub fn new() -> DefaultSession<S> {
-        DefaultSession {
+impl<S> ClientSession<S> where S: Stream {
+    /// Returns a new `ClientSession` with no active streams.
+    pub fn new() -> ClientSession<S> {
+        ClientSession {
             state: DefaultSessionState::new(),
         }
     }
 
     /// Returns a reference to a stream with the given ID, if such a stream is
-    /// found in the `DefaultSession`.
+    /// found in the `ClientSession`.
     #[inline]
     pub fn get_stream(&self, stream_id: StreamId) -> Option<&S> {
         self.state.get_stream_ref(stream_id)
@@ -266,7 +264,7 @@ impl<S> DefaultSession<S> where S: Stream {
     }
 }
 
-impl<S> Session for DefaultSession<S> where S: Stream {
+impl<S> Session for ClientSession<S> where S: Stream {
     fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
@@ -309,22 +307,22 @@ impl<S> Session for DefaultSession<S> where S: Stream {
 #[cfg(test)]
 mod tests {
     use super::{
-        Session, DefaultSession,
+        Session, ClientSession,
         Stream,
         DefaultSessionState,
         SessionState,
     };
     use http::tests::common::TestStream;
 
-    /// Tests that a `DefaultSession` notifies the correct stream when the
+    /// Tests that a `ClientSession` notifies the correct stream when the
     /// appropriate callback is invoked.
     ///
-    /// A better unit test would give a mock Stream to the `DefaultSession`,
-    /// instead of testing both the `DefaultSession` and the `DefaultStream`
+    /// A better unit test would give a mock Stream to the `ClientSession`,
+    /// instead of testing both the `ClientSession` and the `DefaultStream`
     /// in the same time...
     #[test]
     fn test_default_session_notifies_stream() {
-        let mut session: DefaultSession = DefaultSession::new();
+        let mut session: ClientSession = ClientSession::new();
         session.new_stream(1);
 
         // Registering some data to stream 1...

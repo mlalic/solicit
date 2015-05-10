@@ -4,7 +4,7 @@ use super::super::http::connection::ClientConnection;
 use super::super::http::connection::HttpConnection;
 use super::super::http::connection::HttpConnect;
 use super::super::http::transport::TransportStream;
-use super::super::http::session::{DefaultSession, Stream};
+use super::super::http::session::{ClientSession, Stream};
 use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Request};
 
 
@@ -127,7 +127,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// ```
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
-    conn: ClientConnection<S, S, DefaultSession>,
+    conn: ClientConnection<S, S, ClientSession>,
     /// Holds the ID that can be assigned to the next stream to be opened by the
     /// client.
     next_stream_id: u32,
@@ -144,7 +144,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     pub fn with_connection(conn: HttpConnection<S, S>, host: String)
             -> HttpResult<SimpleClient<S>> {
         let mut client = SimpleClient {
-            conn: ClientConnection::with_connection(conn, DefaultSession::new()),
+            conn: ClientConnection::with_connection(conn, ClientSession::new()),
             next_stream_id: 1,
             host: host.as_bytes().to_vec(),
         };
