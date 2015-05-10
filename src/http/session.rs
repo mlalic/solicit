@@ -228,45 +228,48 @@ impl Stream for DefaultStream {
 /// instead of keeping it in memory (like the `DefaultStream` does), without
 /// having to change any HTTP/2-specific logic.
 pub struct DefaultSession<S=DefaultStream> where S: Stream {
-    streams: HashMap<StreamId, S>,
+    state: DefaultSessionState<S>,
 }
 
 impl<S> DefaultSession<S> where S: Stream {
     /// Returns a new `DefaultSession` with no active streams.
     pub fn new() -> DefaultSession<S> {
         DefaultSession {
-            streams: HashMap::new(),
+            state: DefaultSessionState::new(),
         }
     }
 
     /// Returns a reference to a stream with the given ID, if such a stream is
     /// found in the `DefaultSession`.
+    #[inline]
     pub fn get_stream(&self, stream_id: StreamId) -> Option<&S> {
-        self.streams.get(&stream_id)
+        self.state.get_stream_ref(stream_id)
+    }
+
+    #[inline]
+    pub fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut S> {
+        self.state.get_stream_mut(stream_id)
     }
 
     /// Creates a new stream with the given ID in the session.
+    #[inline]
     pub fn new_stream(&mut self, stream_id: StreamId) {
-        self.streams.insert(stream_id, Stream::new(stream_id));
+        self.state.insert_stream(Stream::new(stream_id));
     }
 
     /// Returns all streams that are closed and tracked by the session.
     ///
     /// The streams are moved out of the session.
+    #[inline]
     pub fn get_closed(&mut self) -> Vec<S> {
-        let ids: Vec<_> = self.streams.iter()
-                              .filter_map(|(i, s)| {
-                                  if s.is_closed() { Some(*i) } else { None }
-                              })
-                              .collect();
-        FromIterator::from_iter(ids.into_iter().map(|i| self.streams.remove(&i).unwrap()))
+        self.state.get_closed()
     }
 }
 
 impl<S> Session for DefaultSession<S> where S: Stream {
     fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
         debug!("Data chunk for stream {}", stream_id);
-        let mut stream = match self.streams.get_mut(&stream_id) {
+        let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
                 return;
@@ -279,7 +282,7 @@ impl<S> Session for DefaultSession<S> where S: Stream {
 
     fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>) {
         debug!("Headers for stream {}", stream_id);
-        let mut stream = match self.streams.get_mut(&stream_id) {
+        let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
                 return;
@@ -292,7 +295,7 @@ impl<S> Session for DefaultSession<S> where S: Stream {
 
     fn end_of_stream(&mut self, stream_id: StreamId) {
         debug!("End of stream {}", stream_id);
-        let mut stream = match self.streams.get_mut(&stream_id) {
+        let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
                 return;
@@ -349,13 +352,13 @@ mod tests {
         // but not the other one.
         assert!(!session.get_stream(3).unwrap().closed);
         // Sanity check: both streams still found in the session
-        assert_eq!(session.streams.len(), 2);
+        assert_eq!(session.state.streams.len(), 2);
         // The closed stream is returned...
         let closed = session.get_closed();
         assert_eq!(closed.len(), 1);
         assert_eq!(closed[0].id(), 1);
         // ...and is also removed from the session!
-        assert_eq!(session.streams.len(), 1);
+        assert_eq!(session.state.streams.len(), 1);
     }
 
     /// Tests for the `DefaultSessionState` implementation of the `SessionState` trait.
