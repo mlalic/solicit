@@ -34,6 +34,64 @@ pub trait Session {
     fn end_of_stream(&mut self, stream_id: StreamId);
 }
 
+/// A newtype for an iterator over `Stream`s saved in a `SessionState`.
+///
+/// Allows `SessionState` implementations to return iterators over its session without being forced
+/// to declare them as associated types.
+pub struct StreamIter<'a, S: Stream>(Box<Iterator<Item=&'a mut S> + 'a>);
+
+impl<'a, S> Iterator for StreamIter<'a, S> where S: Stream {
+    type Item = &'a mut S;
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a mut S> { self.0.next() }
+}
+
+/// A trait defining a set of methods for accessing and influencing an HTTP/2 session's state.
+///
+/// This trait is tightly coupled to a `Stream`-based session layer implementation. Particular
+/// implementations are additionally tightly coupled to one particular `Stream` implementation.
+///
+/// # Note
+///
+/// Clients built on top of the raw `HttpConnection` + `Session` can still exist without using
+/// this trait; however, it is included for convenience, as most session implementations *will*
+/// want to keep track of similar things in the session's state.
+pub trait SessionState {
+    /// The type of the `Stream` that the `SessionState` manages.
+    type Stream: Stream;
+
+    /// Inserts the given `Stream` into the session's state, starting to track it.
+    fn insert_stream(&mut self, stream: Self::Stream);
+    /// Returns a reference to a `Stream` with the given `StreamId`, if it is found in the current
+    /// session.
+    fn get_stream_ref(&self, stream_id: StreamId) -> Option<&Self::Stream>;
+    /// Returns a mutable reference to a `Stream` with the given `StreamId`, if it is found in the
+    /// current session.
+    fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut Self::Stream>;
+    /// Removes the stream with the given `StreamId` from the session. If the stream was found in
+    /// the session, it is returned in the result.
+    fn remove_stream(&mut self, stream_id: StreamId) -> Option<Self::Stream>;
+
+    /// Returns an iterator over the streams currently found in the session.
+    fn iter(&mut self) -> StreamIter<Self::Stream>;
+
+    /// Returns all streams that are closed and tracked by the session state.
+    ///
+    /// The streams are moved out of the session state.
+    ///
+    /// The default implementations relies on the `iter` implementation to find the closed streams
+    /// first and then calls `remove_stream` on all of them.
+    fn get_closed(&mut self) -> Vec<Self::Stream> {
+        let ids: Vec<_> = self.iter()
+                              .filter_map(|s| {
+                                  if s.is_closed() { Some(s.id()) } else { None }
+                              })
+                              .collect();
+        FromIterator::from_iter(ids.into_iter().map(|i| self.remove_stream(i).unwrap()))
+    }
+}
+
 /// A trait representing a single HTTP/2 client stream. An HTTP/2 connection
 /// multiplexes a number of streams.
 ///
