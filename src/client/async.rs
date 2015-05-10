@@ -10,9 +10,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
-use http::client::{ClientConnection, ClientSession};
+use http::client::{ClientConnection, ClientSession, HttpConnect, ClientStream};
 use http::transport::TransportStream;
-use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnect, ClientStream};
+use http::connection::{SendFrame, ReceiveFrame, HttpFrame};
 use http::HttpResult;
 use http::frame::RawFrame;
 use super::super::http::{StreamId, HttpError, Response, Request, Header};
@@ -520,7 +520,7 @@ impl ClientService {
 ///
 /// ```no_run
 /// use solicit::client::Client;
-/// use solicit::http::connection::CleartextConnector;
+/// use solicit::http::client::CleartextConnector;
 /// use std::thread;
 /// use std::str;
 ///

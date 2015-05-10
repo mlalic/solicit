@@ -1,8 +1,7 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
-use http::client::{ClientConnection, ClientSession};
+use http::client::{ClientConnection, ClientSession, HttpConnect};
 use super::super::http::connection::HttpConnection;
-use super::super::http::connection::HttpConnect;
 use super::super::http::transport::TransportStream;
 use super::super::http::session::Stream;
 use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Request};
@@ -42,7 +41,8 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// ```no_run
 /// use std::net::TcpStream;
 /// use solicit::http::HttpScheme;
-/// use solicit::http::connection::{HttpConnection, write_preface};
+/// use solicit::http::connection::HttpConnection;
+/// use solicit::http::client::write_preface;
 /// use solicit::client::SimpleClient;
 /// use std::str;
 ///
@@ -76,7 +76,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// to establish a new connection.
 ///
 /// ```no_run
-/// use solicit::http::connection::CleartextConnector;
+/// use solicit::http::client::CleartextConnector;
 /// use solicit::client::SimpleClient;
 /// use std::str;
 ///
@@ -102,7 +102,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// Issue a GET request over `https` using the `TlsConnector`
 ///
 /// ```no_run
-/// use solicit::http::connection::TlsConnector;
+/// use solicit::http::client::TlsConnector;
 /// use solicit::client::SimpleClient;
 /// use std::str;
 ///
