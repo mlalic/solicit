@@ -97,9 +97,9 @@ impl HttpFrame {
 /// content within the frames.
 pub struct HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// The instance handling the reading of frames.
-    receiver: R,
+    pub receiver: R,
     /// The instance handling the writing of frames.
-    sender: S,
+    pub sender: S,
     /// HPACK decoder used to decode incoming headers before passing them on to the session.
     decoder: hpack::Decoder<'static>,
     /// The HPACK encoder used to encode headers before sending them on this connection.
@@ -221,7 +221,7 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     ///
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
     #[inline]
-    pub fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
+    fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
         debug!("Sending frame ... {:?}", frame.get_header());
         self.sender.send_frame(frame)
     }
@@ -245,7 +245,7 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// If a frame is successfully read and parsed, returns the frame wrapped
     /// in the appropriate variant of the `HttpFrame` enum.
     #[inline]
-    pub fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
+    fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
         self.receiver.recv_frame()
     }
 
