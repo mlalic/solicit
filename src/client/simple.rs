@@ -1,6 +1,7 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
-use http::client::{ClientConnection, ClientSession, HttpConnect};
+use http::client::{ClientConnection, HttpConnect};
+use http::session::{SessionState, DefaultSessionState};
 use super::super::http::connection::HttpConnection;
 use super::super::http::transport::TransportStream;
 use super::super::http::session::Stream;
@@ -127,7 +128,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Requ
 /// ```
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
-    conn: ClientConnection<S, S, ClientSession>,
+    conn: ClientConnection<S, S>,
     /// Holds the ID that can be assigned to the next stream to be opened by the
     /// client.
     next_stream_id: u32,
@@ -144,7 +145,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     pub fn with_connection(conn: HttpConnection<S, S>, host: String)
             -> HttpResult<SimpleClient<S>> {
         let mut client = SimpleClient {
-            conn: ClientConnection::with_connection(conn, ClientSession::new()),
+            conn: ClientConnection::with_connection(conn, DefaultSessionState::new()),
             next_stream_id: 1,
             host: host.as_bytes().to_vec(),
         };
@@ -220,12 +221,12 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// Any underlying IO errors are propagated. Errors in the HTTP/2 protocol
     /// also stop processing and are returned to the client.
     pub fn get_response(&mut self, stream_id: StreamId) -> HttpResult<Response> {
-        match self.conn.session.get_stream(stream_id) {
+        match self.conn.state.get_stream_ref(stream_id) {
             None => return Err(HttpError::UnknownStreamId),
             Some(_) => {},
         };
         loop {
-            if let Some(stream) = self.conn.session.get_stream(stream_id) {
+            if let Some(stream) = self.conn.state.get_stream_ref(stream_id) {
                 if stream.is_closed() {
                     return Ok(Response {
                         stream_id: stream.id(),
@@ -257,7 +258,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// ID once done.
     fn new_stream(&mut self) -> StreamId {
         let stream_id = self.get_next_stream_id();
-        self.conn.session.new_stream(stream_id);
+        self.conn.state.insert_stream(Stream::new(stream_id));
 
         stream_id
     }

@@ -10,14 +10,14 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
-use http::client::{ClientConnection, ClientSession, HttpConnect, ClientStream};
+use http::client::{ClientConnection, HttpConnect, ClientStream};
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame};
 use http::HttpResult;
 use http::frame::RawFrame;
 use super::super::http::{StreamId, HttpError, Response, Request, Header};
 use super::super::http::connection::HttpConnection;
-use super::super::http::session::DefaultStream;
+use super::super::http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 
 /// A struct representing an asynchronously dispatched request. It is used
 /// internally be the `ClientService` and `Client` structs.
@@ -241,7 +241,7 @@ struct ClientService {
     /// but sent).
     limit: u32,
     /// The connection that is used for underlying HTTP/2 communication.
-    conn: ClientConnection<ChannelFrameSenderHandle, ChannelFrameReceiverHandle, ClientSession>,
+    conn: ClientConnection<ChannelFrameSenderHandle, ChannelFrameReceiverHandle>,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
     chans: HashMap<StreamId, Sender<Response>>,
@@ -308,7 +308,7 @@ impl ClientService {
                     send_handle,
                     recv_handle,
                     scheme),
-                ClientSession::<DefaultStream>::new());
+                DefaultSessionState::new());
 
         let service = ClientService {
             next_stream_id: 1,
@@ -428,7 +428,7 @@ impl ClientService {
 
         debug!("Sending new request... id = {}", req.stream_id);
 
-        self.conn.session.new_stream(req.stream_id);
+        self.conn.state.insert_stream(Stream::new(req.stream_id));
         self.chans.insert(req.stream_id, async_req.tx);
         self.conn.send_request(req).ok().unwrap();
         self.outstanding_reqs += 1;
@@ -487,7 +487,7 @@ impl ClientService {
     /// For now, the channels are all given a `Response`, even though the
     /// stream might end up being closed by the server with an error.
     fn handle_closed(&mut self) {
-        let done = self.conn.session.get_closed();
+        let done = self.conn.state.get_closed();
         for stream in done {
             self.send_response(stream);
             self.outstanding_reqs -= 1;

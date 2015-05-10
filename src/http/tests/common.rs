@@ -14,6 +14,7 @@ use http::{
 use http::frame::{RawFrame, Frame};
 use http::session::{
     Session,
+    DefaultSessionState,
     SessionState,
     Stream,
 };
@@ -24,6 +25,7 @@ use http::connection::{
     HttpFrame,
     HttpConnection,
 };
+use http::client::ClientConnection;
 
 /// A mock `SendFrame` implementation that simply saves all frames that it is to send to a `Vec`.
 pub struct MockSendFrame {
@@ -283,6 +285,8 @@ impl Session for TestSession {
 pub struct TestStream {
     pub id: StreamId,
     pub closed: bool,
+    pub body: Vec<u8>,
+    pub headers: Option<Vec<Header>>,
 }
 
 impl Stream for TestStream {
@@ -290,11 +294,26 @@ impl Stream for TestStream {
         TestStream {
             id: stream_id,
             closed: false,
+            body: Vec::new(),
+            headers: None,
         }
     }
-    fn new_data_chunk(&mut self, _data: &[u8]) {}
-    fn set_headers(&mut self, _headers: Vec<Header>) {}
+    fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
+    fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
     fn close(&mut self) { self.closed = true; }
     fn id(&self) -> StreamId { self.id }
     fn is_closed(&self) -> bool { self.closed }
+}
+
+/// A type alias for a `ClientConnection` with mock replacements for its dependent types.
+pub type MockClientConnection = ClientConnection<MockSendFrame,
+                                                 MockReceiveFrame,
+                                                 DefaultSessionState<TestStream>>;
+
+/// Returns a `ClientConnection` suitable for use in tests.
+#[inline]
+pub fn build_mock_client_conn(frames: Vec<HttpFrame>) -> MockClientConnection {
+    ClientConnection::with_connection(
+        build_mock_http_conn(frames),
+        DefaultSessionState::<TestStream>::new())
 }

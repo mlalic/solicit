@@ -259,28 +259,27 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
 
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
 /// `send_request`) and wires the `HttpConnection` to the client `Session` callbacks.
-pub struct ClientConnection<S, R, Sess>
-        where S: SendFrame, R: ReceiveFrame, Sess: Session {
+pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
+        where S: SendFrame, R: ReceiveFrame, State: SessionState {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection<S, R>,
-    /// The `Session` associated with this connection. It is essentially a set
-    /// of callbacks that are triggered by the connection when different states
-    /// in the HTTP/2 communication arise.
-    pub session: Sess,
+    /// The state of the session associated to this client connection. Maintains the status of the
+    /// connection streams.
+    pub state: State,
 }
 
-impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFrame, Sess: Session {
+impl<S, R, State> ClientConnection<S, R, State>
+        where S: SendFrame, R: ReceiveFrame, State: SessionState {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
     ///
-    /// The given `session` instance will receive all events that arise from reading frames from
-    /// the underlying HTTP/2 connection.
-    pub fn with_connection(conn: HttpConnection<S, R>, session: Sess)
-            -> ClientConnection<S, R, Sess> {
+    /// The given `state` instance will handle the maintenance of the session's state.
+    pub fn with_connection(conn: HttpConnection<S, R>, state: State)
+            -> ClientConnection<S, R, State> {
         ClientConnection {
             conn: conn,
-            session: session,
+            state: state,
         }
     }
 
@@ -312,7 +311,8 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
     /// Additionally, if it is not possible to decode the server preface,
     /// it returns the `HttpError::UnableToConnect` variant.
     fn read_preface(&mut self) -> HttpResult<()> {
-        self.conn.expect_settings(&mut self.session)
+        let mut session = ClientSession::new(&mut self.state);
+        self.conn.expect_settings(&mut session)
     }
 
     /// A method that sends the given `Request` to the server.
@@ -338,63 +338,39 @@ impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFram
     /// instance.
     #[inline]
     pub fn handle_next_frame(&mut self) -> HttpResult<()> {
-        self.conn.handle_next_frame(&mut self.session)
+        let mut session = ClientSession::new(&mut self.state);
+        self.conn.handle_next_frame(&mut session)
     }
 }
 
-/// A simple implementation of the `Session` trait.
+/// An implementation of the `Session` trait specific to handling client HTTP/2 connections.
 ///
-/// Relies on the `DefaultSessionState` to keep track of its currently open streams.
+/// While handling the events signaled by the `HttpConnection`, the struct will modify the given
+/// session state appropriately.
 ///
 /// The purpose of the type is to make it easier for client implementations to
 /// only handle stream-level events by providing a `Stream` implementation,
-/// instead of having to implement the entire session management (tracking active
-/// streams, etc.).
+/// instead of having to implement all session management callbacks.
 ///
 /// For example, by varying the `Stream` implementation it is easy to implement
 /// a client that streams responses directly into a file on the local file system,
 /// instead of keeping it in memory (like the `DefaultStream` does), without
 /// having to change any HTTP/2-specific logic.
-pub struct ClientSession<S=DefaultStream> where S: Stream {
-    state: DefaultSessionState<S>,
+pub struct ClientSession<'a, State> where State: SessionState + 'a {
+    state: &'a mut State,
 }
 
-impl<S> ClientSession<S> where S: Stream {
-    /// Returns a new `ClientSession` with no active streams.
-    pub fn new() -> ClientSession<S> {
+impl<'a, State> ClientSession<'a, State> where State: SessionState + 'a {
+    /// Returns a new `ClientSession` associated to the given state.
+    #[inline]
+    pub fn new(state: &'a mut State) -> ClientSession<State> {
         ClientSession {
-            state: DefaultSessionState::new(),
+            state: state,
         }
     }
-
-    /// Returns a reference to a stream with the given ID, if such a stream is
-    /// found in the `ClientSession`.
-    #[inline]
-    pub fn get_stream(&self, stream_id: StreamId) -> Option<&S> {
-        self.state.get_stream_ref(stream_id)
-    }
-
-    #[inline]
-    pub fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut S> {
-        self.state.get_stream_mut(stream_id)
-    }
-
-    /// Creates a new stream with the given ID in the session.
-    #[inline]
-    pub fn new_stream(&mut self, stream_id: StreamId) {
-        self.state.insert_stream(Stream::new(stream_id));
-    }
-
-    /// Returns all streams that are closed and tracked by the session.
-    ///
-    /// The streams are moved out of the session.
-    #[inline]
-    pub fn get_closed(&mut self) -> Vec<S> {
-        self.state.get_closed()
-    }
 }
 
-impl<S> Session for ClientSession<S> where S: Stream {
+impl<'a, State> Session for ClientSession<'a, State> where State: SessionState + 'a {
     fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
@@ -437,7 +413,6 @@ impl<S> Session for ClientSession<S> where S: Stream {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClientConnection,
         ClientSession,
         write_preface,
     };
@@ -446,8 +421,8 @@ mod tests {
 
     use http::Request;
     use http::tests::common::{
-        TestSession,
-        build_mock_http_conn,
+        TestStream,
+        build_mock_client_conn,
     };
     use http::frame::{
         SettingsFrame,
@@ -459,16 +434,14 @@ mod tests {
     use http::connection::{
         HttpFrame,
     };
-    use http::session::{Session, SessionState, Stream};
+    use http::session::{Session, SessionState, Stream, DefaultSessionState};
 
     /// Tests that a client connection is correctly initialized, by reading the
     /// server preface (i.e. a settings frame) as the first frame of the connection.
     #[test]
     fn test_init_client_conn() {
         let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(frames),
-            TestSession::new());
+        let mut conn = build_mock_client_conn(frames);
 
         conn.init().unwrap();
 
@@ -488,9 +461,7 @@ mod tests {
     #[test]
     fn test_init_client_conn_no_settings() {
         let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(frames),
-            TestSession::new());
+        let mut conn = build_mock_client_conn(frames);
 
         // We get an error since the first frame sent by the server was not
         // SETTINGS.
@@ -510,8 +481,7 @@ mod tests {
              ],
             body: Vec::new(),
         };
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(vec![]), TestSession::new());
+        let mut conn = build_mock_client_conn(vec![]);
 
         conn.send_request(req).unwrap();
 
@@ -540,8 +510,7 @@ mod tests {
              ],
             body: body.clone(),
         };
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(vec![]), TestSession::new());
+        let mut conn = build_mock_client_conn(vec![]);
 
         conn.send_request(req).unwrap();
 
@@ -572,41 +541,56 @@ mod tests {
     /// in the same time...
     #[test]
     fn test_client_session_notifies_stream() {
-        let mut session: ClientSession = ClientSession::new();
-        session.new_stream(1);
+        let mut state = DefaultSessionState::<TestStream>::new();
+        state.insert_stream(Stream::new(1));
 
-        // Registering some data to stream 1...
-        session.new_data_chunk(1, &[1, 2, 3]);
+        {
+            // Registering some data to stream 1...
+            let mut session = ClientSession::new(&mut state);
+            session.new_data_chunk(1, &[1, 2, 3]);
+        }
         // ...works.
-        assert_eq!(session.get_stream(1).unwrap().body, vec![1, 2, 3]);
-        // Some more...
-        session.new_data_chunk(1, &[4]);
+        assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
+        {
+            // Some more...
+            let mut session = ClientSession::new(&mut state);
+            session.new_data_chunk(1, &[4]);
+        }
         // ...works.
-        assert_eq!(session.get_stream(1).unwrap().body, vec![1, 2, 3, 4]);
+        assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
         // Now headers?
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
-        session.new_headers(1, headers.clone());
-        assert_eq!(session.get_stream(1).unwrap().headers.clone().unwrap(),
+        {
+            let mut session = ClientSession::new(&mut state);
+            session.new_headers(1, headers.clone());
+        }
+        assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
                    headers);
         // Add another stream in the mix
-        session.new_stream(3);
-        // and send it some data
-        session.new_data_chunk(3, &[100]);
-        assert_eq!(session.get_stream(3).unwrap().body, vec![100]);
-        // Finally, the stream 1 ends...
-        session.end_of_stream(1);
+        state.insert_stream(Stream::new(3));
+        {
+            // and send it some data
+            let mut session = ClientSession::new(&mut state);
+            session.new_data_chunk(3, &[100]);
+        }
+        assert_eq!(state.get_stream_ref(3).unwrap().body, vec![100]);
+        {
+            // Finally, the stream 1 ends...
+            let mut session = ClientSession::new(&mut state);
+            session.end_of_stream(1);
+        }
         // ...and gets closed.
-        assert!(session.get_stream(1).unwrap().closed);
+        assert!(state.get_stream_ref(1).unwrap().closed);
         // but not the other one.
-        assert!(!session.get_stream(3).unwrap().closed);
+        assert!(!state.get_stream_ref(3).unwrap().closed);
         // Sanity check: both streams still found in the session
-        assert_eq!(session.state.iter().collect::<Vec<_>>().len(), 2);
+        assert_eq!(state.iter().collect::<Vec<_>>().len(), 2);
         // The closed stream is returned...
-        let closed = session.get_closed();
+        let closed = state.get_closed();
         assert_eq!(closed.len(), 1);
         assert_eq!(closed[0].id(), 1);
         // ...and is also removed from the session!
-        assert_eq!(session.state.iter().collect::<Vec<_>>().len(), 1);
+        assert_eq!(state.iter().collect::<Vec<_>>().len(), 1);
     }
 
     /// Tests that the `write_preface` function correctly writes a client preface to
