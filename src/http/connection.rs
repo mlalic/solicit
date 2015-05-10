@@ -1,13 +1,19 @@
 //! The module contains the implementation of an HTTP/2 connection.
 //!
-//! This provides an API to read and write raw HTTP/2 frames.
+//! This provides an API to read and write raw HTTP/2 frames, as well as a way to hook into
+//! higher-level events arising on an HTTP/2 connection, such as the receipt of headers on a
+//! particular stream or a new data chunk.
 //!
-//! The basic `HttpConnection` provides an API to read and write raw HTTP/2
-//! frames.
+//! The `SendFrame` and `ReceiveFrame` traits are the API to sending and receiving frames off of an
+//! HTTP/2 connection. The module includes default implementations of those traits for `io::Write`
+//! and `solicit::http::transport::TransportStream` types.
 //!
-//! The `ClientConnection` provides a slightly higher level API (based on the
-//! `HttpConnection`) that exposes client-specific functions of an HTTP/2
-//! connection, such as sending requests.
+//! The `HttpConnection` struct builds on top of these traits and provides an API for sending
+//! messages of a higher level to the peer (such as writing data or headers, while automatically
+//! handling the framing and header encoding), as well as for handling incoming events of that
+//! type. The `Session` trait is the bridge between the connection layer (i.e. the
+//! `HttpConnection`) and the higher layers that handle these events and pass them on to the
+//! application.
 
 use std::net::TcpStream;
 use std::convert::AsRef;
@@ -27,7 +33,7 @@ use http::{
 };
 use super::session::Session;
 use super::ALPN_PROTOCOLS;
-use super::{HttpError, HttpResult, Request, HttpScheme};
+use super::{HttpError, HttpResult, HttpScheme};
 use super::transport::TransportStream;
 use super::frame::{
     Frame,
@@ -666,90 +672,6 @@ pub fn write_preface<W: io::Write>(stream: &mut W) -> Result<(), io::Error> {
     Ok(())
 }
 
-/// A struct implementing the client side of an HTTP/2 connection.
-///
-/// It builds on top of an `HttpConnection` and provides additional methods
-/// that are only used by clients.
-pub struct ClientConnection<S, R, Sess>
-        where S: SendFrame, R: ReceiveFrame, Sess: Session {
-    /// The underlying `HttpConnection` that will be used for any HTTP/2
-    /// communication.
-    conn: HttpConnection<S, R>,
-    /// The `Session` associated with this connection. It is essentially a set
-    /// of callbacks that are triggered by the connection when different states
-    /// in the HTTP/2 communication arise.
-    pub session: Sess,
-}
-
-impl<S, R, Sess> ClientConnection<S, R, Sess> where S: SendFrame, R: ReceiveFrame, Sess: Session {
-    /// Creates a new `ClientConnection` that will use the given `HttpConnection`
-    /// for all its underlying HTTP/2 communication.
-    pub fn with_connection(conn: HttpConnection<S, R>, session: Sess)
-            -> ClientConnection<S, R, Sess> {
-        ClientConnection {
-            conn: conn,
-            session: session,
-        }
-    }
-
-    /// Returns the scheme of the underlying `HttpConnection`.
-    #[inline]
-    pub fn scheme(&self) -> HttpScheme {
-        self.conn.scheme
-    }
-
-    /// Performs the initialization of the `ClientConnection`.
-    ///
-    /// This means that it expects the next frame that it receives to be the server preface -- i.e.
-    /// a `SETTINGS` frame. Returns an `HttpError` if this is not the case.
-    pub fn init(&mut self) -> HttpResult<()> {
-        try!(self.read_preface());
-        Ok(())
-    }
-
-    /// Reads and handles the server preface from the underlying HTTP/2
-    /// connection.
-    ///
-    /// According to the HTTP/2 spec, a server preface consists of a single
-    /// settings frame.
-    ///
-    /// # Returns
-    ///
-    /// Any error raised by the underlying connection is propagated.
-    ///
-    /// Additionally, if it is not possible to decode the server preface,
-    /// it returns the `HttpError::UnableToConnect` variant.
-    fn read_preface(&mut self) -> HttpResult<()> {
-        self.conn.expect_settings(&mut self.session)
-    }
-
-    /// A method that sends the given `Request` to the server.
-    ///
-    /// The method blocks until the entire request has been sent.
-    ///
-    /// All errors are propagated.
-    pub fn send_request(&mut self, req: Request) -> HttpResult<()> {
-        let end_of_stream = req.body.len() == 0;
-        try!(self.conn.send_headers(req.headers, req.stream_id, end_of_stream));
-        if !end_of_stream {
-            // Queue the entire request body for transfer now...
-            // Also assumes that the entire body fits into a single frame.
-            // TODO Stash the body locally (associated to a stream) and send it out depending on a
-            //      pluggable stream prioritization strategy.
-            try!(self.conn.send_data(req.body, req.stream_id, true));
-        }
-
-        Ok(())
-    }
-
-    /// Fully handles the next incoming frame. Events are passed on to the internal `session`
-    /// instance.
-    #[inline]
-    pub fn handle_next_frame(&mut self) -> HttpResult<()> {
-        self.conn.handle_next_frame(&mut self.session)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::mem;
@@ -768,9 +690,9 @@ mod tests {
         unpack_header,
         RawFrame,
     };
-    use super::{HttpConnection, HttpFrame, ClientConnection, write_preface, SendFrame, ReceiveFrame};
+    use super::{HttpConnection, HttpFrame, write_preface, SendFrame, ReceiveFrame};
     use super::super::transport::TransportStream;
-    use super::super::{HttpError, Request, HttpResult};
+    use super::super::{HttpError, HttpResult};
     use hpack;
 
     /// A helper function that performs a `send_frame` operation on the given
@@ -1271,109 +1193,6 @@ mod tests {
         let frame = Frame::from_raw(raw).unwrap();
 
         (frame, len + 9)
-    }
-
-    /// Tests that a client connection is correctly initialized, by reading the
-    /// server preface (i.e. a settings frame) as the first frame of the connection.
-    #[test]
-    fn test_init_client_conn() {
-        let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(frames),
-            TestSession::new());
-
-        conn.init().unwrap();
-
-        // We have read the server's response (the settings frame only, since no panic
-        // ocurred)
-        assert_eq!(conn.conn.receiver.recv_list.len(), 0);
-        // We also sent an ACK already.
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::SettingsFrame(frame) => frame,
-            _ => panic!("ACK not sent!"),
-        };
-        assert!(frame.is_ack());
-    }
-
-    /// Tests that a client connection fails to initialize when the server does
-    /// not send a settings frame as its first frame (i.e. server preface).
-    #[test]
-    fn test_init_client_conn_no_settings() {
-        let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(frames),
-            TestSession::new());
-
-        // We get an error since the first frame sent by the server was not
-        // SETTINGS.
-        assert!(conn.init().is_err());
-    }
-
-    /// Tests that a `ClientConnection` correctly sends a `Request` with no
-    /// body.
-    #[test]
-    fn test_client_conn_send_request_no_body() {
-        let req = Request {
-            stream_id: 1,
-            // An incomplete header list, but this does not matter for this test.
-            headers: vec![
-                (b":method".to_vec(), b"GET".to_vec()),
-                (b":path".to_vec(), b"/".to_vec()),
-             ],
-            body: Vec::new(),
-        };
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(vec![]), TestSession::new());
-
-        conn.send_request(req).unwrap();
-
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::HeadersFrame(frame) => frame,
-            _ => panic!("Headers not sent!"),
-        };
-        // We sent a headers frame with end of headers and end of stream flags
-        assert!(frame.is_headers_end());
-        assert!(frame.is_end_of_stream());
-        // ...and nothing else!
-        assert_eq!(conn.conn.sender.sent.len(), 0);
-    }
-
-    /// Tests that a `ClientConnection` correctly sends a `Request` with a small body (i.e. a body
-    /// that fits into a single HTTP/2 DATA frame).
-    #[test]
-    fn test_client_conn_send_request_with_small_body() {
-        let body = vec![1, 2, 3];
-        let req = Request {
-            stream_id: 1,
-            // An incomplete header list, but this does not matter for this test.
-            headers: vec![
-                (b":method".to_vec(), b"GET".to_vec()),
-                (b":path".to_vec(), b"/".to_vec()),
-             ],
-            body: body.clone(),
-        };
-        let mut conn = ClientConnection::with_connection(
-            build_mock_http_conn(vec![]), TestSession::new());
-
-        conn.send_request(req).unwrap();
-
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::HeadersFrame(frame) => frame,
-            _ => panic!("Headers not sent!"),
-        };
-        // The headers were sent, but didn't close the stream
-        assert!(frame.is_headers_end());
-        assert!(!frame.is_end_of_stream());
-        // A single data frame is found that *did* close the stream
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::DataFrame(frame) => frame,
-            _ => panic!("Headers not sent!"),
-        };
-        assert!(frame.is_end_of_stream());
-        // The data bore the correct payload
-        assert_eq!(frame.data, body);
-        // ...and nothing else was sent!
-        assert_eq!(conn.conn.sender.sent.len(), 0);
     }
 
     /// Tests that the `HttpConnection` correctly notifies the session on a
