@@ -12,7 +12,11 @@ use http::{
     Header,
 };
 use http::frame::{RawFrame, Frame};
-use http::session::Session;
+use http::session::{
+    Session,
+    SessionState,
+    Stream,
+};
 use http::transport::TransportStream;
 use http::connection::{
     SendFrame,
@@ -273,4 +277,24 @@ impl Session for TestSession {
     }
 
     fn end_of_stream(&mut self, _: StreamId) {}
+}
+
+/// A stream that can be used for testing purposes.
+pub struct TestStream {
+    pub id: StreamId,
+    pub closed: bool,
+}
+
+impl Stream for TestStream {
+    fn new(stream_id: StreamId) -> TestStream {
+        TestStream {
+            id: stream_id,
+            closed: false,
+        }
+    }
+    fn new_data_chunk(&mut self, _data: &[u8]) {}
+    fn set_headers(&mut self, _headers: Vec<Header>) {}
+    fn close(&mut self) { self.closed = true; }
+    fn id(&self) -> StreamId { self.id }
+    fn is_closed(&self) -> bool { self.closed }
 }

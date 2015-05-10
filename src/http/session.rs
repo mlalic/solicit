@@ -92,6 +92,50 @@ pub trait SessionState {
     }
 }
 
+/// An implementation of the `SessionState` trait that tracks the active streams in a `HashMap`,
+/// mapping the stream ID to the concrete `Stream` instance.
+pub struct DefaultSessionState<S> where S: Stream {
+    /// All streams that the session state is currently aware of.
+    streams: HashMap<StreamId, S>,
+}
+
+impl<S> DefaultSessionState<S> where S: Stream {
+    /// Creates a new `DefaultSessionState` with no known streams.
+    pub fn new() -> DefaultSessionState<S> {
+        DefaultSessionState {
+            streams: HashMap::new(),
+        }
+    }
+}
+
+impl<S> SessionState for DefaultSessionState<S> where S: Stream {
+    type Stream = S;
+
+    #[inline]
+    fn insert_stream(&mut self, stream: Self::Stream) {
+        self.streams.insert(stream.id(), stream);
+    }
+
+    #[inline]
+    fn get_stream_ref(&self, stream_id: StreamId) -> Option<&Self::Stream> {
+        self.streams.get(&stream_id)
+    }
+    #[inline]
+    fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut Self::Stream> {
+        self.streams.get_mut(&stream_id)
+    }
+
+    #[inline]
+    fn remove_stream(&mut self, stream_id: StreamId) -> Option<Self::Stream> {
+        self.streams.remove(&stream_id)
+    }
+
+    #[inline]
+    fn iter(&mut self) -> StreamIter<S> {
+        StreamIter(Box::new(self.streams.iter_mut().map(|(_, s)| s)))
+    }
+}
+
 /// A trait representing a single HTTP/2 client stream. An HTTP/2 connection
 /// multiplexes a number of streams.
 ///
@@ -264,7 +308,10 @@ mod tests {
     use super::{
         Session, DefaultSession,
         Stream,
+        DefaultSessionState,
+        SessionState,
     };
+    use http::tests::common::TestStream;
 
     /// Tests that a `DefaultSession` notifies the correct stream when the
     /// appropriate callback is invoked.
@@ -309,5 +356,70 @@ mod tests {
         assert_eq!(closed[0].id(), 1);
         // ...and is also removed from the session!
         assert_eq!(session.streams.len(), 1);
+    }
+
+    /// Tests for the `DefaultSessionState` implementation of the `SessionState` trait.
+    #[test]
+    fn test_default_session_state() {
+        fn new_mock_state() -> DefaultSessionState<TestStream> { DefaultSessionState::new() }
+
+        {
+            // Test insert
+            let mut state = new_mock_state();
+            state.insert_stream(Stream::new(1));
+            assert_eq!(state.get_stream_ref(1).unwrap().id(), 1);
+        }
+        {
+            // Test remove
+            let mut state = new_mock_state();
+            state.insert_stream(Stream::new(101));
+
+            let stream = state.remove_stream(101).unwrap();
+
+            assert_eq!(101, stream.id());
+        }
+        {
+            // Test get stream -- unknown ID
+            let mut state = new_mock_state();
+            state.insert_stream(Stream::new(1));
+            assert!(state.get_stream_ref(3).is_none());
+        }
+        {
+            // Test iterate
+            let mut state = new_mock_state();
+            state.insert_stream(Stream::new(1));
+            state.insert_stream(Stream::new(7));
+            state.insert_stream(Stream::new(3));
+
+            let mut streams: Vec<_> = state.iter().collect();
+            streams.sort_by(|s1, s2| s1.id().cmp(&s2.id()));
+
+            assert_eq!(vec![1, 3, 7], streams.into_iter().map(|s| s.id()).collect::<Vec<_>>());
+        }
+        {
+            // Test iterate on an empty state
+            let mut state = new_mock_state();
+
+            assert_eq!(state.iter().collect::<Vec<_>>().len(), 0);
+        }
+        {
+            // Test `get_closed`
+            let mut state = new_mock_state();
+            state.insert_stream(Stream::new(1));
+            state.insert_stream(Stream::new(7));
+            state.insert_stream(Stream::new(3));
+            // Close some streams now
+            state.get_stream_mut(1).unwrap().close();
+            state.get_stream_mut(7).unwrap().close();
+
+            let mut closed = state.get_closed();
+
+            // Only one stream left
+            assert_eq!(state.streams.len(), 1);
+            // Both of the closed streams extracted into the `closed` Vec.
+            assert_eq!(closed.len(), 2);
+            closed.sort_by(|s1, s2| s1.id().cmp(&s2.id()));
+            assert_eq!(vec![1, 7], closed.into_iter().map(|s| s.id()).collect::<Vec<_>>());
+        }
     }
 }
