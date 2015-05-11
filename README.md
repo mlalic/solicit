@@ -82,78 +82,73 @@ pipelining) work.
 A clear-text (`http://`) connection.
 
 ```rust
-use solicit::http::connection::CleartextConnector;
+extern crate solicit;
+use solicit::http::client::CleartextConnector;
 use solicit::client::SimpleClient;
 use std::str;
-// Connect to an HTTP/2 aware server
-let connector = CleartextConnector { host: "http2bin.org" };
-let mut client = SimpleClient::with_connector(connector).unwrap();
-// This blocks until the response is received...
-let response = client.get(b"/get", &[]).unwrap();
-assert_eq!(response.stream_id, 1);
-assert_eq!(response.status_code().unwrap(), 200);
-// Dump the headers and the response body to stdout.
-// They are returned as raw bytes for the user to do as they please.
-// (Note: in general directly decoding assuming a utf8 encoding might not
-// always work -- this is meant as a simple example that shows that the
-// response is well formed.)
-for header in response.headers.iter() {
-   println!("{}: {}",
-       str::from_utf8(&header.0).unwrap(),
-       str::from_utf8(&header.1).unwrap());
+
+fn main() {
+  // Connect to an HTTP/2 aware server
+  let connector = CleartextConnector { host: "http2bin.org" };
+  let mut client = SimpleClient::with_connector(connector).unwrap();
+  let response = client.get(b"/get", &[]).unwrap();
+  assert_eq!(response.stream_id, 1);
+  assert_eq!(response.status_code().unwrap(), 200);
+  // Dump the headers and the response body to stdout.
+  // They are returned as raw bytes for the user to do as they please.
+  // (Note: in general directly decoding assuming a utf8 encoding might not
+  // always work -- this is meant as a simple example that shows that the
+  // response is well formed.)
+  for header in response.headers.iter() {
+    println!("{}: {}",
+        str::from_utf8(&header.0).unwrap(),
+        str::from_utf8(&header.1).unwrap());
+  }
+  println!("{}", str::from_utf8(&response.body).unwrap());
+  // We can issue more requests after reading this one...
+  // These calls block until the request itself is sent, but do not wait
+  // for a response.
+  let req_id1 = client.request(b"GET", b"/", &[], None).unwrap();
+  let req_id2 = client.request(b"GET", b"/asdf", &[], None).unwrap();
+  // Now we get a response for both requests... This does block.
+  let (resp1, resp2) = (
+      client.get_response(req_id1).unwrap(),
+      client.get_response(req_id2).unwrap(),
+  );
+  assert_eq!(resp1.status_code().unwrap(), 200);
+  assert_eq!(resp2.status_code().unwrap(), 404);
 }
-println!("{}", str::from_utf8(&response.body).unwrap());
-// We can issue more requests after reading this one...
-// These calls block until the request itself is sent, but do not wait
-// for a response.
-let req_id1 = client.request(b"GET", b"/", &[]).unwrap();
-let req_id2 = client.request(b"GET", b"/asdf", &[]).unwrap();
-// Now we get a response for both requests... This does block.
-let (resp1, resp2) = (
-    client.get_response(req_id1).unwrap(),
-    client.get_response(req_id2).unwrap(),
-);
-assert_eq!(resp1.status_code().unwrap(), 200);
-assert_eq!(resp2.status_code().unwrap(), 404);
 ```
 
-A TLS-protected (and negotiated) `https://` connection.
+A TLS-protected (and negotiated) `https://` connection. The only difference is
+in the type of the connector provided to the `SimpleClient`.
 
 ```rust
-use solicit::http::connection::TlsConnector;
+extern crate solicit;
+use solicit::http::client::TlsConnector;
 use solicit::client::SimpleClient;
 use std::str;
-// Connect to an HTTP/2 aware server
-let certs_path = "/path/to/certs.pem";
-let connector = TlsConnector::new("http2bin.org", &certs_path);
-let mut client = SimpleClient::with_connector(connector).unwrap();
-// This blocks until the response is received...
-let response = client.get(b"/get", &[]).unwrap();
-assert_eq!(response.stream_id, 1);
-assert_eq!(response.status_code().unwrap(), 200);
-// Dump the headers and the response body to stdout.
-// They are returned as raw bytes for the user to do as they please.
-// (Note: in general directly decoding assuming a utf8 encoding might not
-// always work -- this is meant as a simple example that shows that the
-// response is well formed.)
-for header in response.headers.iter() {
-   println!("{}: {}",
-       str::from_utf8(&header.0).unwrap(),
-       str::from_utf8(&header.1).unwrap());
+
+fn main() {
+  // Connect to an HTTP/2 aware server
+  let path = "/path/to/certs.pem";
+  let connector = TlsConnector::new("http2bin.org", &path);
+  let mut client = SimpleClient::with_connector(connector).unwrap();
+  let response = client.get(b"/get", &[]).unwrap();
+  assert_eq!(response.stream_id, 1);
+  assert_eq!(response.status_code().unwrap(), 200);
+  // Dump the headers and the response body to stdout.
+  // They are returned as raw bytes for the user to do as they please.
+  // (Note: in general directly decoding assuming a utf8 encoding might not
+  // always work -- this is meant as a simple example that shows that the
+  // response is well formed.)
+  for header in response.headers.iter() {
+    println!("{}: {}",
+        str::from_utf8(&header.0).unwrap(),
+        str::from_utf8(&header.1).unwrap());
+  }
+  println!("{}", str::from_utf8(&response.body).unwrap());
 }
-println!("{}", str::from_utf8(&response.body).unwrap());
-// We can issue more requests after reading this one...
-// These calls block until the request itself is sent, but do not wait
-// for a response.
-let req_id1 = client.request(b"GET", b"/", &[]).unwrap();
-let req_id2 = client.request(b"GET", b"/asdf", &[]).unwrap();
-// Now we get a response for both requests... This does block.
-let (resp1, resp2) = (
-    client.get_response(req_id1).unwrap(),
-    client.get_response(req_id2).unwrap(),
-);
-assert_eq!(resp1.status_code().unwrap(), 200);
-assert_eq!(resp2.status_code().unwrap(), 404);
 ```
 
 For how it leverages the `solicit::http` API for its implementation, check out the
@@ -182,34 +177,47 @@ using the `solicit::htp` API -- see:
 ### Example
 
 ```rust
-#![feature(std_misc)]
+extern crate solicit;
 
 use solicit::client::Client;
+use solicit::http::client::CleartextConnector;
 use std::thread;
 use std::str;
 
-// Connect to a server that supports HTTP/2
-let client = Client::new("nghttp2.org", 80).unwrap();
+fn main() {
+  // Connect to a server that supports HTTP/2
+  let connector = CleartextConnector { host: "http2bin.org" };
+  let client = Client::with_connector(connector).unwrap();
 
-// Issue 5 requests from 5 different threads concurrently and wait for all
-// threads to receive their response.
-let threads: Vec<_> = (0..5).map(|i| {
-    let this = client.clone();
-    thread::spawn(move || {
-        // This call returns immediately...
-        let resp = this.get(b"/", &[]).unwrap();
-        // ...this one blocks until the full response is ready!
-        let response = resp.into_inner();
-        println!("Thread {} got response ... {}", i, response.status_code().unwrap());
-        println!("The response contains the following headers:");
-        for header in response.headers.iter() {
-            println!("  {}: {}",
-                  str::from_utf8(&header.0).unwrap(),
-                  str::from_utf8(&header.1).unwrap());
-        }
-    })
-}).collect();
-let _: Vec<_> = threads.into_iter().map(|thread| thread.join()).collect();
+  // Issue 5 requests from 5 different threads concurrently and wait for all
+  // threads to receive their response.
+  let threads: Vec<_> = (0..5).map(|i| {
+      let this = client.clone();
+      thread::spawn(move || {
+          let resp = this.get(b"/get", &[(b"x-thread".to_vec(), vec![b'0' + i])]).unwrap();
+          let response = resp.recv().unwrap();
+
+          println!("Thread {} got response ... {}", i, response.status_code().ok().unwrap());
+
+          response
+      })
+      }).collect();
+
+  let responses: Vec<_> = threads.into_iter().map(|thread| thread.join())
+                                             .collect();
+
+  println!("All threads joined. Full responses are:");
+  for response in responses.into_iter() {
+      let response = response.unwrap();
+      println!("The response contains the following headers:");
+      for header in response.headers.iter() {
+          println!("  {}: {}",
+                   str::from_utf8(&header.0).unwrap(),
+                   str::from_utf8(&header.1).unwrap());
+      }
+      println!("{}", str::from_utf8(&response.body).unwrap());
+  }
+}
 ```
 
 # License
