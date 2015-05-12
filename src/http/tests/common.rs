@@ -17,6 +17,7 @@ use http::session::{
     DefaultSessionState,
     SessionState,
     Stream,
+    StreamState,
 };
 use http::transport::TransportStream;
 use http::connection::{
@@ -287,6 +288,7 @@ pub struct TestStream {
     pub closed: bool,
     pub body: Vec<u8>,
     pub headers: Option<Vec<Header>>,
+    pub state: StreamState,
 }
 
 impl Stream for TestStream {
@@ -296,12 +298,15 @@ impl Stream for TestStream {
             closed: false,
             body: Vec::new(),
             headers: None,
+            state: StreamState::Open,
         }
     }
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
     fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
-    fn close(&mut self) { self.closed = true; }
+    fn set_state(&mut self, state: StreamState) { self.state = state; }
+    fn close(&mut self) { self.closed = true; self.state = StreamState::Closed; }
     fn id(&self) -> StreamId { self.id }
+    fn state(&self) -> StreamState { self.state }
     fn is_closed(&self) -> bool { self.closed }
 }
 

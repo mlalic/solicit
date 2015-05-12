@@ -165,11 +165,15 @@ pub trait Stream {
     /// Set headers for a stream. A stream is only allowed to have one set of
     /// headers.
     fn set_headers(&mut self, headers: Vec<Header>);
+    /// Sets the stream state to the newly provided state.
+    fn set_state(&mut self, state: StreamState);
     /// Close the stream.
     fn close(&mut self);
 
     /// Returns the ID of the stream.
     fn id(&self) -> StreamId;
+    /// Returns the current state of the stream.
+    fn state(&self) -> StreamState;
     /// Returns whether the stream is closed.
     fn is_closed(&self) -> bool;
 }
@@ -186,6 +190,8 @@ pub struct DefaultStream {
     pub body: Vec<u8>,
     /// Whether the stream is already closed
     pub closed: bool,
+    /// The current stream state.
+    pub state: StreamState,
 }
 
 impl DefaultStream {
@@ -196,6 +202,7 @@ impl DefaultStream {
             headers: None,
             body: Vec::new(),
             closed: false,
+            state: StreamState::Open,
         }
     }
 }
@@ -212,15 +219,17 @@ impl Stream for DefaultStream {
     fn set_headers(&mut self, headers: Vec<Header>) {
         self.headers = Some(headers);
     }
+    fn set_state(&mut self, state: StreamState) { self.state = state; }
 
     fn close(&mut self) {
         self.closed = true;
+        self.state = StreamState::Closed;
     }
 
     fn id(&self) -> StreamId {
         self.stream_id
     }
-
+    fn state(&self) -> StreamState { self.state }
     fn is_closed(&self) -> bool {
         self.closed
     }
