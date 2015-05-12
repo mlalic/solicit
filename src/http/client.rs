@@ -580,9 +580,9 @@ mod tests {
             session.end_of_stream(1);
         }
         // ...and gets closed.
-        assert!(state.get_stream_ref(1).unwrap().closed);
+        assert!(state.get_stream_ref(1).unwrap().is_closed());
         // but not the other one.
-        assert!(!state.get_stream_ref(3).unwrap().closed);
+        assert!(!state.get_stream_ref(3).unwrap().is_closed());
         // Sanity check: both streams still found in the session
         assert_eq!(state.iter().collect::<Vec<_>>().len(), 2);
         // The closed stream is returned...

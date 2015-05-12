@@ -174,8 +174,11 @@ pub trait Stream {
     fn id(&self) -> StreamId;
     /// Returns the current state of the stream.
     fn state(&self) -> StreamState;
+
     /// Returns whether the stream is closed.
-    fn is_closed(&self) -> bool;
+    ///
+    /// A stream is considered to be closed iff its state is set to `Closed`.
+    fn is_closed(&self) -> bool { self.state() == StreamState::Closed }
 }
 
 /// An implementation of the `Stream` trait that saves all headers and data
@@ -188,8 +191,6 @@ pub struct DefaultStream {
     pub headers: Option<Vec<Header>>,
     /// The body of the stream (i.e. the response body)
     pub body: Vec<u8>,
-    /// Whether the stream is already closed
-    pub closed: bool,
     /// The current stream state.
     pub state: StreamState,
 }
@@ -201,7 +202,6 @@ impl DefaultStream {
             stream_id: stream_id,
             headers: None,
             body: Vec::new(),
-            closed: false,
             state: StreamState::Open,
         }
     }
@@ -221,18 +221,12 @@ impl Stream for DefaultStream {
     }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
 
-    fn close(&mut self) {
-        self.closed = true;
-        self.state = StreamState::Closed;
-    }
+    fn close(&mut self) { self.set_state(StreamState::Closed); }
 
     fn id(&self) -> StreamId {
         self.stream_id
     }
     fn state(&self) -> StreamState { self.state }
-    fn is_closed(&self) -> bool {
-        self.closed
-    }
 }
 
 #[cfg(test)]

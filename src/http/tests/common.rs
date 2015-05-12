@@ -285,7 +285,6 @@ impl Session for TestSession {
 /// A stream that can be used for testing purposes.
 pub struct TestStream {
     pub id: StreamId,
-    pub closed: bool,
     pub body: Vec<u8>,
     pub headers: Option<Vec<Header>>,
     pub state: StreamState,
@@ -295,7 +294,6 @@ impl Stream for TestStream {
     fn new(stream_id: StreamId) -> TestStream {
         TestStream {
             id: stream_id,
-            closed: false,
             body: Vec::new(),
             headers: None,
             state: StreamState::Open,
@@ -304,10 +302,9 @@ impl Stream for TestStream {
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
     fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
-    fn close(&mut self) { self.closed = true; self.state = StreamState::Closed; }
+    fn close(&mut self) { self.set_state(StreamState::Closed); }
     fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
-    fn is_closed(&self) -> bool { self.closed }
 }
 
 /// A type alias for a `ClientConnection` with mock replacements for its dependent types.
