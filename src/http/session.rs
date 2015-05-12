@@ -136,6 +136,20 @@ impl<S> SessionState for DefaultSessionState<S> where S: Stream {
     }
 }
 
+/// The enum represents all the states that an HTTP/2 stream can be found in.
+///
+/// Corresponds to [section 5.1.](http://http2.github.io/http2-spec/#rfc.section.5.1) of the spec.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum StreamState {
+    Idle,
+    ReservedLocal,
+    ReservedRemote,
+    Open,
+    HalfClosedRemote,
+    HalfClosedLocal,
+    Closed,
+}
+
 /// A trait representing a single HTTP/2 client stream. An HTTP/2 connection
 /// multiplexes a number of streams.
 ///
