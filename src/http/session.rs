@@ -167,18 +167,36 @@ pub trait Stream {
     fn set_headers(&mut self, headers: Vec<Header>);
     /// Sets the stream state to the newly provided state.
     fn set_state(&mut self, state: StreamState);
-    /// Close the stream.
-    fn close(&mut self);
 
     /// Returns the ID of the stream.
     fn id(&self) -> StreamId;
     /// Returns the current state of the stream.
     fn state(&self) -> StreamState;
 
+    /// Transitions the stream state to closed. After this, the stream is considered to be closed
+    /// for any further reads or writes.
+    fn close(&mut self) { self.set_state(StreamState::Closed); }
+    /// Updates the `Stream` status to indicate that it is closed locally.
+    ///
+    /// If the stream is closed on the remote end, then it is fully closed after this call.
+    fn close_local(&mut self) {
+        let next = match self.state() {
+            StreamState::HalfClosedRemote => StreamState::Closed,
+            _ => StreamState::HalfClosedLocal,
+        };
+        self.set_state(next);
+    }
     /// Returns whether the stream is closed.
     ///
     /// A stream is considered to be closed iff its state is set to `Closed`.
     fn is_closed(&self) -> bool { self.state() == StreamState::Closed }
+    /// Returns whether the stream is closed locally.
+    fn is_closed_local(&self) -> bool {
+        match self.state() {
+            StreamState::HalfClosedLocal | StreamState::Closed => true,
+            _ => false,
+        }
+    }
 }
 
 /// An implementation of the `Stream` trait that saves all headers and data
@@ -220,8 +238,6 @@ impl Stream for DefaultStream {
         self.headers = Some(headers);
     }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
-
-    fn close(&mut self) { self.set_state(StreamState::Closed); }
 
     fn id(&self) -> StreamId {
         self.stream_id

@@ -302,7 +302,6 @@ impl Stream for TestStream {
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
     fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
-    fn close(&mut self) { self.set_state(StreamState::Closed); }
     fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
 }
