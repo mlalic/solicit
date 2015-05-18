@@ -186,6 +186,10 @@ enum ClientServiceErr {
     Http(HttpError),
 }
 
+impl From<HttpError> for ClientServiceErr {
+    fn from(err: HttpError) -> ClientServiceErr { ClientServiceErr::Http(err) }
+}
+
 /// An enum representing the types of work that the `ClientService` can perform from within its
 /// `run_once` method.
 enum WorkItem {
@@ -402,10 +406,7 @@ impl ClientService {
     fn handle_frame(&mut self) -> Result<(), ClientServiceErr> {
         // Handles the next frame...
         debug!("Handling next frame");
-        match self.conn.handle_next_frame() {
-            Ok(_) => {},
-            Err(e) => return Err(ClientServiceErr::Http(e)),
-        };
+        try!(self.conn.handle_next_frame());
         // ...and then any connections that may have been closed in the meantime
         // are converted to responses and notifications sent to appropriate
         // channels.
