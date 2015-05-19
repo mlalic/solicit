@@ -1,5 +1,6 @@
 //! The module implements the framing layer of HTTP/2 and exposes an API for using it.
 use std::io;
+use std::fmt;
 use std::convert::From;
 use std::error::Error;
 
@@ -50,6 +51,34 @@ pub enum HttpError {
 impl From<io::Error> for HttpError {
     fn from(err: io::Error) -> HttpError {
         HttpError::IoError(err)
+    }
+}
+
+impl fmt::Display for HttpError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "HTTP/2 Error: {}", self.description())
+    }
+}
+
+impl Error for HttpError {
+    fn description(&self) -> &str {
+        match *self {
+            HttpError::IoError(_) => "Encountered an IO error",
+            HttpError::InvalidFrame => "Encountered an invalid HTTP/2 frame",
+            HttpError::CompressionError(_) => "Encountered an error with HPACK compression",
+            HttpError::UnknownStreamId => "Attempted an operation with an unknown HTTP/2 stream ID",
+            HttpError::UnableToConnect => "An error attempting to establish an HTTP/2 connection",
+            HttpError::MalformedResponse => "The received response was malformed",
+            HttpError::Other(_) => "An unknown error",
+        }
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match *self {
+            HttpError::Other(ref e) => Some(&**e),
+            HttpError::IoError(ref e) => Some(e),
+            _ => None,
+        }
     }
 }
 
