@@ -40,7 +40,9 @@ pub enum HttpError {
     CompressionError(DecoderError),
     UnknownStreamId,
     UnableToConnect,
+    // TODO This variant should be split into actual reasons for the response being malformed
     MalformedResponse,
+    Other(Box<Error>),
 }
 
 /// Implement the trait that allows us to automatically convert `io::Error`s
@@ -66,6 +68,9 @@ impl PartialEq for HttpError {
             (&HttpError::UnknownStreamId, &HttpError::UnknownStreamId) => true,
             (&HttpError::UnableToConnect, &HttpError::UnableToConnect) => true,
             (&HttpError::MalformedResponse, &HttpError::MalformedResponse) => true,
+            (&HttpError::Other(ref e1), &HttpError::Other(ref e2)) => {
+                e1.description() == e2.description()
+            },
             _ => false,
         }
     }
