@@ -29,6 +29,8 @@ struct AsyncRequest {
     /// Extra headers that should be included in the request. Does *not*
     /// include meta-headers.
     pub headers: Vec<Header>,
+    /// The body of the request, if any.
+    pub body: Option<Vec<u8>>,
     /// The sender side of a channel where the response to this request should
     /// be delivered.
     tx: Sender<Response>,
@@ -450,7 +452,7 @@ impl ClientService {
         let req = Request {
             stream_id: self.next_stream_id,
             headers: headers,
-            body: Vec::new(),
+            body: async_req.body.unwrap_or(Vec::new()),
         };
         self.next_stream_id += 2;
 
@@ -653,7 +655,7 @@ impl Client {
     /// If the method is unable to queue the request, it must mean that the
     /// underlying HTTP/2 connection to which this client is associated has
     /// failed and it returns `None`.
-    pub fn request(&self, method: &[u8], path: &[u8], headers: &[Header])
+    pub fn request(&self, method: &[u8], path: &[u8], headers: &[Header], body: Option<Vec<u8>>)
             -> Option<Receiver<Response>> {
         let (resp_tx, resp_rx): (Sender<Response>, Receiver<Response>) =
                 mpsc::channel();
@@ -664,6 +666,7 @@ impl Client {
             method: method.to_vec(),
             path: path.to_vec(),
             headers: headers.to_vec(),
+            body: body,
             tx: resp_tx,
         }));
 
@@ -678,6 +681,6 @@ impl Client {
     /// A convenience wrapper around the `request` method that sets the correct
     /// method.
     pub fn get(&self, path: &[u8], headers: &[Header]) -> Option<Receiver<Response>> {
-        self.request(b"GET", path, headers)
+        self.request(b"GET", path, headers, None)
     }
 }
