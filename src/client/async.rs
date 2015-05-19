@@ -422,34 +422,30 @@ impl ClientService {
     /// parameters given in the `AsyncRequest`. It blocks until the request is
     /// fully transmitted to the server.
     fn send_request(&mut self, async_req: AsyncRequest) {
-        let req = self.create_request(
-                                 async_req.method,
-                                 async_req.path,
-                                 async_req.headers);
+        let (req, tx) = self.create_request(async_req);
 
         debug!("Sending new request... id = {}", req.stream_id);
 
         self.conn.state.insert_stream(Stream::new(req.stream_id));
-        self.chans.insert(req.stream_id, async_req.tx);
+        self.chans.insert(req.stream_id, tx);
         self.conn.send_request(req).ok().unwrap();
         self.outstanding_reqs += 1;
     }
 
     /// Internal helper method. Creates a new `Request` instance based on the
     /// given parameters. Such a `Request` instance is ready to be passed to
-    /// the connection for transmission to the server.
-    fn create_request(&mut self,
-                      method: Vec<u8>,
-                      path: Vec<u8>,
-                      extra_headers: Vec<Header>) -> Request {
+    /// the connection for transmission to the server. Also returns the sender
+    /// end of the channel to which the response is to be transmitted, once
+    /// received.
+    fn create_request(&mut self, async_req: AsyncRequest) -> (Request, Sender<Response>) {
         let mut headers: Vec<Header> = Vec::new();
         headers.extend(vec![
-            (b":method".to_vec(), method),
-            (b":path".to_vec(), path),
+            (b":method".to_vec(), async_req.method),
+            (b":path".to_vec(), async_req.path),
             (b":authority".to_vec(), self.host.clone()),
             (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
         ].into_iter());
-        headers.extend(extra_headers.into_iter());
+        headers.extend(async_req.headers.into_iter());
 
         let req = Request {
             stream_id: self.next_stream_id,
@@ -458,7 +454,7 @@ impl ClientService {
         };
         self.next_stream_id += 2;
 
-        req
+        (req, async_req.tx)
     }
 
     /// Internal helper method. Sends a response assembled from the given
