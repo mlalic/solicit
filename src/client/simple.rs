@@ -1,11 +1,11 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
-use http::client::{ClientConnection, HttpConnect};
-use http::session::{SessionState, DefaultSessionState};
+use http::client::{ClientConnection, HttpConnect, SendStatus, RequestStream};
+use http::session::{SessionState, DefaultSessionState, DefaultStream};
 use super::super::http::connection::HttpConnection;
 use super::super::http::transport::TransportStream;
 use super::super::http::session::Stream;
-use super::super::http::{StreamId, HttpResult, HttpError, Response, Header, Request};
+use super::super::http::{StreamId, HttpResult, HttpError, Response, Header};
 
 
 /// A struct implementing a simple HTTP/2 client.
@@ -193,20 +193,22 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// Any IO errors are propagated.
     pub fn request(&mut self, method: &[u8], path: &[u8], extras: &[Header], body: Option<Vec<u8>>)
             -> HttpResult<StreamId> {
-        let stream_id = self.new_stream();
-        let mut headers: Vec<Header> = vec![
-            (b":method".to_vec(), method.to_vec()),
-            (b":path".to_vec(), path.to_vec()),
-            (b":authority".to_vec(), self.host.clone()),
-            (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
-        ];
-        headers.extend(extras.to_vec().into_iter());
+        // Prepares the request stream
+        let stream = self.new_stream(method, path, extras, body);
+        // Remember the stream's ID before passing on the ownership to the connection
+        let stream_id = stream.stream.id();
+        // Starts the request (i.e. sends out the headers)
+        try!(self.conn.start_request(stream));
 
-        try!(self.conn.send_request(Request {
-            stream_id: stream_id,
-            headers: headers,
-            body: body.unwrap_or(Vec::new()),
-        }));
+        // And now makes sure the data is sent out...
+        // Note: Since for now there is no flow control, sending data will always continue
+        //       progressing, but it might violate flow control windows, causing the peer to shut
+        //       down the connection.
+        debug!("Trying to send the body");
+        while let SendStatus::Sent = try!(self.conn.send_next_data()) {
+            // We iterate until the data is sent, as the contract of this call is that it blocks
+            // until such a time.
+        }
 
         Ok(stream_id)
     }
@@ -254,13 +256,32 @@ impl<S> SimpleClient<S> where S: TransportStream {
         self.get_response(stream_id)
     }
 
-    /// Internal helper method that initializes a new stream and returns its
-    /// ID once done.
-    fn new_stream(&mut self) -> StreamId {
+    /// Internal helper method that prepares a new `RequestStream` instance based on the given
+    /// request parameters.
+    ///
+    /// The `RequestStream` is then ready to be passed on to the connection instance in order to
+    /// start the request.
+    fn new_stream(&mut self, method: &[u8], path: &[u8], extras: &[Header], body: Option<Vec<u8>>)
+            -> RequestStream<DefaultStream> {
         let stream_id = self.get_next_stream_id();
-        self.conn.state.insert_stream(Stream::new(stream_id));
+        let mut stream = DefaultStream::new(stream_id);
+        match body {
+            Some(body) => stream.set_full_data(body),
+            None => stream.close_local(),
+        };
 
-        stream_id
+        let mut headers: Vec<Header> = vec![
+            (b":method".to_vec(), method.to_vec()),
+            (b":path".to_vec(), path.to_vec()),
+            (b":authority".to_vec(), self.host.clone()),
+            (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
+        ];
+        headers.extend(extras.to_vec().into_iter());
+
+        RequestStream {
+            headers: headers,
+            stream: stream,
+        }
     }
 
     /// Internal helper method that gets the next valid stream ID number.
