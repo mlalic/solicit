@@ -683,4 +683,12 @@ impl Client {
     pub fn get(&self, path: &[u8], headers: &[Header]) -> Option<Receiver<Response>> {
         self.request(b"GET", path, headers, None)
     }
+
+    /// Issues a POST request to the server.
+    ///
+    /// Returns the receiving end of a channel where the `Response` will eventually be pushed.
+    pub fn post(&self, path: &[u8], headers: &[Header], body: Vec<u8>)
+            -> Option<Receiver<Response>> {
+        self.request(b"POST", path, headers, Some(body))
+    }
 }
