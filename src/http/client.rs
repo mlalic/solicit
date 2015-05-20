@@ -236,7 +236,7 @@ pub struct CleartextConnector<'a> {
 /// establish an HTTP/2 connection over cleartext TCP (with prior knowledge).
 pub struct CleartextConnectError(io::Error);
 
-/// For convenience we make sure that `io::Error`s are easily convertable to
+/// For convenience we make sure that `io::Error`s are easily convertible to
 /// the `CleartextConnectError`, if needed.
 impl From<io::Error> for CleartextConnectError {
     fn from(e: io::Error) -> CleartextConnectError { CleartextConnectError(e) }
@@ -285,7 +285,7 @@ pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
     pub state: State,
 }
 
-/// The enum represents the success status of the `ClientConnection::send_next_frame` method.
+/// The enum represents the success status of the `ClientConnection::send_next_data` method.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SendStatus {
     /// Indicates that a DATA frame was successfully sent
