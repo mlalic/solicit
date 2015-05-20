@@ -11,6 +11,9 @@
 //! logic, without worrying about handling the book-keeping tasks of which
 //! streams are active.
 use std::collections::HashMap;
+use std::error::Error;
+use std::io::Read;
+use std::io::Cursor;
 use std::iter::FromIterator;
 use super::{StreamId, Header};
 
@@ -150,6 +153,31 @@ pub enum StreamState {
     Closed,
 }
 
+/// The enum represents errors that can be returned from the `Stream::get_data_chunk` method.
+#[derive(Debug)]
+pub enum StreamDataError {
+    /// Indicates that the stream cannot provide any data, since it is closed for further writes
+    /// from the peer's side.
+    Closed,
+    /// A different error while trying to obtain the data chunk. Wraps a boxed `Error` impl.
+    Other(Box<Error>),
+}
+
+impl<E> From<E> for StreamDataError where E: Error + 'static {
+    fn from(err: E) -> StreamDataError { StreamDataError::Other(Box::new(err)) }
+}
+
+/// The enum represents the successful completion of the `Stream::get_data_chunk` method.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum StreamDataChunk {
+    /// A data chunk of the given size, after which more chunks can follow.
+    Chunk(usize),
+    /// The chunk was the last one that the stream will ever write.
+    Last(usize),
+    /// No data currently available, but the stream isn't closed yet
+    Unavailable,
+}
+
 /// A trait representing a single HTTP/2 client stream. An HTTP/2 connection
 /// multiplexes a number of streams.
 ///
@@ -167,6 +195,21 @@ pub trait Stream {
     fn set_headers(&mut self, headers: Vec<Header>);
     /// Sets the stream state to the newly provided state.
     fn set_state(&mut self, state: StreamState);
+
+    /// Places the next data chunk that should be written onto the stream into the given buffer.
+    ///
+    /// # Returns
+    ///
+    /// The returned variant of the `StreamDataChunk` enum can indicate that the returned chunk is
+    /// the last one that the stream can write (the `StreamDataChunk::Last` variant).
+    ///
+    /// It can also indicate that the stream currently does not have any data that could be
+    /// written, but it isn't closed yet, implying that at a later time some data might become
+    /// available for writing (the `StreamDataChunk::Unavailable` variant).
+    ///
+    /// The `StreamDataChunk::Chunk` indicates that the chunk of the given length has been placed
+    /// into the buffer and that more data might follow on the stream.
+    fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError>;
 
     /// Returns the ID of the stream.
     fn id(&self) -> StreamId;
@@ -201,6 +244,8 @@ pub trait Stream {
 
 /// An implementation of the `Stream` trait that saves all headers and data
 /// in memory.
+///
+/// Stores its outgoing data as a `Vec<u8>`.
 #[derive(Clone)]
 pub struct DefaultStream {
     /// The ID of the stream
@@ -211,6 +256,9 @@ pub struct DefaultStream {
     pub body: Vec<u8>,
     /// The current stream state.
     pub state: StreamState,
+    /// The outgoing data associated to the stream. The `Cursor` points into the `Vec` at the
+    /// position where the data has been sent out.
+    data: Option<Cursor<Vec<u8>>>,
 }
 
 impl DefaultStream {
@@ -221,7 +269,16 @@ impl DefaultStream {
             headers: None,
             body: Vec::new(),
             state: StreamState::Open,
+            data: None,
         }
+    }
+
+    /// Sets the outgoing data of the stream to the given `Vec`.
+    ///
+    /// Any previously associated (and perhaps unwritten) data is discarded.
+    #[inline]
+    pub fn set_full_data(&mut self, data: Vec<u8>) {
+        self.data = Some(Cursor::new(data));
     }
 }
 
@@ -243,6 +300,26 @@ impl Stream for DefaultStream {
         self.stream_id
     }
     fn state(&self) -> StreamState { self.state }
+
+    fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
+        if self.is_closed_local() {
+            return Err(StreamDataError::Closed);
+        }
+        match self.data.as_mut() {
+            // No data associated to the stream, but it's open => nothing available for writing
+            None => Ok(StreamDataChunk::Unavailable),
+            Some(d) =>  {
+                // For the `Vec`-backed reader, this should never fail, so unwrapping is
+                // fine.
+                let read = d.read(buf).unwrap();
+                if (d.position() as usize) == d.get_ref().len() {
+                    Ok(StreamDataChunk::Last(read))
+                } else {
+                    Ok(StreamDataChunk::Chunk(read))
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +327,8 @@ mod tests {
     use super::{
         Stream,
         DefaultSessionState,
+        DefaultStream,
+        StreamDataChunk, StreamDataError,
         SessionState,
     };
     use http::tests::common::TestStream;
@@ -316,6 +395,84 @@ mod tests {
             assert_eq!(closed.len(), 2);
             closed.sort_by(|s1, s2| s1.id().cmp(&s2.id()));
             assert_eq!(vec![1, 7], closed.into_iter().map(|s| s.id()).collect::<Vec<_>>());
+        }
+    }
+
+    /// Tests that the `DefaultStream` provides the correct data when its `get_data_chunk` method
+    /// is called.
+    #[test]
+    fn test_default_stream_get_data() {
+        // The buffer that will be used in upcoming tests
+        let mut buf = Vec::with_capacity(2);
+        unsafe { buf.set_len(2); }
+
+        {
+            // A newly open stream has no available data.
+            let mut stream = DefaultStream::new(1);
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Unavailable);
+        }
+        {
+            // A closed stream returns an error
+            let mut stream = DefaultStream::new(1);
+            stream.close();
+            let res = stream.get_data_chunk(&mut buf).err().unwrap();
+            assert!(match res {
+                StreamDataError::Closed => true,
+                _ => false,
+            });
+        }
+        {
+            // A locally closed stream returns an error
+            let mut stream = DefaultStream::new(1);
+            stream.close_local();
+            let res = stream.get_data_chunk(&mut buf).err().unwrap();
+            assert!(match res {
+                StreamDataError::Closed => true,
+                _ => false,
+            });
+        }
+        {
+            let mut stream = DefaultStream::new(1);
+            stream.set_full_data(vec![1, 2, 3, 4]);
+
+            // A stream with data returns the first full chunk
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Chunk(2));
+            assert_eq!(buf, vec![1, 2]);
+
+            // Now it returns the last chunk with the correct indicator
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Last(2));
+            assert_eq!(buf, vec![3, 4]);
+
+            // Further calls are allowed too
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Last(0));
+        }
+        {
+            let mut stream = DefaultStream::new(1);
+            stream.set_full_data(vec![1, 2, 3, 4, 5]);
+
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Chunk(2));
+            assert_eq!(buf, vec![1, 2]);
+
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Chunk(2));
+            assert_eq!(buf, vec![3, 4]);
+
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Last(1));
+            assert_eq!(&buf[..1], &vec![5][..]);
+        }
+        {
+            // Empty data
+            let mut stream = DefaultStream::new(1);
+            stream.set_full_data(vec![]);
+
+            let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+            assert_eq!(res, StreamDataChunk::Last(0));
         }
     }
 }

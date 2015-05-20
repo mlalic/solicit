@@ -18,6 +18,7 @@ use http::session::{
     SessionState,
     Stream,
     StreamState,
+    StreamDataChunk, StreamDataError,
 };
 use http::transport::TransportStream;
 use http::connection::{
@@ -302,6 +303,9 @@ impl Stream for TestStream {
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
     fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
+    fn get_data_chunk(&mut self, _buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
+        Err(StreamDataError::Closed)
+    }
     fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
 }
