@@ -10,12 +10,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
-use http::client::{ClientConnection, HttpConnect, ClientStream};
+use http::client::{ClientConnection, HttpConnect, ClientStream, RequestStream};
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame};
 use http::HttpResult;
 use http::frame::RawFrame;
-use super::super::http::{StreamId, HttpError, Response, Request, Header};
+use super::super::http::{StreamId, HttpError, Response, Header};
 use super::super::http::connection::HttpConnection;
 use super::super::http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 
@@ -200,6 +200,8 @@ enum WorkItem {
     /// Trigger a new `handle_next_frame`. The work item should be queued only when there is a
     /// frame to be handled to avoid blocking the `run_once` call.
     HandleFrame,
+    /// Trigger a new `send_next_data` operation.
+    SendData,
     /// Signals to the service that a new client is connected. Helps it keep track of whether there
     /// are clients that would expect a response.
     NewClient,
@@ -385,6 +387,11 @@ impl ClientService {
             WorkItem::HandleFrame => {
                 self.handle_frame()
             },
+            WorkItem::SendData => {
+                debug!("Will queue some request data");
+                try!(self.conn.send_next_data());
+                Ok(())
+            }
             WorkItem::NewClient => {
                 self.client_count += 1;
                 Ok(())
@@ -426,20 +433,20 @@ impl ClientService {
     fn send_request(&mut self, async_req: AsyncRequest) {
         let (req, tx) = self.create_request(async_req);
 
-        debug!("Sending new request... id = {}", req.stream_id);
+        debug!("Sending new request... id = {}", req.stream.id());
 
-        self.conn.state.insert_stream(Stream::new(req.stream_id));
-        self.chans.insert(req.stream_id, tx);
-        self.conn.send_request(req).ok().unwrap();
+        self.chans.insert(req.stream.id(), tx);
+        self.conn.start_request(req).ok().unwrap();
         self.outstanding_reqs += 1;
     }
 
-    /// Internal helper method. Creates a new `Request` instance based on the
-    /// given parameters. Such a `Request` instance is ready to be passed to
-    /// the connection for transmission to the server. Also returns the sender
-    /// end of the channel to which the response is to be transmitted, once
-    /// received.
-    fn create_request(&mut self, async_req: AsyncRequest) -> (Request, Sender<Response>) {
+    /// Internal helper method. Creates a new `RequestStream` instance based on the
+    /// given parameters. Such a `RequestStream` instance is ready to be passed to
+    /// the connection for transmission to the server (i.e. `start_request`).
+    /// Also returns the sender end of the channel to which the response is to be transmitted,
+    /// once received.
+    fn create_request(&mut self, async_req: AsyncRequest)
+            -> (RequestStream<DefaultStream>, Sender<Response>) {
         let mut headers: Vec<Header> = Vec::new();
         headers.extend(vec![
             (b":method".to_vec(), async_req.method),
@@ -449,14 +456,20 @@ impl ClientService {
         ].into_iter());
         headers.extend(async_req.headers.into_iter());
 
-        let req = Request {
-            stream_id: self.next_stream_id,
-            headers: headers,
-            body: async_req.body.unwrap_or(Vec::new()),
-        };
+        let mut stream = DefaultStream::new(self.next_stream_id);
         self.next_stream_id += 2;
+        match async_req.body {
+            Some(body) => stream.set_full_data(body),
+            None => stream.close_local(),
+        };
 
-        (req, async_req.tx)
+        (
+            RequestStream {
+                stream: stream,
+                headers: headers,
+            },
+            async_req.tx
+        )
     }
 
     /// Internal helper method. Sends a response assembled from the given
@@ -610,6 +623,7 @@ impl Client {
         // Keep a handle to the work queue to notify the service of newly read frames, making it so
         // that it never blocks on waiting for frames to read.
         let read_notify = rx.clone();
+        let sender_work_queue = rx.clone();
 
         thread::spawn(move || {
             while let Ok(_) = service.run_once() {}
@@ -620,7 +634,9 @@ impl Client {
             sck.close().unwrap();
         });
         thread::spawn(move || {
-            while let Ok(_) = send_frame.send_next() {}
+            while let Ok(_) = send_frame.send_next() {
+                sender_work_queue.send(WorkItem::SendData).unwrap();
+            }
             debug!("Sender thread halting");
         });
         thread::spawn(move || {
