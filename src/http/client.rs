@@ -13,7 +13,7 @@ use openssl::ssl::SSL_OP_NO_COMPRESSION;
 use openssl::ssl::error::SslError;
 use openssl::ssl::SslMethod;
 
-use http::{HttpScheme, HttpResult, HttpError, Request, StreamId, Header, ALPN_PROTOCOLS};
+use http::{HttpScheme, HttpResult, HttpError, StreamId, Header, ALPN_PROTOCOLS};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
@@ -274,7 +274,7 @@ pub struct RequestStream<S> where S: Stream {
 }
 
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
-/// `send_request`) and wires the `HttpConnection` to the client `Session` callbacks.
+/// `start_request`) and wires the `HttpConnection` to the client `Session` callbacks.
 pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
         where S: SendFrame, R: ReceiveFrame, State: SessionState {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
@@ -340,25 +340,6 @@ impl<S, R, State> ClientConnection<S, R, State>
     fn read_preface(&mut self) -> HttpResult<()> {
         let mut session = ClientSession::new(&mut self.state);
         self.conn.expect_settings(&mut session)
-    }
-
-    /// A method that sends the given `Request` to the server.
-    ///
-    /// The method blocks until the entire request has been sent.
-    ///
-    /// All errors are propagated.
-    pub fn send_request(&mut self, req: Request) -> HttpResult<()> {
-        let end_of_stream = req.body.len() == 0;
-        try!(self.conn.send_headers(req.headers, req.stream_id, end_of_stream));
-        if !end_of_stream {
-            // Queue the entire request body for transfer now...
-            // Also assumes that the entire body fits into a single frame.
-            // TODO Stash the body locally (associated to a stream) and send it out depending on a
-            //      pluggable stream prioritization strategy.
-            try!(self.conn.send_data(req.body, req.stream_id, true));
-        }
-
-        Ok(())
     }
 
     /// Starts a new request based on the given `RequestStream`.
@@ -508,7 +489,7 @@ mod tests {
 
     use std::mem;
 
-    use http::{Request, StreamId};
+    use http::StreamId;
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
@@ -555,71 +536,6 @@ mod tests {
         // We get an error since the first frame sent by the server was not
         // SETTINGS.
         assert!(conn.init().is_err());
-    }
-
-    /// Tests that a `ClientConnection` correctly sends a `Request` with no
-    /// body.
-    #[test]
-    fn test_client_conn_send_request_no_body() {
-        let req = Request {
-            stream_id: 1,
-            // An incomplete header list, but this does not matter for this test.
-            headers: vec![
-                (b":method".to_vec(), b"GET".to_vec()),
-                (b":path".to_vec(), b"/".to_vec()),
-             ],
-            body: Vec::new(),
-        };
-        let mut conn = build_mock_client_conn(vec![]);
-
-        conn.send_request(req).unwrap();
-
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::HeadersFrame(frame) => frame,
-            _ => panic!("Headers not sent!"),
-        };
-        // We sent a headers frame with end of headers and end of stream flags
-        assert!(frame.is_headers_end());
-        assert!(frame.is_end_of_stream());
-        // ...and nothing else!
-        assert_eq!(conn.conn.sender.sent.len(), 0);
-    }
-
-    /// Tests that a `ClientConnection` correctly sends a `Request` with a small body (i.e. a body
-    /// that fits into a single HTTP/2 DATA frame).
-    #[test]
-    fn test_client_conn_send_request_with_small_body() {
-        let body = vec![1, 2, 3];
-        let req = Request {
-            stream_id: 1,
-            // An incomplete header list, but this does not matter for this test.
-            headers: vec![
-                (b":method".to_vec(), b"GET".to_vec()),
-                (b":path".to_vec(), b"/".to_vec()),
-             ],
-            body: body.clone(),
-        };
-        let mut conn = build_mock_client_conn(vec![]);
-
-        conn.send_request(req).unwrap();
-
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::HeadersFrame(frame) => frame,
-            _ => panic!("Headers not sent!"),
-        };
-        // The headers were sent, but didn't close the stream
-        assert!(frame.is_headers_end());
-        assert!(!frame.is_end_of_stream());
-        // A single data frame is found that *did* close the stream
-        let frame = match conn.conn.sender.sent.remove(0) {
-            HttpFrame::DataFrame(frame) => frame,
-            _ => panic!("Headers not sent!"),
-        };
-        assert!(frame.is_end_of_stream());
-        // The data bore the correct payload
-        assert_eq!(frame.data, body);
-        // ...and nothing else was sent!
-        assert_eq!(conn.conn.sender.sent.len(), 0);
     }
 
     /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
