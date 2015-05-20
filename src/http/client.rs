@@ -262,6 +262,17 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
     }
 }
 
+/// A struct representing a request stream. It provides the headers that are to be sent when
+/// initiating the request, as well as a `Stream` instance that handles the received response and
+/// provides the request body.
+pub struct RequestStream<S> where S: Stream {
+    /// The list of headers that will be sent with the request.
+    pub headers: Vec<Header>,
+    /// The underlying `Stream` instance, which will handle the response, as well as optionally
+    /// provide the body of the request.
+    pub stream: S,
+}
+
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
 /// `send_request`) and wires the `HttpConnection` to the client `Session` callbacks.
 pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
@@ -346,6 +357,17 @@ impl<S, R, State> ClientConnection<S, R, State>
             //      pluggable stream prioritization strategy.
             try!(self.conn.send_data(req.body, req.stream_id, true));
         }
+
+        Ok(())
+    }
+
+    /// Starts a new request based on the given `RequestStream`.
+    ///
+    /// For now it does not perform any validation whether the given `RequestStream` is valid.
+    pub fn start_request(&mut self, req: RequestStream<State::Stream>) -> HttpResult<()> {
+        try!(self.conn.send_headers(req.headers, req.stream.id(), req.stream.is_closed_local()));
+        // Start tracking the stream if the headers are queued successfully.
+        self.state.insert_stream(req.stream);
 
         Ok(())
     }
@@ -481,6 +503,7 @@ mod tests {
         ClientSession,
         write_preface,
         SendStatus,
+        RequestStream,
     };
 
     use std::mem;
@@ -599,20 +622,20 @@ mod tests {
         assert_eq!(conn.conn.sender.sent.len(), 0);
     }
 
+    /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
+    fn prepare_stream(id: StreamId, data: Option<Vec<u8>>) -> TestStream {
+        let mut stream = TestStream::new(id);
+        match data {
+            None => stream.close_local(),
+            Some(d) => stream.set_outgoing(d),
+        };
+        return stream;
+    }
+
     /// Tests that the `ClientConnection` correctly sends the next data, depending on the streams
     /// known to it.
     #[test]
     fn test_client_conn_send_next_data() {
-        /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
-        fn prepare_stream(id: StreamId, data: Option<Vec<u8>>) -> TestStream {
-            let mut stream = TestStream::new(id);
-            match data {
-                None => stream.close_local(),
-                Some(d) => stream.set_outgoing(d),
-            };
-            return stream;
-        }
-
         {
             // No streams => nothing sent.
             let mut conn = build_mock_client_conn(vec![]);
@@ -650,6 +673,59 @@ mod tests {
             // All of it got sent in the first go, so now we've got nothing?
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Nothing);
+        }
+    }
+
+    /// Tests that the `ClientConnection::start_request` method correctly starts a new request.
+    #[test]
+    fn test_client_conn_start_request() {
+        {
+            // No body
+            let mut conn = build_mock_client_conn(vec![]);
+
+            conn.start_request(RequestStream {
+                headers: vec![
+                    (b":method".to_vec(), b"GET".to_vec()),
+                ],
+                stream: prepare_stream(1, None),
+            }).unwrap();
+
+            // The stream is in the connection state?
+            assert!(conn.state.get_stream_ref(1).is_some());
+            // The headers got sent?
+            // (It'd be so much nicer to assert that the `send_headers` method got called)
+            assert_eq!(conn.conn.sender.sent.len(), 1);
+            match conn.conn.sender.sent[0] {
+                HttpFrame::HeadersFrame(ref frame) => {
+                    // The frame closed the stream?
+                    assert!(frame.is_end_of_stream());
+                },
+                _ => panic!("Expected a Headers frame"),
+            };
+        }
+        {
+            // With a body
+            let mut conn = build_mock_client_conn(vec![]);
+
+            conn.start_request(RequestStream {
+                headers: vec![
+                    (b":method".to_vec(), b"POST".to_vec()),
+                ],
+                stream: prepare_stream(1, Some(vec![1, 2, 3])),
+            }).unwrap();
+
+            // The stream is in the connection state?
+            assert!(conn.state.get_stream_ref(1).is_some());
+            // The headers got sent?
+            // (It'd be so much nicer to assert that the `send_headers` method got called)
+            assert_eq!(conn.conn.sender.sent.len(), 1);
+            match conn.conn.sender.sent[0] {
+                HttpFrame::HeadersFrame(ref frame) => {
+                    // The stream is still open
+                    assert!(!frame.is_end_of_stream());
+                },
+                _ => panic!("Expected a Headers frame"),
+            };
         }
     }
 
