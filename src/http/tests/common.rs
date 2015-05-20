@@ -289,6 +289,14 @@ pub struct TestStream {
     pub body: Vec<u8>,
     pub headers: Option<Vec<Header>>,
     pub state: StreamState,
+    pub outgoing: Option<Cursor<Vec<u8>>>,
+}
+
+impl TestStream {
+    #[inline]
+    pub fn set_outgoing(&mut self, outgoing: Vec<u8>) {
+        self.outgoing = Some(Cursor::new(outgoing));
+    }
 }
 
 impl Stream for TestStream {
@@ -298,14 +306,33 @@ impl Stream for TestStream {
             body: Vec::new(),
             headers: None,
             state: StreamState::Open,
+            outgoing: None,
         }
     }
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
     fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
-    fn get_data_chunk(&mut self, _buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
-        Err(StreamDataError::Closed)
+
+    fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
+        if self.is_closed_local() {
+            return Err(StreamDataError::Closed);
+        }
+        match self.outgoing.as_mut() {
+            // No data associated to the stream, but it's open => nothing available for writing
+            None => Ok(StreamDataChunk::Unavailable),
+            Some(d) =>  {
+                // For the `Vec`-backed reader, this should never fail, so unwrapping is
+                // fine.
+                let read = d.read(buf).unwrap();
+                if (d.position() as usize) == d.get_ref().len() {
+                    Ok(StreamDataChunk::Last(read))
+                } else {
+                    Ok(StreamDataChunk::Chunk(read))
+                }
+            }
+        }
     }
+
     fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
 }

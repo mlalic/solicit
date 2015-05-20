@@ -13,14 +13,19 @@ use openssl::ssl::SSL_OP_NO_COMPRESSION;
 use openssl::ssl::error::SslError;
 use openssl::ssl::SslMethod;
 
-use http::{HttpScheme, HttpResult, Request, StreamId, Header, ALPN_PROTOCOLS};
+use http::{HttpScheme, HttpResult, HttpError, Request, StreamId, Header, ALPN_PROTOCOLS};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
     SendFrame, ReceiveFrame,
     HttpConnection,
 };
-use http::session::{Session, Stream, DefaultStream, DefaultSessionState, SessionState};
+use http::session::{
+    Session,
+    Stream, DefaultStream,
+    DefaultSessionState, SessionState,
+    StreamDataChunk, StreamDataError,
+};
 
 /// Writes the client preface to the underlying HTTP/2 connection.
 ///
@@ -269,6 +274,17 @@ pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
     pub state: State,
 }
 
+/// The enum represents the success status of the `ClientConnection::send_next_frame` method.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SendStatus {
+    /// Indicates that a DATA frame was successfully sent
+    Sent,
+    /// Indicates that nothing was sent, but that no errors occurred.
+    ///
+    /// This is the case when none of the streams had any data to write.
+    Nothing,
+}
+
 impl<S, R, State> ClientConnection<S, R, State>
         where S: SendFrame, R: ReceiveFrame, State: SessionState {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
@@ -340,6 +356,55 @@ impl<S, R, State> ClientConnection<S, R, State>
     pub fn handle_next_frame(&mut self) -> HttpResult<()> {
         let mut session = ClientSession::new(&mut self.state);
         self.conn.handle_next_frame(&mut session)
+    }
+
+    /// Queues a new DATA frame onto the underlying `SendFrame`.
+    ///
+    /// Currently, no prioritization of streams is taken into account and which stream's data is
+    /// queued cannot be relied on.
+    pub fn send_next_data(&mut self) -> HttpResult<SendStatus> {
+        debug!("Sending next data...");
+        // A default "maximumum" chunk size of 8 KiB is set on all data frames.
+        // TODO: Account for the current stream and connection window sizes, as well as the
+        //       SETTINGS_MAX_FRAME_SIZE setting, when deciding on the maximum chunk size.
+        const MAX_CHUNK_SIZE: usize = 8 * 1024;
+        let mut buf = Vec::with_capacity(MAX_CHUNK_SIZE);
+        unsafe { buf.set_len(MAX_CHUNK_SIZE); }
+
+        // Find a stream with data to send.
+        // No real prioritization is done for now.
+        // TODO: Extract the logic of which stream should have the chance to write data to an
+        //       external stream prioritization strategy.
+        for stream in self.state.iter().filter(|s| !s.is_closed_local()) {
+            let res = stream.get_data_chunk(&mut buf);
+            match res {
+                Ok(StreamDataChunk::Last(total)) => {
+                    try!(self.conn.send_data(&buf[..total], stream.id(), true));
+                    stream.close_local();
+                    return Ok(SendStatus::Sent);
+                },
+                Ok(StreamDataChunk::Chunk(total)) => {
+                    try!(self.conn.send_data(&buf[..total], stream.id(), false));
+                    return Ok(SendStatus::Sent);
+                },
+                Ok(StreamDataChunk::Unavailable) => {
+                    // Stream is still open, but currently has no data that could be sent.
+                    // Pass...
+                }
+                Err(StreamDataError::Closed) => {
+                    // Transition the stream state to be locally closed, so we don't attempt to
+                    // write any more data on this stream.
+                    stream.close_local();
+                    // Find a stream with data to actually write to...
+                },
+                Err(StreamDataError::Other(e)) => {
+                    // Any other error is fatal!
+                    return Err(HttpError::Other(e));
+                },
+            };
+        }
+        // Nothing was sent if we reach here, so we signal this outcome to the clients.
+        Ok(SendStatus::Nothing)
     }
 }
 
@@ -415,11 +480,12 @@ mod tests {
     use super::{
         ClientSession,
         write_preface,
+        SendStatus,
     };
 
     use std::mem;
 
-    use http::Request;
+    use http::{Request, StreamId};
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
@@ -531,6 +597,60 @@ mod tests {
         assert_eq!(frame.data, body);
         // ...and nothing else was sent!
         assert_eq!(conn.conn.sender.sent.len(), 0);
+    }
+
+    /// Tests that the `ClientConnection` correctly sends the next data, depending on the streams
+    /// known to it.
+    #[test]
+    fn test_client_conn_send_next_data() {
+        /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
+        fn prepare_stream(id: StreamId, data: Option<Vec<u8>>) -> TestStream {
+            let mut stream = TestStream::new(id);
+            match data {
+                None => stream.close_local(),
+                Some(d) => stream.set_outgoing(d),
+            };
+            return stream;
+        }
+
+        {
+            // No streams => nothing sent.
+            let mut conn = build_mock_client_conn(vec![]);
+            let res = conn.send_next_data().unwrap();
+            assert_eq!(res, SendStatus::Nothing);
+        }
+        {
+            // A locally closed stream (i.e. nothing to send)
+            let mut conn = build_mock_client_conn(vec![]);
+            conn.state.insert_stream(prepare_stream(1, None));
+            let res = conn.send_next_data().unwrap();
+            assert_eq!(res, SendStatus::Nothing);
+        }
+        {
+            // A stream with some data
+            let mut conn = build_mock_client_conn(vec![]);
+            conn.state.insert_stream(prepare_stream(1, Some(vec![1, 2, 3])));
+            let res = conn.send_next_data().unwrap();
+            assert_eq!(res, SendStatus::Sent);
+
+            // All of it got sent in the first go, so now we've got nothing?
+            let res = conn.send_next_data().unwrap();
+            assert_eq!(res, SendStatus::Nothing);
+        }
+        {
+            // Multiple streams with data
+            let mut conn = build_mock_client_conn(vec![]);
+            conn.state.insert_stream(prepare_stream(1, Some(vec![1, 2, 3])));
+            conn.state.insert_stream(prepare_stream(3, Some(vec![1, 2, 3])));
+            conn.state.insert_stream(prepare_stream(5, Some(vec![1, 2, 3])));
+            for _ in 0..3 {
+                let res = conn.send_next_data().unwrap();
+                assert_eq!(res, SendStatus::Sent);
+            }
+            // All of it got sent in the first go, so now we've got nothing?
+            let res = conn.send_next_data().unwrap();
+            assert_eq!(res, SendStatus::Nothing);
+        }
     }
 
     /// Tests that a `ClientSession` notifies the correct stream when the
