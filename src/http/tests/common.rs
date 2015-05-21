@@ -317,20 +317,27 @@ impl Stream for TestStream {
         if self.is_closed_local() {
             return Err(StreamDataError::Closed);
         }
-        match self.outgoing.as_mut() {
+        let chunk = match self.outgoing.as_mut() {
             // No data associated to the stream, but it's open => nothing available for writing
-            None => Ok(StreamDataChunk::Unavailable),
+            None => StreamDataChunk::Unavailable,
             Some(d) =>  {
                 // For the `Vec`-backed reader, this should never fail, so unwrapping is
                 // fine.
                 let read = d.read(buf).unwrap();
                 if (d.position() as usize) == d.get_ref().len() {
-                    Ok(StreamDataChunk::Last(read))
+                    StreamDataChunk::Last(read)
                 } else {
-                    Ok(StreamDataChunk::Chunk(read))
+                    StreamDataChunk::Chunk(read)
                 }
             }
-        }
+        };
+        // Transition the stream state to locally closed if we've extracted the final data chunk.
+        match chunk {
+            StreamDataChunk::Last(_) => self.close_local(),
+            _ => {},
+        };
+
+        Ok(chunk)
     }
 
     fn id(&self) -> StreamId { self.id }

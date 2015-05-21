@@ -383,7 +383,6 @@ impl<S, R, State> ClientConnection<S, R, State>
             match res {
                 Ok(StreamDataChunk::Last(total)) => {
                     try!(self.conn.send_data(&buf[..total], stream.id(), true));
-                    stream.close_local();
                     return Ok(SendStatus::Sent);
                 },
                 Ok(StreamDataChunk::Chunk(total)) => {
