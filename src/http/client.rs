@@ -19,6 +19,7 @@ use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
     SendFrame, ReceiveFrame,
     HttpConnection,
+    EndStream,
 };
 use http::session::{
     Session,
@@ -346,7 +347,8 @@ impl<S, R, State> ClientConnection<S, R, State>
     ///
     /// For now it does not perform any validation whether the given `RequestStream` is valid.
     pub fn start_request(&mut self, req: RequestStream<State::Stream>) -> HttpResult<()> {
-        try!(self.conn.send_headers(req.headers, req.stream.id(), req.stream.is_closed_local()));
+        let end_stream = if req.stream.is_closed_local() { EndStream::Yes } else { EndStream::No };
+        try!(self.conn.send_headers(req.headers, req.stream.id(), end_stream));
         // Start tracking the stream if the headers are queued successfully.
         self.state.insert_stream(req.stream);
 
@@ -382,11 +384,11 @@ impl<S, R, State> ClientConnection<S, R, State>
             let res = stream.get_data_chunk(&mut buf);
             match res {
                 Ok(StreamDataChunk::Last(total)) => {
-                    try!(self.conn.send_data(&buf[..total], stream.id(), true));
+                    try!(self.conn.send_data(&buf[..total], stream.id(), EndStream::Yes));
                     return Ok(SendStatus::Sent);
                 },
                 Ok(StreamDataChunk::Chunk(total)) => {
-                    try!(self.conn.send_data(&buf[..total], stream.id(), false));
+                    try!(self.conn.send_data(&buf[..total], stream.id(), EndStream::No));
                     return Ok(SendStatus::Sent);
                 },
                 Ok(StreamDataChunk::Unavailable) => {

@@ -179,6 +179,15 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
     }
 }
 
+/// An enum indicating whether the `HttpConnection` send operation should end the stream.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum EndStream {
+    /// The stream should be closed
+    Yes,
+    /// The stream should still be kept open
+    No,
+}
+
 impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// Creates a new `HttpConnection` that will use the given sender and receiver instances
     /// for writing and reading frames, respectively.
@@ -259,13 +268,15 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     pub fn send_headers<H: Into<Vec<Header>>>(&mut self,
                                               headers: H,
                                               stream_id: StreamId,
-                                              end_stream: bool) -> HttpResult<()> {
+                                              end_stream: EndStream) -> HttpResult<()> {
         self.send_headers_inner(headers.into(), stream_id, end_stream)
     }
 
     /// A private helper method: the non-generic implementation of the `send_headers` method.
-    fn send_headers_inner(&mut self, headers: Vec<Header>, stream_id: StreamId, end_stream: bool)
-            -> HttpResult<()> {
+    fn send_headers_inner(&mut self,
+                          headers: Vec<Header>,
+                          stream_id: StreamId,
+                          end_stream: EndStream) -> HttpResult<()> {
         let headers_fragment = self.encoder.encode(&headers);
         // For now, sending header fragments larger than 16kB is not supported
         // (i.e. the encoded representation cannot be split into CONTINUATION
@@ -273,7 +284,7 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
         let mut frame = HeadersFrame::new(headers_fragment, stream_id);
         frame.set_flag(HeadersFlag::EndHeaders);
 
-        if end_stream {
+        if end_stream == EndStream::Yes {
             frame.set_flag(HeadersFlag::EndStream);
         }
 
@@ -292,19 +303,21 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// - `stream_id` - the ID of the stream on which the data will be sent
     /// - `end_stream` - whether the stream should be closed from the peer's side immediately after
     ///   sending the data (i.e. the last data frame closes the stream).
-    pub fn send_data<D: Into<Vec<u8>>>(&mut self, data: D, stream_id: StreamId, end_stream: bool)
-            -> HttpResult<()> {
+    pub fn send_data<D: Into<Vec<u8>>>(&mut self,
+                                       data: D,
+                                       stream_id: StreamId,
+                                       end_stream: EndStream) -> HttpResult<()> {
         self.send_data_inner(data.into(), stream_id, end_stream)
     }
 
     /// A private helepr method: the non-generic implementation of the `send_data` method.
-    fn send_data_inner(&mut self, data: Vec<u8>, stream_id: StreamId, end_stream: bool)
+    fn send_data_inner(&mut self, data: Vec<u8>, stream_id: StreamId, end_stream: EndStream)
             -> HttpResult<()>{
         // TODO Validate that the given data can fit into the maximum frame size allowed by the
         //      current settings.
         let mut frame = DataFrame::new(stream_id);
         frame.data.extend(data);
-        if end_stream {
+        if end_stream == EndStream::Yes {
             frame.set_flag(DataFlag::EndStream);
         }
 
@@ -439,7 +452,7 @@ mod tests {
         pack_header,
         RawFrame,
     };
-    use super::{HttpConnection, HttpFrame, SendFrame, ReceiveFrame};
+    use super::{HttpConnection, HttpFrame, SendFrame, ReceiveFrame, EndStream};
     use super::super::transport::TransportStream;
     use super::super::{HttpError, HttpResult};
     use hpack;
@@ -794,7 +807,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
 
             // Headers when the stream should be closed
-            conn.send_headers(&headers[..], 1, true).unwrap();
+            conn.send_headers(&headers[..], 1, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -813,7 +826,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
 
             // Headers when the stream should be left open
-            conn.send_headers(&headers[..], 1, false).unwrap();
+            conn.send_headers(&headers[..], 1, EndStream::No).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -831,7 +844,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
 
             // Make sure it's all peachy when we give a `Vec` instead of a slice
-            conn.send_headers(headers.clone(), 1, true).unwrap();
+            conn.send_headers(headers.clone(), 1, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -857,7 +870,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(data, 1, false).unwrap();
+            conn.send_data(data, 1, EndStream::No).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -874,7 +887,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(data, 1, true).unwrap();
+            conn.send_data(data, 1, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -891,7 +904,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(data.to_vec(), 1, true).unwrap();
+            conn.send_data(data.to_vec(), 1, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
