@@ -187,6 +187,8 @@ pub struct DataChunk<'a> {
     pub data: Cow<'a, [u8]>,
     /// The ID of the stream on which the data should be sent.
     pub stream_id: StreamId,
+    /// Whether the data chunk will also end the stream.
+    pub end_stream: EndStream,
 }
 
 impl<'a> DataChunk<'a> {
@@ -195,19 +197,22 @@ impl<'a> DataChunk<'a> {
     /// **Note:** `IntoCow` is unstable and there's no implementation of `Into<Cow<'a, [u8]>>` for
     /// the fundamental types, making this a bit of a clunky API. Once such an `Into` impl is
     /// added, this can be made generic over the trait for some ergonomic improvements.
-    pub fn new(data: Cow<'a, [u8]>, stream_id: StreamId) -> DataChunk<'a> {
+    pub fn new(data: Cow<'a, [u8]>, stream_id: StreamId, end_stream: EndStream) -> DataChunk<'a> {
         DataChunk {
             data: data,
             stream_id: stream_id,
+            end_stream: end_stream,
         }
     }
 
     /// Creates a new `DataChunk` from a borrowed slice. This method should become obsolete if we
     /// can take an `Into<Cow<_, _>>` without using unstable features.
-    pub fn new_borrowed<D: Borrow<&'a [u8]>>(data: D, stream_id: StreamId) -> DataChunk<'a> {
+    pub fn new_borrowed<D: Borrow<&'a [u8]>>(data: D, stream_id: StreamId, end_stream: EndStream)
+            -> DataChunk<'a> {
         DataChunk {
             data: Cow::Borrowed(data.borrow()),
             stream_id: stream_id,
+            end_stream: end_stream,
         }
     }
 }
@@ -337,9 +342,8 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// - `end_stream` - whether the stream should be closed from the peer's side immediately after
     ///   sending the data (i.e. the last data frame closes the stream).
     pub fn send_data<'a>(&mut self,
-                         chunk: DataChunk<'a>,
-                         end_stream: EndStream) -> HttpResult<()> {
-        let DataChunk { data, stream_id } = chunk;
+                         chunk: DataChunk<'a>) -> HttpResult<()> {
+        let DataChunk { data, stream_id, end_stream } = chunk;
         self.send_data_inner(data.into_owned(), stream_id, end_stream)
     }
 
@@ -905,7 +909,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(DataChunk::new_borrowed(data, 1), EndStream::No).unwrap();
+            conn.send_data(DataChunk::new_borrowed(data, 1, EndStream::No)).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -922,7 +926,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(DataChunk::new_borrowed(data, 1), EndStream::Yes).unwrap();
+            conn.send_data(DataChunk::new_borrowed(data, 1, EndStream::Yes)).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -941,9 +945,10 @@ mod tests {
             let chunk = DataChunk {
                 data: Cow::Owned(data.to_vec()),
                 stream_id: 1,
+                end_stream: EndStream::Yes,
             };
 
-            conn.send_data(chunk, EndStream::Yes).unwrap();
+            conn.send_data(chunk).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
