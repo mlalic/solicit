@@ -16,6 +16,8 @@
 //! application.
 
 use std::io;
+use std::borrow::Cow;
+use std::borrow::Borrow;
 
 use http::{
     Header,
@@ -179,6 +181,37 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
     }
 }
 
+/// The struct represents a chunk of data that should be sent to the peer on a particular stream.
+pub struct DataChunk<'a> {
+    /// The data that should be sent.
+    pub data: Cow<'a, [u8]>,
+    /// The ID of the stream on which the data should be sent.
+    pub stream_id: StreamId,
+}
+
+impl<'a> DataChunk<'a> {
+    /// Creates a new `DataChunk`.
+    ///
+    /// **Note:** `IntoCow` is unstable and there's no implementation of `Into<Cow<'a, [u8]>>` for
+    /// the fundamental types, making this a bit of a clunky API. Once such an `Into` impl is
+    /// added, this can be made generic over the trait for some ergonomic improvements.
+    pub fn new(data: Cow<'a, [u8]>, stream_id: StreamId) -> DataChunk<'a> {
+        DataChunk {
+            data: data,
+            stream_id: stream_id,
+        }
+    }
+
+    /// Creates a new `DataChunk` from a borrowed slice. This method should become obsolete if we
+    /// can take an `Into<Cow<_, _>>` without using unstable features.
+    pub fn new_borrowed<D: Borrow<&'a [u8]>>(data: D, stream_id: StreamId) -> DataChunk<'a> {
+        DataChunk {
+            data: Cow::Borrowed(data.borrow()),
+            stream_id: stream_id,
+        }
+    }
+}
+
 /// An enum indicating whether the `HttpConnection` send operation should end the stream.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EndStream {
@@ -303,11 +336,11 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
     /// - `stream_id` - the ID of the stream on which the data will be sent
     /// - `end_stream` - whether the stream should be closed from the peer's side immediately after
     ///   sending the data (i.e. the last data frame closes the stream).
-    pub fn send_data<D: Into<Vec<u8>>>(&mut self,
-                                       data: D,
-                                       stream_id: StreamId,
-                                       end_stream: EndStream) -> HttpResult<()> {
-        self.send_data_inner(data.into(), stream_id, end_stream)
+    pub fn send_data<'a>(&mut self,
+                         chunk: DataChunk<'a>,
+                         end_stream: EndStream) -> HttpResult<()> {
+        let DataChunk { data, stream_id } = chunk;
+        self.send_data_inner(data.into_owned(), stream_id, end_stream)
     }
 
     /// A private helepr method: the non-generic implementation of the `send_data` method.
@@ -439,6 +472,8 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use http::tests::common::{
         build_mock_http_conn,
         build_stub_from_frames,
@@ -452,7 +487,7 @@ mod tests {
         pack_header,
         RawFrame,
     };
-    use super::{HttpConnection, HttpFrame, SendFrame, ReceiveFrame, EndStream};
+    use super::{HttpConnection, HttpFrame, SendFrame, ReceiveFrame, EndStream, DataChunk};
     use super::super::transport::TransportStream;
     use super::super::{HttpError, HttpResult};
     use hpack;
@@ -870,7 +905,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(data, 1, EndStream::No).unwrap();
+            conn.send_data(DataChunk::new_borrowed(data, 1), EndStream::No).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -887,7 +922,7 @@ mod tests {
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
 
-            conn.send_data(data, 1, EndStream::Yes).unwrap();
+            conn.send_data(DataChunk::new_borrowed(data, 1), EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);
@@ -903,8 +938,12 @@ mod tests {
             // given a `Vec` we're good too?
             let mut conn = build_mock_http_conn(vec![]);
             let data: &[u8] = b"1234";
+            let chunk = DataChunk {
+                data: Cow::Owned(data.to_vec()),
+                stream_id: 1,
+            };
 
-            conn.send_data(data.to_vec(), 1, EndStream::Yes).unwrap();
+            conn.send_data(chunk, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
             assert_eq!(conn.sender.sent.len(), 1);

@@ -20,6 +20,7 @@ use http::connection::{
     SendFrame, ReceiveFrame,
     HttpConnection,
     EndStream,
+    DataChunk,
 };
 use http::session::{
     Session,
@@ -384,11 +385,15 @@ impl<S, R, State> ClientConnection<S, R, State>
             let res = stream.get_data_chunk(&mut buf);
             match res {
                 Ok(StreamDataChunk::Last(total)) => {
-                    try!(self.conn.send_data(&buf[..total], stream.id(), EndStream::Yes));
+                    try!(self.conn.send_data(
+                            DataChunk::new_borrowed(&buf[..total], stream.id()),
+                            EndStream::Yes));
                     return Ok(SendStatus::Sent);
                 },
                 Ok(StreamDataChunk::Chunk(total)) => {
-                    try!(self.conn.send_data(&buf[..total], stream.id(), EndStream::No));
+                    try!(self.conn.send_data(
+                            DataChunk::new_borrowed(&buf[..total], stream.id()),
+                            EndStream::No));
                     return Ok(SendStatus::Sent);
                 },
                 Ok(StreamDataChunk::Unavailable) => {
