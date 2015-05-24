@@ -3,6 +3,7 @@
 use std::io;
 use std::rc::Rc;
 use std::cell::{RefCell, Cell};
+use std::borrow::Cow;
 use std::io::{Cursor, Read, Write};
 
 use http::{
@@ -20,12 +21,15 @@ use http::session::{
     StreamState,
     StreamDataChunk, StreamDataError,
 };
+use http::priority::DataPrioritizer;
 use http::transport::TransportStream;
 use http::connection::{
     SendFrame,
     ReceiveFrame,
     HttpFrame,
     HttpConnection,
+    EndStream,
+    DataChunk,
 };
 use http::client::ClientConnection;
 
@@ -342,6 +346,32 @@ impl Stream for TestStream {
 
     fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
+}
+
+/// A `DataPrioritizer` implementation that returns data chunks from a predefined buffer given to
+/// it at construct time (always on stream ID 1).
+pub struct StubDataPrioritizer {
+    pub chunks: Vec<Vec<u8>>,
+}
+
+impl StubDataPrioritizer {
+    pub fn new(chunks: Vec<Vec<u8>>) -> StubDataPrioritizer {
+        StubDataPrioritizer { chunks: chunks }
+    }
+}
+
+impl DataPrioritizer for StubDataPrioritizer {
+    fn get_next_chunk(&mut self) -> HttpResult<Option<DataChunk>> {
+        if self.chunks.len() == 0 {
+            return Ok(None);
+        }
+        let chunk = self.chunks.remove(0);
+        Ok(Some(DataChunk {
+            stream_id: 1,
+            data: Cow::Owned(chunk),
+            end_stream: EndStream::No,
+        }))
+    }
 }
 
 /// A type alias for a `ClientConnection` with mock replacements for its dependent types.

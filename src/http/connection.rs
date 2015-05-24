@@ -23,6 +23,7 @@ use http::{
     Header,
     StreamId,
 };
+use http::priority::DataPrioritizer;
 use super::session::Session;
 use super::{HttpError, HttpResult, HttpScheme};
 use super::transport::TransportStream;
@@ -373,6 +374,24 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
         self.send_frame(frame)
     }
 
+    /// Sends the chunk of data provided by the given `DataPrioritizer`.
+    ///
+    /// # Returns
+    ///
+    /// Returns the status of the operation. If the provider does not currently have any data that
+    /// could be sent, returns `SendStatus::Nothing`. If any data is sent, returns
+    /// `SendStatus::Sent`.
+    pub fn send_next_data<P: DataPrioritizer>(&mut self, prioritizer: &mut P)
+            -> HttpResult<SendStatus> {
+        let chunk = try!(prioritizer.get_next_chunk());
+        match chunk {
+            None => Ok(SendStatus::Nothing),
+            Some(chunk) => {
+                try!(self.send_data(chunk));
+                Ok(SendStatus::Sent)
+            },
+        }
+    }
     /// The method processes the next incoming frame, expecting it to be a SETTINGS frame.
     /// Additionally, the frame cannot be an ACK settings frame, but rather it should contain the
     /// peer's settings.
@@ -494,6 +513,7 @@ mod tests {
         build_mock_http_conn,
         build_stub_from_frames,
         StubTransportStream,
+        StubDataPrioritizer,
         TestSession,
     };
 
@@ -503,7 +523,14 @@ mod tests {
         pack_header,
         RawFrame,
     };
-    use super::{HttpConnection, HttpFrame, SendFrame, ReceiveFrame, EndStream, DataChunk};
+    use super::{
+        HttpConnection,
+        HttpFrame,
+        SendFrame, ReceiveFrame,
+        EndStream,
+        DataChunk,
+        SendStatus,
+    };
     use super::super::transport::TransportStream;
     use super::super::{HttpError, HttpResult};
     use hpack;
@@ -821,6 +848,32 @@ mod tests {
         assert_eq!(expected, conn.sender.sent);
     }
 
+    #[test]
+    fn test_send_next_data() {
+        fn expect_chunk(expected: &[u8], frame: &HttpFrame) {
+            let frame = match frame {
+                &HttpFrame::DataFrame(ref frame) => frame,
+                _ => panic!("Expected a data frame"),
+            };
+            assert_eq!(expected, &frame.data[..]);
+        }
+        let mut conn = build_mock_http_conn(vec![]);
+        let chunks = vec![
+            vec![1, 2, 3, 4],
+            vec![5, 6],
+            vec![7],
+            vec![],
+        ];
+        let mut prioritizer = StubDataPrioritizer::new(chunks.clone());
+
+        // Send as many chunks as we've given the prioritizer
+        for chunk in chunks.iter() {
+            assert_eq!(SendStatus::Sent, conn.send_next_data(&mut prioritizer).unwrap());
+            expect_chunk(&chunk, conn.sender.sent.last().unwrap());
+        }
+        // Nothing to send any more
+        assert_eq!(SendStatus::Nothing, conn.send_next_data(&mut prioritizer).unwrap());
+    }
 
     /// Tests that multiple frames are correctly written to the stream.
     #[test]
