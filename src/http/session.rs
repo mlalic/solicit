@@ -2,14 +2,7 @@
 //! communication. This is effectively an API that allows hooking into an
 //! HTTP/2 connection in order to handle events arising on the connection.
 //!
-//! It also provides a default implementation of this interface, the
-//! `ClientSession`. This implementation is based on keeping a mapping of
-//! valid stream IDs to instances of `Stream` objects. When the session
-//! receives a callback for a particular stream ID, it first validates that
-//! it represents a valid stream ID and then delegates to the appropriate
-//! action of a `Stream`. This allows clients to easily vary the stream-level
-//! logic, without worrying about handling the book-keeping tasks of which
-//! streams are active.
+//! The module also provides a default implementation for some of the traits.
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Read;
@@ -17,14 +10,15 @@ use std::io::Cursor;
 use std::iter::FromIterator;
 use super::{StreamId, Header};
 
-/// A trait that defines methods that need to be defined in order to track the
-/// status of a `ClientConnection`.
+/// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
+/// it. Essentially, it allows the `HttpConnection` to pass information onto those higher levels
+/// through a well-defined interface.
 ///
-/// These methods are effectively callbacks that the `ClientConnection` invokes
-/// on particular events in the HTTP/2 frame stream.
+/// These methods are effectively a set of callbacks that the `HttpConnection` invokes when the
+/// corresponding events arise on the HTTP/2 connection (i.e. frame stream).
 ///
-/// TODO Allow the session to influence the `ClientConnection` state and raise
-///      errors (i.e. make the return type -> HttpResult<()>.
+/// TODO Allow the session to influence the `HttpConnection` state and raise
+///      errors (i.e. make the return type -> HttpResult<()>).
 pub trait Session {
     /// Notifies the `Session` that a new data chunk has arrived on the
     /// connection for a particular stream. Only the raw data is passed
@@ -178,13 +172,14 @@ pub enum StreamDataChunk {
     Unavailable,
 }
 
-/// A trait representing a single HTTP/2 client stream. An HTTP/2 connection
-/// multiplexes a number of streams.
+/// A trait representing a single HTTP/2 stream. An HTTP/2 connection multiplexes a number of
+/// streams.
 ///
-/// The trait defines which operations need to be defined by a type that should
-/// be useable as an HTTP/2 stream. By implementing this trait, clients can only
-/// implement stream-level logic, such as how the received data should be handled,
-/// instead of tracking which streams exist and what their states are.
+/// The trait defines which operations need to be implemented by a type that should
+/// be usable as an HTTP/2 stream. By implementing this trait, clients can implement only
+/// stream-level logic, such as how the received data should be handled, or which data should be
+/// sent to the peer, without having to worry about the lower-level details of session and
+/// connection management (e.g. handling raw frames or tracking stream status).
 pub trait Stream {
     /// Create a new stream with the given ID
     fn new(stream_id: StreamId) -> Self;
