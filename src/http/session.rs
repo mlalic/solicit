@@ -229,6 +229,16 @@ pub trait Stream {
         };
         self.set_state(next);
     }
+    /// Updates the `Stream` status to indicate that it is closed on the remote peer's side.
+    ///
+    /// If the stream is also locally closed, then it is fully closed after this call.
+    fn close_remote(&mut self) {
+        let next = match self.state() {
+            StreamState::HalfClosedLocal => StreamState::Closed,
+            _ => StreamState::HalfClosedRemote,
+        };
+        self.set_state(next);
+    }
     /// Returns whether the stream is closed.
     ///
     /// A stream is considered to be closed iff its state is set to `Closed`.
@@ -237,6 +247,13 @@ pub trait Stream {
     fn is_closed_local(&self) -> bool {
         match self.state() {
             StreamState::HalfClosedLocal | StreamState::Closed => true,
+            _ => false,
+        }
+    }
+    /// Returns whether the remote peer has closed the stream. This includes a fully closed stream.
+    fn is_closed_remote(&self) -> bool {
+        match self.state() {
+            StreamState::HalfClosedRemote | StreamState::Closed => true,
             _ => false,
         }
     }
