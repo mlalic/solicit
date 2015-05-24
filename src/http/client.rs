@@ -13,7 +13,7 @@ use openssl::ssl::SSL_OP_NO_COMPRESSION;
 use openssl::ssl::error::SslError;
 use openssl::ssl::SslMethod;
 
-use http::{HttpScheme, HttpResult, HttpError, StreamId, Header, ALPN_PROTOCOLS};
+use http::{HttpScheme, HttpResult, StreamId, Header, ALPN_PROTOCOLS};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
@@ -21,14 +21,13 @@ use http::connection::{
     SendStatus,
     HttpConnection,
     EndStream,
-    DataChunk,
 };
 use http::session::{
     Session,
     Stream, DefaultStream,
     DefaultSessionState, SessionState,
-    StreamDataChunk, StreamDataError,
 };
+use http::priority::SimplePrioritizer;
 
 /// Writes the client preface to the underlying HTTP/2 connection.
 ///
@@ -383,41 +382,9 @@ impl<S, R, State> ClientConnection<S, R, State>
         let mut buf = Vec::with_capacity(MAX_CHUNK_SIZE);
         unsafe { buf.set_len(MAX_CHUNK_SIZE); }
 
-        // Find a stream with data to send.
-        // No real prioritization is done for now.
-        // TODO: Extract the logic of which stream should have the chance to write data to an
-        //       external stream prioritization strategy.
-        for stream in self.state.iter().filter(|s| !s.is_closed_local()) {
-            let res = stream.get_data_chunk(&mut buf);
-            match res {
-                Ok(StreamDataChunk::Last(total)) => {
-                    try!(self.conn.send_data(DataChunk::new_borrowed(
-                                &buf[..total], stream.id(), EndStream::Yes)));
-                    return Ok(SendStatus::Sent);
-                },
-                Ok(StreamDataChunk::Chunk(total)) => {
-                    try!(self.conn.send_data(DataChunk::new_borrowed(
-                                &buf[..total], stream.id(), EndStream::No)));
-                    return Ok(SendStatus::Sent);
-                },
-                Ok(StreamDataChunk::Unavailable) => {
-                    // Stream is still open, but currently has no data that could be sent.
-                    // Pass...
-                }
-                Err(StreamDataError::Closed) => {
-                    // Transition the stream state to be locally closed, so we don't attempt to
-                    // write any more data on this stream.
-                    stream.close_local();
-                    // Find a stream with data to actually write to...
-                },
-                Err(StreamDataError::Other(e)) => {
-                    // Any other error is fatal!
-                    return Err(HttpError::Other(e));
-                },
-            };
-        }
-        // Nothing was sent if we reach here, so we signal this outcome to the clients.
-        Ok(SendStatus::Nothing)
+        let mut prioritizer = SimplePrioritizer::new(&mut self.state, &mut buf);
+
+        self.conn.send_next_data(&mut prioritizer)
     }
 }
 
