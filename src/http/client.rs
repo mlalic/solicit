@@ -451,6 +451,9 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
             },
             Some(stream) => stream,
         };
+        // Since this implies that the server has closed the stream (i.e. provided a response), we
+        // close the local end of the stream, as well as the remote one; there's no need to keep
+        // sending out the request body if the server's decided that it doesn't want to see it.
         stream.close()
     }
 }
