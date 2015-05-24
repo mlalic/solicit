@@ -7,3 +7,4 @@ pub use self::async::Client;
 
 mod simple;
 mod async;
+#[cfg(test)] mod tests;
