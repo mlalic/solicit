@@ -4,6 +4,7 @@ extern crate openssl;
 
 pub mod http;
 pub mod client;
+pub mod server;
 
 mod tests {
 }
