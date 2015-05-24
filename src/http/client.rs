@@ -375,15 +375,11 @@ impl<S, R, State> ClientConnection<S, R, State>
     /// queued cannot be relied on.
     pub fn send_next_data(&mut self) -> HttpResult<SendStatus> {
         debug!("Sending next data...");
-        // A default "maximumum" chunk size of 8 KiB is set on all data frames.
-        // TODO: Account for the current stream and connection window sizes, as well as the
-        //       SETTINGS_MAX_FRAME_SIZE setting, when deciding on the maximum chunk size.
+        // A default "maximum" chunk size of 8 KiB is set on all data frames.
         const MAX_CHUNK_SIZE: usize = 8 * 1024;
-        let mut buf = Vec::with_capacity(MAX_CHUNK_SIZE);
-        unsafe { buf.set_len(MAX_CHUNK_SIZE); }
+        let mut buf = [0; MAX_CHUNK_SIZE];
 
         let mut prioritizer = SimplePrioritizer::new(&mut self.state, &mut buf);
-
         self.conn.send_next_data(&mut prioritizer)
     }
 }
