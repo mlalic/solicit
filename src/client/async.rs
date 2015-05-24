@@ -263,6 +263,8 @@ struct ClientService {
     client_count: i32,
     /// The name of the host the connection is established to.
     host: Vec<u8>,
+    /// Whether the connection has already been initialized.
+    initialized: bool,
 }
 
 /// A helper wrapper around the components of the `ClientService` that are returned from its
@@ -328,6 +330,7 @@ impl ClientService {
             request_queue: Vec::new(),
             client_count: 0,
             host: host.as_bytes().to_vec(),
+            initialized: false,
         };
 
         // Returns the handles to the channel sender/receiver, so that the client can use them to
@@ -385,7 +388,13 @@ impl ClientService {
                 Ok(())
             },
             WorkItem::HandleFrame => {
-                self.handle_frame()
+                if !self.initialized {
+                    try!(self.conn.init());
+                    self.initialized = true;
+                    Ok(())
+                } else {
+                    self.handle_frame()
+                }
             },
             WorkItem::SendData => {
                 debug!("Will queue some request data");
