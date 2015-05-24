@@ -80,6 +80,18 @@ impl HttpFrame {
     }
 }
 
+/// The enum represents the success status of the operation of sending a next data chunk on an
+/// HTTP/2 connection.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SendStatus {
+    /// Indicates that a DATA frame was successfully sent
+    Sent,
+    /// Indicates that nothing was sent, but that no errors occurred.
+    ///
+    /// This is the case when none of the streams had any data to write.
+    Nothing,
+}
+
 /// The struct implements the HTTP/2 connection level logic.
 ///
 /// This means that the struct is a bridge between the low level raw frame reads/writes (i.e. what

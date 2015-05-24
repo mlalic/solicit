@@ -18,6 +18,7 @@ use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
     SendFrame, ReceiveFrame,
+    SendStatus,
     HttpConnection,
     EndStream,
     DataChunk,
@@ -303,17 +304,6 @@ pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
     pub state: State,
 }
 
-/// The enum represents the success status of the `ClientConnection::send_next_data` method.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum SendStatus {
-    /// Indicates that a DATA frame was successfully sent
-    Sent,
-    /// Indicates that nothing was sent, but that no errors occurred.
-    ///
-    /// This is the case when none of the streams had any data to write.
-    Nothing,
-}
-
 impl<S, R, State> ClientConnection<S, R, State>
         where S: SendFrame, R: ReceiveFrame, State: SessionState {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
@@ -503,7 +493,6 @@ mod tests {
     use super::{
         ClientSession,
         write_preface,
-        SendStatus,
         RequestStream,
     };
 
@@ -523,6 +512,7 @@ mod tests {
     };
     use http::connection::{
         HttpFrame,
+        SendStatus,
     };
     use http::session::{Session, SessionState, Stream, DefaultSessionState};
 
