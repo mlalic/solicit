@@ -537,7 +537,7 @@ impl ClientService {
 /// use std::str;
 ///
 /// // Connect to a server that supports HTTP/2
-/// let connector = CleartextConnector { host: "http2bin.org" };
+/// let connector = CleartextConnector::new("http2bin.org");
 /// let client = Client::with_connector(connector).unwrap();
 ///
 /// // Issue 5 requests from 5 different threads concurrently and wait for all

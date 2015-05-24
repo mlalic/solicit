@@ -82,7 +82,7 @@ use super::super::http::{StreamId, HttpResult, HttpError, Response, Header};
 /// use std::str;
 ///
 /// // Connect to an HTTP/2 aware server
-/// let connector = CleartextConnector { host: "http2bin.org" };
+/// let connector = CleartextConnector::new("http2bin.org");
 /// let mut client = SimpleClient::with_connector(connector).unwrap();
 /// let response = client.get(b"/", &[]).unwrap();
 /// assert_eq!(response.stream_id, 1);

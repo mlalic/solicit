@@ -232,6 +232,22 @@ impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
 pub struct CleartextConnector<'a> {
     /// The host to which the connection should be established
     pub host: &'a str,
+    /// The port on which the connection should be established
+    pub port: u16,
+}
+
+impl<'a> CleartextConnector<'a> {
+    /// Creates a new `CleartextConnector` that will attempt to establish a connection to the given
+    /// host on port 80.
+    pub fn new(host: &'a str) -> CleartextConnector {
+        CleartextConnector { host: host, port: 80 }
+    }
+
+    /// Creates a new `CleartextConnector` that will attempt to establish a connection to the given
+    /// host on the given port.
+    pub fn with_port(host: &'a str, port: u16) -> CleartextConnector {
+        CleartextConnector { host: host, port: port }
+    }
 }
 
 /// A newtype wrapping the `io::Error`, as it occurs when attempting to
@@ -251,10 +267,10 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
     type Stream = TcpStream;
     type Err = CleartextConnectError;
 
-    /// Establishes a cleartext TCP connection to the host on port 80.
+    /// Establishes a cleartext TCP connection based on the host and port.
     /// If it is not possible, returns an `HttpError`.
     fn connect(self) -> Result<ClientStream<TcpStream>, CleartextConnectError> {
-        let mut stream = try!(TcpStream::connect((self.host, 80)));
+        let mut stream = try!(TcpStream::connect((self.host, self.port)));
         // Once the stream has been established, we need to write the client preface,
         // to ensure that the connection is indeed initialized.
         try!(write_preface(&mut stream));
