@@ -8,63 +8,37 @@ An HTTP/2 implementation in Rust.
 # Goals
 
 The main goal of the project is to provide a low-level implementation of the
-client side of the HTTP/2 protocol and expose it in a way that higher-level
-libraries can make use of it. For example, it should be possible for a higher
-level libary to write a very simple adapter that exposes the responses
-obtained over an HTTP/2 connection in the same manner as those obtained over
-HTTP/1.1.
+HTTP/2 protocol and expose it in a way that higher-level libraries can make use
+of it. For example, it should be possible for a higher level libary to write a
+simple adapter that exposes the responses obtained over an HTTP/2 connection in
+the same manner as those obtained over HTTP/1.1.
 
-The exposed API should make it possible to customize any stage of handling
-an HTTP/2 response, such as adding custom handlers for partial response data
-(to make it viable to either save the response in memory, stream it to a
-file, or just notify a different process on every new chunk or even something
-else entirely).
+The API should make it possible to use an HTTP/2 connection at any level --
+everything from sending and managing individual HTTP/2 frames to only
+manipulating requests and responses -- depending on the needs of the end users
+of the library.
 
-The library itself should never spawn any threads, but the primitives exposed
-by it should be flexible enough to allow a multi-threaded client implementation
-(one where requests can be made from different threads, using the same underlying
-HTTP/2 connection).
+The core of the library should be decoupled from the particulars of the
+underlying IO -- it should be possible to use the same APIs regardless if the
+IO is evented or blocking. In the same time, the library provides convenience
+adapters that allow the usage of Rust's standard library socket IO as the
+transport layer out of the box.
 
 Extensive test coverage is also a major goal. No code is committed without
 accompanying tests.
 
 At this stage, performance was not considered as one of the primary goals.
 
-# Status
-
-Only a small subset of the full HTTP/2 spec is implemented so far, however it
-is already possible to issue requests and read their corresponding responses.
-
-
-Some features that are implemented:
-
-- Connection establishment: both cleartext TCP (with prior knowledge), as well
-  as TLS-protected (and negotiated) connections are supported.
-- HPACK compression and decompression: based on the
-  [`hpack-rs`](https://github.com/mlalic/hpack-rs) crate (which was extracted from
-  `solicit`).
-- The framing layer correctly handles incoming frames, discarding frame types for which
-  the handling (parsing, processing) is not yet implemented.
-  Handling is implemented for `DATA`, `HEADERS`, and `SETTINGS` frames.
-- Frame serialization is also implemented for the aforementioned 3 frame types.
-
-
 # Examples
 
 As mentioned in the goals section, this library does not aim to provide a
-full high-level client implementation (no caching, no automatic redirect
-following, no strongly-typed headers, etc.). Rather, it implements the lower
-level details of an HTTP/2 connection -- what is essentially an additional
-transport layer on top of the socket connection -- and exposes an API that
-allows a full-featured client to be built on top of that.
+full high-level client or server implementation (no caching, no automatic
+redirect following, no strongly-typed headers, etc.).
 
-However, in order to showcase how such clients might be built and in order to
-make sure that the main goals for such clients are achievable, there are two
-example implementations (included in the
-[`solicit::client`](https://github.com/mlalic/solicit/blob/master/src/client/mod.rs)
-module) built on top of the underlying abstractions of the
-[`solicit::http`](https://github.com/mlalic/solicit/blob/master/src/http/mod.rs)
-module.
+However, in order to demonstrate how such components could be built or provide
+a baseline for less demanding versions of the same, implementations of a limited
+client and server are included in the crate (the modules `solicit::client` and
+`solicit::server`, respectively).
 
 ## Simple Client
 
@@ -108,7 +82,7 @@ fn main() {
   // We can issue more requests after reading this one...
   // These calls block until the request itself is sent, but do not wait
   // for a response.
-  let req_id1 = client.request(b"GET", b"/", &[], None).unwrap();
+  let req_id1 = client.request(b"GET", b"/get?hi=hello", &[], None).unwrap();
   let req_id2 = client.request(b"GET", b"/asdf", &[], None).unwrap();
   // Now we get a response for both requests... This does block.
   let (resp1, resp2) = (
@@ -217,6 +191,64 @@ fn main() {
       }
       println!("{}", str::from_utf8(&response.body).unwrap());
   }
+}
+```
+
+## Simple Server
+
+The simple server implementation works similarly to the `SimpleClient`; this
+server implementation is fully single-threaded: no responses can be written
+while reading a request (and vice-versa). It does show how the API can be used
+to implement an HTTP/2 server, though.
+
+Provided by the [`solicit::server`](https://github.com/mlalic/solicit/blob/master/src/server/mod.rs)
+module.
+
+### Example
+
+A server that echoes the body of each request that it receives.
+
+```rust
+extern crate solicit;
+use std::str;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
+
+use solicit::http::Response;
+use solicit::server::SimpleServer;
+
+fn main() {
+    fn handle_client(stream: TcpStream) {
+        let mut server = SimpleServer::new(stream, |req| {
+            println!("Received request:");
+            for header in req.headers.iter() {
+                println!("  {}: {}",
+                str::from_utf8(&header.0).unwrap(),
+                str::from_utf8(&header.1).unwrap());
+            }
+            println!("Body:\n{}", str::from_utf8(&req.body).unwrap());
+
+            // Return a dummy response for every request
+            Response {
+                headers: vec![
+                    (b":status".to_vec(), b"200".to_vec()),
+                    (b"x-solicit".to_vec(), b"Hello, World!".to_vec()),
+                ],
+                body: req.body.to_vec(),
+                stream_id: req.stream_id,
+           }
+        }).unwrap();
+        while let Ok(_) = server.handle_next() {}
+        println!("Server done (client disconnected)");
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
+        thread::spawn(move || {
+            handle_client(stream)
+        });
+    }
 }
 ```
 
