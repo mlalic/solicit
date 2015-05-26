@@ -150,7 +150,7 @@ impl TransportStream for StubTransportStream {
 
     /// Closes the stream, making any read or write operation return an
     /// `io::Error` from there on out.
-    fn close(&self) -> io::Result<()> {
+    fn close(&mut self) -> io::Result<()> {
         self.closed.set(true);
         Ok(())
     }
@@ -210,7 +210,7 @@ fn sanity_check_stub_stream() {
     // Closing one handle of the stream closes all handles
     {
         let mut stream = StubTransportStream::with_stub_content(&vec![3, 4]);
-        let other = stream.try_split().unwrap();
+        let mut other = stream.try_split().unwrap();
         other.close().unwrap();
         assert!(stream.write(&[1]).is_err());
         assert!(stream.read(&mut [0; 5]).is_err());

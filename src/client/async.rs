@@ -617,7 +617,7 @@ impl Client {
         // socket is still open and the read thread waiting, it can happen that the read thread
         // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
         // decides to close it), effectively leaking the socket and thread.
-        let sck = client_stream.0.try_split().unwrap();
+        let mut sck = client_stream.0.try_split().unwrap();
 
         let service = match ClientService::new(client_stream) {
             Some(service) => service,

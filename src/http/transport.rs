@@ -64,7 +64,7 @@ pub trait TransportStream: Read + Write {
     ///
     /// If successful, all handles to the stream created by the `try_split` operation will start
     /// receiving an error for any IO operations.
-    fn close(&self) -> Result<(), io::Error>;
+    fn close(&mut self) -> Result<(), io::Error>;
 }
 
 impl TransportStream for TcpStream {
@@ -72,7 +72,7 @@ impl TransportStream for TcpStream {
         self.try_clone()
     }
 
-    fn close(&self) -> Result<(), io::Error> {
+    fn close(&mut self) -> Result<(), io::Error> {
         self.shutdown(Shutdown::Both)
     }
 }
@@ -82,7 +82,7 @@ impl TransportStream for SslStream<TcpStream> {
         self.try_clone()
     }
 
-    fn close(&self) -> Result<(), io::Error> {
+    fn close(&mut self) -> Result<(), io::Error> {
         self.get_ref().shutdown(Shutdown::Both)
     }
 }
