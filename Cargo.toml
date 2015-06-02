@@ -22,3 +22,4 @@ features = ["tlsv1_2", "npn"]
 
 [features]
 live_tests = []
+tls = ["openssl/tlsv1_2", "openssl/npn"]

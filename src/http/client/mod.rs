@@ -2,18 +2,9 @@
 //! HTTP/2 connection.
 
 use std::net::TcpStream;
-use std::convert::AsRef;
-use std::path::Path;
 use std::io;
-use std::str;
 
-use openssl::ssl::{Ssl, SslStream, SslContext};
-use openssl::ssl::{SSL_VERIFY_PEER, SSL_VERIFY_FAIL_IF_NO_PEER_CERT};
-use openssl::ssl::SSL_OP_NO_COMPRESSION;
-use openssl::ssl::error::SslError;
-use openssl::ssl::SslMethod;
-
-use http::{HttpScheme, HttpResult, StreamId, Header, ALPN_PROTOCOLS};
+use http::{HttpScheme, HttpResult, StreamId, Header};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
@@ -28,6 +19,9 @@ use http::session::{
     DefaultSessionState, SessionState,
 };
 use http::priority::SimplePrioritizer;
+
+#[cfg(feature="tls")]
+pub mod tls;
 
 /// Writes the client preface to the underlying HTTP/2 connection.
 ///
@@ -83,143 +77,6 @@ pub trait HttpConnect {
 
     /// Establishes a network connection that can be used by HTTP/2 connections.
     fn connect(self) -> Result<ClientStream<Self::Stream>, Self::Err>;
-}
-
-/// A struct implementing the functionality of establishing a TLS-backed TCP stream
-/// that can be used by an HTTP/2 connection. Takes care to set all the TLS options
-/// to those allowed by the HTTP/2 spec, as well as of the protocol negotiation.
-pub struct TlsConnector<'a, 'ctx> {
-    pub host: &'a str,
-    context: Http2TlsContext<'ctx>,
-}
-
-/// A private enum that represents the two options for configuring the
-/// `TlsConnector`
-enum Http2TlsContext<'a> {
-    /// This means that the `TlsConnector` will use the referenced `SslContext`
-    /// instance when creating a new `SslStream`
-    Wrapped(&'a SslContext),
-    /// This means that the `TlsConnector` will create a new context with the
-    /// certificates file being found at the given path.
-    CertPath(&'a Path),
-}
-
-/// An enum representing possible errors that can arise when trying to
-/// establish an HTTP/2 connection over TLS.
-pub enum TlsConnectError {
-    /// The variant corresponds to the underlying raw TCP connection returning
-    /// an error.
-    IoError(io::Error),
-    /// The variant corresponds to the TLS negotiation returning an error.
-    SslError(SslError),
-    /// The variant corresponds to the case when the TLS connection is
-    /// established, but the application protocol that was negotiated didn't
-    /// end up being HTTP/2.
-    /// It wraps the established SSL stream in order to allow the client to
-    /// decide what to do with it (and the application protocol that was
-    /// chosen).
-    Http2NotSupported(SslStream<TcpStream>),
-}
-
-impl From<io::Error> for TlsConnectError {
-    fn from(err: io::Error) -> TlsConnectError {
-        TlsConnectError::IoError(err)
-    }
-}
-
-impl From<SslError> for TlsConnectError {
-    fn from(err: SslError) -> TlsConnectError {
-        TlsConnectError::SslError(err)
-    }
-}
-
-impl HttpConnectError for TlsConnectError {}
-
-impl<'a, 'ctx> TlsConnector<'a, 'ctx> {
-    /// Creates a new `TlsConnector` that will create a new `SslContext` before
-    /// trying to establish the TLS connection. The path to the CA file that the
-    /// context will use needs to be provided.
-    pub fn new<P: AsRef<Path>>(host: &'a str, ca_file_path: &'ctx P) -> TlsConnector<'a, 'ctx> {
-        TlsConnector {
-            host: host,
-            context: Http2TlsContext::CertPath(ca_file_path.as_ref()),
-        }
-    }
-
-    /// Creates a new `TlsConnector` that will use the provided context to
-    /// create the `SslStream` that will back the HTTP/2 connection.
-    pub fn with_context(host: &'a str, context: &'ctx SslContext) -> TlsConnector<'a, 'ctx> {
-        TlsConnector {
-            host: host,
-            context: Http2TlsContext::Wrapped(context),
-        }
-    }
-
-    /// Builds up a default `SslContext` instance wth TLS settings that the
-    /// HTTP/2 spec mandates. The path to the CA file needs to be provided.
-    pub fn build_default_context(ca_file_path: &Path) -> Result<SslContext, TlsConnectError> {
-        // HTTP/2 connections need to be on top of TLSv1.2 or newer.
-        let mut context = try!(SslContext::new(SslMethod::Tlsv1_2));
-
-        // This makes the certificate required (only VERIFY_PEER would mean optional)
-        context.set_verify(SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, None);
-        try!(context.set_CA_file(ca_file_path));
-        // Compression is not allowed by the spec
-        context.set_options(SSL_OP_NO_COMPRESSION);
-        // The HTTP/2 protocol identifiers are constant at the library level...
-        context.set_npn_protocols(ALPN_PROTOCOLS);
-
-        Ok(context)
-    }
-}
-
-impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
-    type Stream = SslStream<TcpStream>;
-    type Err = TlsConnectError;
-
-    fn connect(self) -> Result<ClientStream<SslStream<TcpStream>>, TlsConnectError> {
-        // First, create a TCP connection to port 443
-        let raw_tcp = try!(TcpStream::connect(&(self.host, 443)));
-        // Now build the SSL instance, depending on which SSL context should be
-        // used...
-        let ssl = match self.context {
-            Http2TlsContext::CertPath(path) => {
-                let ctx = try!(TlsConnector::build_default_context(&path));
-                try!(Ssl::new(&ctx))
-            },
-            Http2TlsContext::Wrapped(ctx) => try!(Ssl::new(ctx)),
-        };
-        // SNI must be used
-        try!(ssl.set_hostname(self.host));
-
-        // Wrap the Ssl instance into an `SslStream`
-        let mut ssl_stream = try!(SslStream::new_from(ssl, raw_tcp));
-        // This connector only understands HTTP/2, so if that wasn't chosen in
-        // NPN, we raise an error.
-        let fail = match ssl_stream.get_selected_npn_protocol() {
-            None => true,
-            Some(proto) => {
-                // Make sure that the protocol is one of the HTTP/2 protocols.
-                debug!("Selected protocol -> {:?}", str::from_utf8(proto));
-                let found = ALPN_PROTOCOLS.iter().any(|&http2_proto| http2_proto == proto);
-
-                // We fail if we don't find an HTTP/2 protcol match...
-                !found
-            }
-        };
-        if fail {
-            // We need the fail flag (instead of returning from one of the match
-            // arms above because we need to move the `ssl_stream` and that is
-            // not possible above (since it's borrowed at that point).
-            return Err(TlsConnectError::Http2NotSupported(ssl_stream));
-        }
-
-        // Now that the stream is correctly established, we write the client preface.
-        try!(write_preface(&mut ssl_stream));
-
-        // All done.
-        Ok(ClientStream(ssl_stream, HttpScheme::Https, self.host.into()))
-    }
 }
 
 /// A struct that establishes a cleartext TCP connection that can be used by an HTTP/2

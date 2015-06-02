@@ -99,9 +99,11 @@ fn main() {
 A TLS-protected (and negotiated) `https://` connection. The only difference is
 in the type of the connector provided to the `SimpleClient`.
 
+Requires the `tls` feature of the crate.
+
 ```rust
 extern crate solicit;
-use solicit::http::client::TlsConnector;
+use solicit::http::client::tls::TlsConnector;
 use solicit::client::SimpleClient;
 use std::str;
 
