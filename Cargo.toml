@@ -19,6 +19,7 @@ log = "^0.3"
 [dependencies.openssl]
 version = "*"
 features = ["tlsv1_2", "npn"]
+optional = true
 
 [features]
 live_tests = []

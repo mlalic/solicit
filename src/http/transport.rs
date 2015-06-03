@@ -12,7 +12,6 @@ use std::io;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::net::Shutdown;
-use openssl::ssl::SslStream;
 
 /// A trait that any struct that wants to provide the transport layer for
 /// HTTP/2 needs to implement.
@@ -77,6 +76,9 @@ impl TransportStream for TcpStream {
     }
 }
 
+#[cfg(feature="tls")]
+use openssl::ssl::SslStream;
+#[cfg(feature="tls")]
 impl TransportStream for SslStream<TcpStream> {
     fn try_split(&self) -> Result<SslStream<TcpStream>, io::Error> {
         self.try_clone()
