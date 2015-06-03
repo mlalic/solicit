@@ -1,5 +1,7 @@
 language: rust
-script: cargo test --features="live_tests"
+script:
+  - cargo test --features="live_tests"
+  - cargo test --features="tls"
 
 after_success: |
   [ $TRAVIS_BRANCH = master ] &&
