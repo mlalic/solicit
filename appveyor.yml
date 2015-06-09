@@ -1,0 +1,31 @@
+install:
+  - ps: |
+      if ($env:PLATFORM -eq "x86") {
+        Start-FileDownload 'http://slproweb.com/download/Win32OpenSSL-1_0_2c.exe' -FileName openssl.exe
+      } else {
+        Start-FileDownload 'http://slproweb.com/download/Win64OpenSSL-1_0_2c.exe' -FileName openssl.exe
+      }
+  - openssl.exe /SILENT /VERYSILENT /SP- /SUPPRESSMSGBOXES /NORESTART /DIR="C:\OpenSSL"
+  # Sanity check: OpenSSL's properly installed?
+  - DIR C:\OpenSSL
+
+  - ps: |
+      if ($env:PLATFORM -eq "x86") {
+        Start-FileDownload 'https://static.rust-lang.org/dist/rust-nightly-i686-pc-windows-gnu.exe' -FileName rust.exe
+      } else {
+        Start-FileDownload 'https://static.rust-lang.org/dist/rust-nightly-x86_64-pc-windows-gnu.exe' -FileName rust.exe
+      }
+  - rust.exe /VERYSILENT /NORESTART /DIR="C:\Program Files\Rust"
+  - SET PATH=%PATH%;C:\Program Files\Rust\bin;C:\MinGW\bin
+  - rustc -V
+  - cargo -V
+
+platform:
+  - x86
+
+build: false
+
+test_script:
+  - env OPENSSL_LIB_DIR=C:/OpenSSL OPENSSL_INCLUDE_DIR=C:/OpenSSL/include cargo test --verbose --features="tls"
+  - cargo test --verbose
+  - cargo test --verbose --features="live_tests"
