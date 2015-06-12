@@ -1,12 +1,10 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
+use http::{StreamId, HttpResult, HttpError, Response, Header};
+use http::transport::TransportStream;
+use http::connection::{HttpConnection, SendStatus};
+use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 use http::client::{ClientConnection, HttpConnect, RequestStream};
-use http::session::{SessionState, DefaultSessionState, DefaultStream};
-use super::super::http::connection::{HttpConnection, SendStatus};
-use super::super::http::transport::TransportStream;
-use super::super::http::session::Stream;
-use super::super::http::{StreamId, HttpResult, HttpError, Response, Header};
-
 
 /// A struct implementing a simple HTTP/2 client.
 ///

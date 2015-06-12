@@ -8,7 +8,7 @@ use std::error::Error;
 use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
-use super::{StreamId, Header};
+use http::{StreamId, Header};
 
 /// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
 /// it. Essentially, it allows the `HttpConnection` to pass information onto those higher levels

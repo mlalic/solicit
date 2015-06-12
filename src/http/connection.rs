@@ -22,12 +22,14 @@ use std::borrow::Borrow;
 use http::{
     Header,
     StreamId,
+    HttpError,
+    HttpResult,
+    HttpScheme,
 };
 use http::priority::DataPrioritizer;
-use super::session::Session;
-use super::{HttpError, HttpResult, HttpScheme};
-use super::transport::TransportStream;
-use super::frame::{
+use http::session::Session;
+use http::transport::TransportStream;
+use http::frame::{
     Frame,
     RawFrame,
     DataFrame,
@@ -509,20 +511,6 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
 mod tests {
     use std::borrow::Cow;
 
-    use http::tests::common::{
-        build_mock_http_conn,
-        build_stub_from_frames,
-        StubTransportStream,
-        StubDataPrioritizer,
-        TestSession,
-    };
-
-    use super::super::frame::{
-        Frame, DataFrame, HeadersFrame,
-        SettingsFrame,
-        pack_header,
-        RawFrame,
-    };
     use super::{
         HttpConnection,
         HttpFrame,
@@ -531,8 +519,22 @@ mod tests {
         DataChunk,
         SendStatus,
     };
-    use super::super::transport::TransportStream;
-    use super::super::{HttpError, HttpResult};
+
+    use http::tests::common::{
+        build_mock_http_conn,
+        build_stub_from_frames,
+        StubTransportStream,
+        StubDataPrioritizer,
+        TestSession,
+    };
+    use http::frame::{
+        Frame, DataFrame, HeadersFrame,
+        SettingsFrame,
+        pack_header,
+        RawFrame,
+    };
+    use http::transport::TransportStream;
+    use http::{HttpError, HttpResult};
     use hpack;
 
     /// A helper function that performs a `send_frame` operation on the given

@@ -1,7 +1,8 @@
 //! The module contains the implementation of HTTP/2 frames.
 
 use std::mem;
-use super::StreamId;
+
+use http::StreamId;
 
 /// A helper macro that unpacks a sequence of 4 bytes found in the buffer with
 /// the given identifier, starting at the given offset, into the given integer
