@@ -34,6 +34,8 @@
 use std::convert::AsRef;
 use std::net::TcpStream;
 use std::path::Path;
+use std::error;
+use std::fmt;
 use std::str;
 use std::io;
 use http::{HttpScheme, ALPN_PROTOCOLS};
@@ -109,6 +111,50 @@ pub enum TlsConnectError {
     /// decide what to do with it (and the application protocol that was
     /// chosen).
     Http2NotSupported(SslStream<TcpStream>),
+}
+
+// Note: TcpStream does not implement `Debug` in 1.0.0, so deriving is not possible.
+impl fmt::Debug for TlsConnectError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        // The enum variant...
+        try!(write!(fmt, "TlsConnectError::{}", match *self {
+            TlsConnectError::IoError(_) => "IoError",
+            TlsConnectError::SslError(_) => "SslError",
+            TlsConnectError::Http2NotSupported(_) => "Http2NotSupported",
+        }));
+        // ...and the wrapped value, except for when it's the stream.
+        match *self {
+            TlsConnectError::IoError(ref err) => try!(write!(fmt, "({:?})", err)),
+            TlsConnectError::SslError(ref err) => try!(write!(fmt, "({:?})", err)),
+            TlsConnectError::Http2NotSupported(_) => try!(write!(fmt, "(...)")),
+        };
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for TlsConnectError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "TLS HTTP/2 connect error: {}", (self as &error::Error).description())
+    }
+}
+
+impl error::Error for TlsConnectError {
+    fn description(&self) -> &str {
+        match *self {
+            TlsConnectError::IoError(ref err) => err.description(),
+            TlsConnectError::SslError(ref err) => err.description(),
+            TlsConnectError::Http2NotSupported(_) => "HTTP/2 not supported by the server",
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            TlsConnectError::IoError(ref err) => Some(err),
+            TlsConnectError::SslError(ref err) => Some(err),
+            TlsConnectError::Http2NotSupported(_) => None,
+        }
+    }
 }
 
 impl From<io::Error> for TlsConnectError {

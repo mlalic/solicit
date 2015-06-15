@@ -3,6 +3,8 @@
 
 use std::net::TcpStream;
 use std::io;
+use std::fmt;
+use std::error;
 
 use http::{HttpScheme, HttpResult, StreamId, Header};
 use http::transport::TransportStream;
@@ -55,7 +57,7 @@ pub struct ClientStream<TS: TransportStream>(pub TS, pub HttpScheme, pub String)
 
 /// A marker trait for errors raised by attempting to establish an HTTP/2
 /// connection.
-pub trait HttpConnectError {}
+pub trait HttpConnectError: error::Error {}
 
 /// A trait that can be implemented by structs that want to provide the
 /// functionality of establishing network connections for use by HTTP/2 connections.
@@ -109,7 +111,24 @@ impl<'a> CleartextConnector<'a> {
 
 /// A newtype wrapping the `io::Error`, as it occurs when attempting to
 /// establish an HTTP/2 connection over cleartext TCP (with prior knowledge).
+#[derive(Debug)]
 pub struct CleartextConnectError(io::Error);
+
+impl fmt::Display for CleartextConnectError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "Cleartext HTTP/2 connect error: {}", (self as &error::Error).description())
+    }
+}
+
+impl error::Error for CleartextConnectError {
+    fn description(&self) -> &str {
+        self.0.description()
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        self.0.cause()
+    }
+}
 
 /// For convenience we make sure that `io::Error`s are easily convertible to
 /// the `CleartextConnectError`, if needed.
