@@ -6,7 +6,7 @@ use std::io;
 use std::fmt;
 use std::error;
 
-use http::{HttpScheme, HttpResult, StreamId, Header};
+use http::{HttpScheme, HttpResult, StreamId, Header, HttpError};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, Frame};
 use http::connection::{
@@ -59,6 +59,10 @@ pub struct ClientStream<TS: TransportStream>(pub TS, pub HttpScheme, pub String)
 /// connection.
 pub trait HttpConnectError: error::Error {}
 
+impl<E> From<E> for HttpError where E: HttpConnectError + 'static {
+    fn from(e: E) -> HttpError { HttpError::Other(Box::new(e)) }
+}
+
 /// A trait that can be implemented by structs that want to provide the
 /// functionality of establishing network connections for use by HTTP/2 connections.
 ///
@@ -75,7 +79,7 @@ pub trait HttpConnect {
     type Stream: TransportStream;
     /// The type of the error that can be produced by trying to establish the
     /// connection (i.e. calling the `connect` method).
-    type Err;
+    type Err: HttpConnectError + 'static;
 
     /// Establishes a network connection that can be used by HTTP/2 connections.
     fn connect(self) -> Result<ClientStream<Self::Stream>, Self::Err>;

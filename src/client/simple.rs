@@ -135,7 +135,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// Currently, it panics if the connector returns an error.
     pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
             where C: HttpConnect<Stream=S> {
-        let stream = connector.connect().ok().unwrap();
+        let stream = try!(connector.connect());
         let conn = HttpConnection::<S, S>::with_stream(stream.0, stream.1);
         SimpleClient::with_connection(conn, stream.2)
     }

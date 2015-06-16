@@ -2,7 +2,7 @@
 
 #[cfg(feature="live_tests")]
 mod simple {
-    use http::Response;
+    use http::{Response, HttpError};
     use http::client::CleartextConnector;
     use client::SimpleClient;
     use std::str;
@@ -36,6 +36,20 @@ mod simple {
 
         let body = str::from_utf8(&res.body).unwrap();
         assert!(body.contains("Hello, World!"));
+    }
+
+    /// Tests that `with_connector` returns an error when the connector is unable to establish a
+    /// new connection.
+    #[test]
+    fn test_error_on_connect_failure() {
+        let connector = CleartextConnector::new("unknown.host.name.lcl");
+        let client = SimpleClient::with_connector(connector);
+
+        assert!(client.is_err());
+        assert!(match client.err().unwrap() {
+            HttpError::Other(_) => true,
+            _ => false,
+        });
     }
 }
 
