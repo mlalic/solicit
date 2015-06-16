@@ -1,6 +1,7 @@
 # solicit
 
-[![Build Status](https://img.shields.io/travis/mlalic/solicit.svg?style=flat-square)](https://travis-ci.org/mlalic/solicit)
+[![Travis Build Status](https://img.shields.io/travis/mlalic/solicit/master.svg?style=flat-square&label=Travis%20Build)](https://travis-ci.org/mlalic/solicit)
+[![AppVeyor Build Status](https://img.shields.io/appveyor/ci/mlalic/solicit/master.svg?style=flat-square&label=AppVeyor%20Build)](https://ci.appveyor.com/project/mlalic/solicit)
 [![Crates.io](https://img.shields.io/crates/v/solicit.svg?style=flat-square)](https://crates.io/crates/solicit)
 
 An HTTP/2 implementation in Rust.
