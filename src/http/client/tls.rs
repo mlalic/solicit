@@ -1,5 +1,7 @@
 //! The module contains helpers for implementing TLS-based client connections.
 //!
+//! Available only when the `"tls"` crate feature is enabled.
+//!
 //! Depends on the `openssl` crate.
 //!
 //! # Example
@@ -7,6 +9,7 @@
 //! Establishing a new client connection using the `TlsConnector` and issuing a `GET` request.
 //!
 //! ```no_run
+//! // Remember to enable the "tls" feature for `solicit`
 //! use solicit::http::client::tls::TlsConnector;
 //! use solicit::client::SimpleClient;
 //! use std::str;
