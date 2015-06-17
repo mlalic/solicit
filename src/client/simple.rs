@@ -26,12 +26,6 @@ use http::client::{ClientConnection, HttpConnect, RequestStream};
 /// The responses that are returned by the client are very raw representations
 /// of the response.
 ///
-/// # Notes
-///
-/// - For now (temporarily) no requests with bodies are supported.
-/// - A direct HTTP/2 connection is used (not an upgrade of an HTTP/1.1
-///   connection)
-///
 /// # Examples
 ///
 /// Issue a simple GET request using the helper `get` method. Premade connection
