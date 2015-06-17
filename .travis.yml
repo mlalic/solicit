@@ -1,4 +1,9 @@
 language: rust
+matrix:
+  include:
+    - rust: nightly
+    - rust: beta
+    - rust: stable
 script:
   - cargo test --features="live_tests"
   - cargo test --features="tls"
@@ -8,6 +13,7 @@ sudo: false
 after_success: |
   [ $TRAVIS_BRANCH = master ] &&
   [ $TRAVIS_PULL_REQUEST = false ] &&
+  [ $TRAVIS_RUST_VERSION = stable ] &&
   cargo doc &&
   echo "<meta http-equiv=refresh content=0;url=`echo $TRAVIS_REPO_SLUG | cut -d '/' -f 2`/index.html>" > target/doc/index.html &&
   pip install --user ghp-import &&
