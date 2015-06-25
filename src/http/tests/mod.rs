@@ -52,4 +52,11 @@ mod root_tests {
         assert_eq!(HttpScheme::Http.as_bytes(), b"http");
         assert_eq!(HttpScheme::Https.as_bytes(), b"https");
     }
+
+    /// Make sure that the `HttpError` is both `Sync` and `Send`
+    #[test]
+    fn _assert_error_is_sync_send() {
+        fn _is_sync_send<T: Sync + Send>() {}
+        _is_sync_send::<HttpError>();
+    }
 }

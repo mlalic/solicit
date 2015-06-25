@@ -154,10 +154,10 @@ pub enum StreamDataError {
     /// from the peer's side.
     Closed,
     /// A different error while trying to obtain the data chunk. Wraps a boxed `Error` impl.
-    Other(Box<Error>),
+    Other(Box<Error + Send + Sync>),
 }
 
-impl<E> From<E> for StreamDataError where E: Error + 'static {
+impl<E> From<E> for StreamDataError where E: Error + Send + Sync + 'static {
     fn from(err: E) -> StreamDataError { StreamDataError::Other(Box::new(err)) }
 }
 

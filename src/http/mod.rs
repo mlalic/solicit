@@ -45,7 +45,7 @@ pub enum HttpError {
     UnableToConnect,
     // TODO This variant should be split into actual reasons for the response being malformed
     MalformedResponse,
-    Other(Box<Error>),
+    Other(Box<Error + Send + Sync>),
 }
 
 /// Implement the trait that allows us to automatically convert `io::Error`s

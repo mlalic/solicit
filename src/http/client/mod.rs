@@ -57,7 +57,7 @@ pub struct ClientStream<TS: TransportStream>(pub TS, pub HttpScheme, pub String)
 
 /// A marker trait for errors raised by attempting to establish an HTTP/2
 /// connection.
-pub trait HttpConnectError: error::Error {}
+pub trait HttpConnectError: error::Error + Send + Sync {}
 
 impl<E> From<E> for HttpError where E: HttpConnectError + 'static {
     fn from(e: E) -> HttpError { HttpError::Other(Box::new(e)) }
