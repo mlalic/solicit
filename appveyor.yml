@@ -1,9 +1,9 @@
 install:
   - ps: |
       if ($env:PLATFORM -eq "x86") {
-        Start-FileDownload 'http://slproweb.com/download/Win32OpenSSL-1_0_2c.exe' -FileName openssl.exe
+        Start-FileDownload 'http://slproweb.com/download/Win32OpenSSL-1_0_2d.exe' -FileName openssl.exe
       } else {
-        Start-FileDownload 'http://slproweb.com/download/Win64OpenSSL-1_0_2c.exe' -FileName openssl.exe
+        Start-FileDownload 'http://slproweb.com/download/Win64OpenSSL-1_0_2d.exe' -FileName openssl.exe
       }
   - openssl.exe /SILENT /VERYSILENT /SP- /SUPPRESSMSGBOXES /NORESTART /DIR="C:\OpenSSL"
   # Sanity check: OpenSSL's properly installed?
