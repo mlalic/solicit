@@ -1,4 +1,4 @@
-//! The module contains the implementation of the `SETTINGS` frame and associated flags.
+//! The module contains the implementation of the `HEADERS` frame and associated flags.
 
 use http::StreamId;
 use http::frame::{
