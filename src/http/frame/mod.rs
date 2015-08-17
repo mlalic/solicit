@@ -115,7 +115,7 @@ pub trait Flag {
 }
 
 /// A trait that all HTTP/2 frame structs need to implement.
-pub trait Frame {
+pub trait Frame: Sized {
     /// The type that represents the flags that the particular `Frame` can take.
     /// This makes sure that only valid `Flag`s are used with each `Frame`.
     type FlagType: Flag;

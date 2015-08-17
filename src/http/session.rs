@@ -35,9 +35,9 @@ pub trait Session {
 ///
 /// Allows `SessionState` implementations to return iterators over its session without being forced
 /// to declare them as associated types.
-pub struct StreamIter<'a, S: Stream>(Box<Iterator<Item=&'a mut S> + 'a>);
+pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item=&'a mut S> + 'a>);
 
-impl<'a, S> Iterator for StreamIter<'a, S> where S: Stream {
+impl<'a, S> Iterator for StreamIter<'a, S> where S: Stream + 'a {
     type Item = &'a mut S;
 
     #[inline]

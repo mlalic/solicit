@@ -18,7 +18,7 @@ use std::net::Shutdown;
 ///
 /// It provides default implementations for some convenience methods, backed
 /// by the `Read` and `Write` implementations.
-pub trait TransportStream: Read + Write {
+pub trait TransportStream: Read + Write + Sized {
     /// A convenience method that performs as many `read` calls on the
     /// underlying `Read` implementation as it takes to fill the given buffer.
     ///
