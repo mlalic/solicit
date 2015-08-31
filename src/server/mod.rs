@@ -81,7 +81,7 @@ impl<TS, H> SimpleServer<TS, H>
     pub fn new(mut stream: TS, handler: H) -> HttpResult<SimpleServer<TS, H>> {
         // First assert that the preface is received
         let mut preface = [0; 24];
-        stream.read_exact(&mut preface).unwrap();
+        TransportStream::read_exact(&mut stream, &mut preface).unwrap();
         if &preface != b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" {
             return Err(HttpError::UnableToConnect);
         }

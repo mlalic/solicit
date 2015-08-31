@@ -164,7 +164,7 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
         // Simply reads the next 9 octets (and no more than 9).
         let read_header_bytes = |stream: &mut TS| -> HttpResult<[u8; 9]> {
             let mut buf = [0; 9];
-            try!(stream.read_exact(&mut buf));
+            try!(TransportStream::read_exact(stream, &mut buf));
 
             Ok(buf)
         };
@@ -177,7 +177,7 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
             // This is completely safe since we *just* allocated the vector with
             // the same capacity.
             unsafe { buf.set_len(length); }
-            try!(stream.read_exact(&mut buf));
+            try!(TransportStream::read_exact(stream, &mut buf));
 
             Ok(buf)
         };
