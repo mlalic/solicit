@@ -29,6 +29,7 @@ sudo: false
 
 after_success:
   - travis-cargo --only stable doc-upload
+  - travis-cargo --only stable coveralls --no-sudo -- --features="tls live_tests"
 
 env:
   global:
