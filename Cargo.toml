@@ -13,7 +13,7 @@ keywords = ["http2", "protocol", "solicit"]
 documentation = "https://mlalic.github.io/solicit/solicit/index.html"
 
 [dependencies]
-hpack = "0.2"
+hpack = "0.3"
 log = "^0.3"
 
 [dependencies.openssl]

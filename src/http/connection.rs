@@ -330,7 +330,8 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
                           headers: Vec<Header>,
                           stream_id: StreamId,
                           end_stream: EndStream) -> HttpResult<()> {
-        let headers_fragment = self.encoder.encode(&headers);
+        let headers_fragment = self.encoder.encode(
+            headers.iter().map(|h| (&h.0[..], &h.1[..])));
         // For now, sending header fragments larger than 16kB is not supported
         // (i.e. the encoded representation cannot be split into CONTINUATION
         // frames).
@@ -1074,7 +1075,8 @@ mod tests {
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(
-                    hpack::Encoder::new().encode(&headers),
+                    hpack::Encoder::new().encode(
+                        headers.iter().map(|h| (&h.0[..], &h.1[..]))),
                     1)),
             HttpFrame::DataFrame(DataFrame::new(1)), {
                 let mut frame = DataFrame::new(1);
