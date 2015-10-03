@@ -3,6 +3,7 @@
 //! HTTP/2 connection in order to handle events arising on the connection.
 //!
 //! The module also provides a default implementation for some of the traits.
+use std::marker::PhantomData;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Read;
@@ -35,13 +36,13 @@ pub trait Session {
 ///
 /// Allows `SessionState` implementations to return iterators over its session without being forced
 /// to declare them as associated types.
-pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item=&'a mut S> + 'a>);
+pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item=(&'a StreamId, &'a mut S)> + 'a>);
 
 impl<'a, S> Iterator for StreamIter<'a, S> where S: Stream + 'a {
-    type Item = &'a mut S;
+    type Item = (&'a StreamId, &'a mut S);
 
     #[inline]
-    fn next(&mut self) -> Option<&'a mut S> { self.0.next() }
+    fn next(&mut self) -> Option<(&'a StreamId, &'a mut S)> { self.0.next() }
 }
 
 /// A trait defining a set of methods for accessing and influencing an HTTP/2 session's state.
@@ -59,7 +60,12 @@ pub trait SessionState {
     type Stream: Stream;
 
     /// Inserts the given `Stream` into the session's state, starting to track it.
-    fn insert_stream(&mut self, stream: Self::Stream);
+    /// The `SessionState` should assign it the next available outgoing stream ID.
+    fn insert_outgoing(&mut self, stream: Self::Stream) -> StreamId;
+    /// Inserts the given `Stream` into the session's state, considering it an incoming
+    /// stream.
+    /// TODO(mlalic): Allow the exact error to propagate out.
+    fn insert_incoming(&mut self, id: StreamId, stream: Self::Stream) -> Result<(), ()>;
     /// Returns a reference to a `Stream` with the given `StreamId`, if it is found in the current
     /// session.
     fn get_stream_ref(&self, stream_id: StreamId) -> Option<&Self::Stream>;
@@ -80,37 +86,124 @@ pub trait SessionState {
     /// The default implementations relies on the `iter` implementation to find the closed streams
     /// first and then calls `remove_stream` on all of them.
     fn get_closed(&mut self) -> Vec<Self::Stream> {
-        let ids: Vec<_> = self.iter()
-                              .filter_map(|s| {
-                                  if s.is_closed() { Some(s.id()) } else { None }
-                              })
-                              .collect();
+        let ids: Vec<StreamId> =
+            self.iter().filter_map(|(id, s)| {
+                if s.is_closed() { Some(*id) } else { None }
+            }).collect();
         FromIterator::from_iter(ids.into_iter().map(|i| self.remove_stream(i).unwrap()))
+    }
+}
+
+/// A phantom type for the `DefaultSessionState` struct that indicates that the struct should be
+/// geared for a client session.
+pub struct Client;
+/// A phantom type for the `DefaultSessionState` struct that indicates that the struct should be
+/// geared for a server session.
+pub struct Server;
+
+/// The simple enum indicates the parity of an integer. Used by the `DefaultSessionState`
+/// implementation to make sure that server and client sessions only accept stream IDs with the
+/// correct parity (for clients outgoing stream IDs must be odd and incoming even, while for
+/// servers it is the other way around).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Parity {
+    Even,
+    Odd,
+}
+
+impl Parity {
+    /// Returns the parity of the given `StreamId`.
+    fn of(stream_id: StreamId) -> Parity {
+        match stream_id % 2 {
+            0 => Parity::Even,
+            1 => Parity::Odd,
+            _ => unreachable!(),
+        }
     }
 }
 
 /// An implementation of the `SessionState` trait that tracks the active streams in a `HashMap`,
 /// mapping the stream ID to the concrete `Stream` instance.
-pub struct DefaultSessionState<S> where S: Stream {
+pub struct DefaultSessionState<T, S> where S: Stream {
     /// All streams that the session state is currently aware of.
     streams: HashMap<StreamId, S>,
+    /// The next available ID for outgoing streams.
+    next_stream_id: StreamId,
+    /// The parity bit for outgoing connections. Client-initiated connections must always be
+    /// odd-numbered, while server-initiated ones should be even. Therefore, the parity bit
+    /// is `Odd` for clients' session state and `Even` for servers'.
+    /// TODO It'd be better to use an associated constant to type T instead, but
+    ///      `associated_consts` is feature gated for now.
+    outgoing_parity: Parity,
+    /// Indicates whether the session state is maintained for a client or a server session.
+    _server_or_client: PhantomData<T>,
 }
 
-impl<S> DefaultSessionState<S> where S: Stream {
-    /// Creates a new `DefaultSessionState` with no known streams.
-    pub fn new() -> DefaultSessionState<S> {
+impl<T, S> DefaultSessionState<T, S> where S: Stream {
+    /// A helper function that returns `true` iff the given `StreamId` is a valid ID for an
+    /// incoming stream, depending on whether the session is that of a client or a server.
+    fn validate_incoming_parity(&self, stream_id: StreamId) -> bool {
+        // The parity of incoming connections should be different than the parity of outgoing ones.
+        Parity::of(stream_id) != self.outgoing_parity
+    }
+}
+
+impl<S> DefaultSessionState<Client, S> where S: Stream {
+    /// Creates a new `DefaultSessionState` for a client session with no known streams.
+    pub fn new() -> DefaultSessionState<Client, S> {
         DefaultSessionState {
             streams: HashMap::new(),
+            next_stream_id: 1,
+            outgoing_parity: Parity::Odd,
+            _server_or_client: PhantomData,
         }
     }
 }
 
-impl<S> SessionState for DefaultSessionState<S> where S: Stream {
+impl<S> DefaultSessionState<Server, S> where S: Stream {
+    /// Creates a new `DefaultSessionState` for a server session with no known streams.
+    pub fn new() -> DefaultSessionState<Server, S> {
+        DefaultSessionState {
+            streams: HashMap::new(),
+            next_stream_id: 2,
+            outgoing_parity: Parity::Even,
+            _server_or_client: PhantomData,
+        }
+    }
+}
+
+/// Create a new `DefaultSessionState` for a client session.
+/// This function is a workaround required due to
+/// [rust-lang/rust#29023](https://github.com/rust-lang/rust/issues/29023).
+pub fn default_client_state<S: Stream>() -> DefaultSessionState<Client, S> {
+    DefaultSessionState::<Client, S>::new()
+}
+/// Create a new `DefaultSessionState` for a server session.
+/// This function is a workaround required due to
+/// [rust-lang/rust#29023](https://github.com/rust-lang/rust/issues/29023).
+pub fn default_server_state<S: Stream>() -> DefaultSessionState<Server, S> {
+    DefaultSessionState::<Server, S>::new()
+}
+
+impl<T, S> SessionState for DefaultSessionState<T, S> where S: Stream {
     type Stream = S;
 
-    #[inline]
-    fn insert_stream(&mut self, stream: Self::Stream) {
-        self.streams.insert(stream.id(), stream);
+    fn insert_outgoing(&mut self, stream: Self::Stream) -> StreamId {
+        let id = self.next_stream_id;
+        self.streams.insert(id, stream);
+        self.next_stream_id += 2;
+        id
+    }
+
+    fn insert_incoming(&mut self, stream_id: StreamId, stream: Self::Stream) -> Result<(), ()> {
+        match self.validate_incoming_parity(stream_id) {
+            false => Err(()),
+            true => {
+                // TODO(mlalic): Assert that the stream IDs are monotonically increasing!
+                self.streams.insert(stream_id, stream);
+                Ok(())
+            },
+        }
     }
 
     #[inline]
@@ -129,7 +222,7 @@ impl<S> SessionState for DefaultSessionState<S> where S: Stream {
 
     #[inline]
     fn iter(&mut self) -> StreamIter<S> {
-        StreamIter(Box::new(self.streams.iter_mut().map(|(_, s)| s)))
+        StreamIter(Box::new(self.streams.iter_mut()))
     }
 }
 
@@ -204,8 +297,6 @@ pub trait Stream {
     /// into the buffer and that more data might follow on the stream.
     fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError>;
 
-    /// Returns the ID of the stream.
-    fn id(&self) -> StreamId;
     /// Returns the current state of the stream.
     fn state(&self) -> StreamState;
 
@@ -302,9 +393,6 @@ impl Stream for DefaultStream {
     }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
 
-    fn id(&self) -> StreamId {
-        self.stream_id
-    }
     fn state(&self) -> StreamState { self.state }
 
     fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
@@ -343,46 +431,91 @@ mod tests {
         DefaultStream,
         StreamDataChunk, StreamDataError,
         SessionState,
+        Parity,
+        Client as ClientMarker,
+        Server as ServerMarker,
     };
     use http::tests::common::TestStream;
+
+    /// Checks that the `Parity` struct indeed works as advertised.
+    #[test]
+    fn test_parity_sanity_check() {
+        assert_eq!(Parity::of(1), Parity::Odd);
+        assert_eq!(Parity::of(2), Parity::Even);
+        assert_eq!(Parity::of(301), Parity::Odd);
+        assert_eq!(Parity::of(418), Parity::Even);
+    }
+
+    /// Tests that the `DefaultSessionState` when instantiated in client-mode correctly assigns
+    /// stream IDs.
+    #[test]
+    fn test_default_session_state_client() {
+        let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+        // Outgoing streams are odd-numbered...
+        assert_eq!(state.insert_outgoing(TestStream::new(1)), 1);
+        assert_eq!(state.insert_outgoing(TestStream::new(1)), 3);
+        // ...while incoming are only allowed to be even-numbered.
+        assert!(state.insert_incoming(2, TestStream::new(1)).is_ok());
+        assert!(state.insert_incoming(3, TestStream::new(1)).is_err());
+    }
+
+    /// Tests that the `DefaultSessionState` when instantiated in server-mode correctly assigns
+    /// stream IDs.
+    #[test]
+    fn test_default_session_state_server() {
+        let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
+        // Outgoing streams are even-numbered...
+        assert_eq!(state.insert_outgoing(TestStream::new(1)), 2);
+        assert_eq!(state.insert_outgoing(TestStream::new(1)), 4);
+        // ...while incoming are only allowed to be odd-numbered.
+        assert!(state.insert_incoming(2, TestStream::new(1)).is_err());
+        assert!(state.insert_incoming(3, TestStream::new(1)).is_ok());
+    }
 
     /// Tests for the `DefaultSessionState` implementation of the `SessionState` trait.
     #[test]
     fn test_default_session_state() {
-        fn new_mock_state() -> DefaultSessionState<TestStream> { DefaultSessionState::new() }
+        fn new_mock_state() -> DefaultSessionState<ClientMarker, TestStream> {
+            DefaultSessionState::<ClientMarker, _>::new()
+        }
 
         {
             // Test insert
             let mut state = new_mock_state();
-            state.insert_stream(TestStream::new(1));
-            assert_eq!(state.get_stream_ref(1).unwrap().id(), 1);
+            let assigned_id = state.insert_outgoing(TestStream::new(1));
+            assert_eq!(assigned_id, 1);
         }
         {
-            // Test remove
+            // Test remove: known stream ID
             let mut state = new_mock_state();
-            state.insert_stream(TestStream::new(101));
+            let id = state.insert_outgoing(TestStream::new(101));
 
-            let stream = state.remove_stream(101).unwrap();
+            let _ = state.remove_stream(id).unwrap();
+        }
+        {
+            // Test remove: unknown stream ID
+            let mut state = new_mock_state();
+            state.insert_outgoing(TestStream::new(101));
 
-            assert_eq!(101, stream.id());
+            assert!(state.remove_stream(101).is_none());
         }
         {
             // Test get stream -- unknown ID
             let mut state = new_mock_state();
-            state.insert_stream(TestStream::new(1));
+            state.insert_outgoing(TestStream::new(1));
             assert!(state.get_stream_ref(3).is_none());
         }
         {
             // Test iterate
-            let mut state = new_mock_state();
-            state.insert_stream(TestStream::new(1));
-            state.insert_stream(TestStream::new(7));
-            state.insert_stream(TestStream::new(3));
+            let mut state: DefaultSessionState<ClientMarker, TestStream> = new_mock_state();
+            state.insert_outgoing(TestStream::new(1));
+            state.insert_outgoing(TestStream::new(7));
+            state.insert_outgoing(TestStream::new(3));
 
-            let mut streams: Vec<_> = state.iter().collect();
-            streams.sort_by(|s1, s2| s1.id().cmp(&s2.id()));
+            let mut stream_ids: Vec<_> = state.iter().map(|(&id, _)| id).collect();
+            stream_ids.sort();
 
-            assert_eq!(vec![1, 3, 7], streams.into_iter().map(|s| s.id()).collect::<Vec<_>>());
+            assert_eq!(vec![1, 3, 5], stream_ids);
         }
         {
             // Test iterate on an empty state
@@ -393,21 +526,19 @@ mod tests {
         {
             // Test `get_closed`
             let mut state = new_mock_state();
-            state.insert_stream(TestStream::new(1));
-            state.insert_stream(TestStream::new(7));
-            state.insert_stream(TestStream::new(3));
+            state.insert_outgoing(TestStream::new(1));
+            state.insert_outgoing(TestStream::new(7));
+            state.insert_outgoing(TestStream::new(3));
             // Close some streams now
             state.get_stream_mut(1).unwrap().close();
-            state.get_stream_mut(7).unwrap().close();
+            state.get_stream_mut(5).unwrap().close();
 
-            let mut closed = state.get_closed();
+            let closed = state.get_closed();
 
             // Only one stream left
             assert_eq!(state.streams.len(), 1);
             // Both of the closed streams extracted into the `closed` Vec.
             assert_eq!(closed.len(), 2);
-            closed.sort_by(|s1, s2| s1.id().cmp(&s2.id()));
-            assert_eq!(vec![1, 7], closed.into_iter().map(|s| s.id()).collect::<Vec<_>>());
         }
     }
 

@@ -19,6 +19,7 @@ use http::session::{
     Stream,
     DefaultStream,
     DefaultSessionState,
+    Server as ServerMarker,
 };
 use http::priority::SimplePrioritizer;
 
@@ -81,7 +82,9 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         // New stream initiated by the client
         let mut stream = self.factory.create(stream_id);
         stream.set_headers(headers);
-        self.state.insert_stream(stream);
+        // TODO(mlalic): Once the `Session` trait is able to signal connection failure, handle
+        //               the error case here and return the corresponding protocol error.
+        let _ = self.state.insert_incoming(stream_id, stream);
     }
 
     fn end_of_stream(&mut self, stream_id: StreamId) {
@@ -99,7 +102,7 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
 
 /// The struct provides a more convenient API for server-related functionality of an HTTP/2
 /// connection, such as sending a response back to the client.
-pub struct ServerConnection<S, R, F, State=DefaultSessionState<DefaultStream>>
+pub struct ServerConnection<S, R, F, State=DefaultSessionState<ServerMarker, DefaultStream>>
         where S: SendFrame,
               R: ReceiveFrame,
               State: SessionState,
@@ -199,12 +202,18 @@ mod tests {
 
     use http::tests::common::{TestStream, TestStreamFactory};
 
-    use http::session::{DefaultSessionState, SessionState, Stream, Session};
+    use http::session::{
+        DefaultSessionState,
+        SessionState,
+        Stream,
+        Session,
+        Server as ServerMarker,
+    };
 
     /// Tests that the `ServerSession` correctly manages the stream state.
     #[test]
     fn test_server_session() {
-        let mut state = DefaultSessionState::<TestStream>::new();
+        let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
 
         // Receiving new headers results in a new stream being created
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];

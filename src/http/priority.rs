@@ -50,16 +50,16 @@ impl<'a, 'b, State> DataPrioritizer for SimplePrioritizer<'a, 'b, State>
         where State: SessionState +'a {
     fn get_next_chunk(&mut self) -> HttpResult<Option<DataChunk>> {
         // Returns the data of the first stream that has data to be written.
-        for stream in self.state.iter().filter(|s| !s.is_closed_local()) {
+        for (stream_id, stream) in self.state.iter().filter(|&(_, ref s)| !s.is_closed_local()) {
             let res = stream.get_data_chunk(self.buf);
             match res {
                 Ok(StreamDataChunk::Last(total)) => {
                     return Ok(Some(DataChunk::new_borrowed(
-                                &self.buf[..total], stream.id(), EndStream::Yes)));
+                                &self.buf[..total], *stream_id, EndStream::Yes)));
                 },
                 Ok(StreamDataChunk::Chunk(total)) => {
                     return Ok(Some(DataChunk::new_borrowed(
-                                &self.buf[..total], stream.id(), EndStream::No)));
+                                &self.buf[..total], *stream_id, EndStream::No)));
                 },
                 Ok(StreamDataChunk::Unavailable) => {
                     // Stream is still open, but currently has no data that could be sent.
@@ -85,14 +85,14 @@ impl<'a, 'b, State> DataPrioritizer for SimplePrioritizer<'a, 'b, State>
 #[cfg(test)]
 mod tests {
     use super::{DataPrioritizer, SimplePrioritizer};
-    use http::session::{DefaultSessionState, SessionState};
+    use http::session::{DefaultSessionState, SessionState, Client as ClientMarker};
 
     use http::tests::common::TestStream;
 
     #[test]
     fn test_simple_prioritizer() {
-        fn prepare_state() -> DefaultSessionState<TestStream> {
-            DefaultSessionState::new()
+        fn prepare_state() -> DefaultSessionState<ClientMarker, TestStream> {
+            DefaultSessionState::<ClientMarker, _>::new()
         }
 
         {
@@ -111,7 +111,7 @@ mod tests {
             let mut state = prepare_state();
             let mut stream = TestStream::new(1);
             stream.set_outgoing(vec![1, 2, 3]);
-            state.insert_stream(stream);
+            state.insert_outgoing(stream);
             let mut prioritizer = SimplePrioritizer::new(&mut state, &mut buf);
 
             {
@@ -128,7 +128,7 @@ mod tests {
             let mut state = prepare_state();
             let mut stream = TestStream::new(1);
             stream.set_outgoing(vec![1, 2, 3]);
-            state.insert_stream(stream);
+            state.insert_outgoing(stream);
             let mut prioritizer = SimplePrioritizer::new(&mut state, &mut buf);
 
             {
@@ -150,7 +150,7 @@ mod tests {
             for id in 0..3 {
                 let mut stream = TestStream::new(id);
                 stream.set_outgoing(vec![1, 2, 3]);
-                state.insert_stream(stream);
+                state.insert_outgoing(stream);
             }
 
             // In total, we get 3 frames; we don't know anything about the order of the streams,

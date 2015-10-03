@@ -19,6 +19,7 @@ use http::session::{
     Session,
     Stream, DefaultStream,
     DefaultSessionState, SessionState,
+    Client as ClientMarker,
 };
 use http::priority::SimplePrioritizer;
 
@@ -173,7 +174,7 @@ pub struct RequestStream<S> where S: Stream {
 
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
 /// `start_request`) and wires the `HttpConnection` to the client `Session` callbacks.
-pub struct ClientConnection<S, R, State=DefaultSessionState<DefaultStream>>
+pub struct ClientConnection<S, R, State=DefaultSessionState<ClientMarker, DefaultStream>>
         where S: SendFrame, R: ReceiveFrame, State: SessionState {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
@@ -232,13 +233,12 @@ impl<S, R, State> ClientConnection<S, R, State>
     /// Starts a new request based on the given `RequestStream`.
     ///
     /// For now it does not perform any validation whether the given `RequestStream` is valid.
-    pub fn start_request(&mut self, req: RequestStream<State::Stream>) -> HttpResult<()> {
+    pub fn start_request(&mut self, req: RequestStream<State::Stream>) -> HttpResult<StreamId> {
         let end_stream = if req.stream.is_closed_local() { EndStream::Yes } else { EndStream::No };
-        try!(self.conn.send_headers(req.headers, req.stream.id(), end_stream));
-        // Start tracking the stream if the headers are queued successfully.
-        self.state.insert_stream(req.stream);
+        let stream_id = self.state.insert_outgoing(req.stream);
+        try!(self.conn.send_headers(req.headers, stream_id, end_stream));
 
-        Ok(())
+        Ok(stream_id)
     }
 
     /// Fully handles the next incoming frame. Events are passed on to the internal `session`
@@ -360,7 +360,13 @@ mod tests {
         HttpFrame,
         SendStatus,
     };
-    use http::session::{Session, SessionState, Stream, DefaultSessionState};
+    use http::session::{
+        Session,
+        SessionState,
+        Stream,
+        DefaultSessionState,
+        Client as ClientMarker,
+    };
 
     /// Tests that a client connection is correctly initialized, by reading the
     /// server preface (i.e. a settings frame) as the first frame of the connection.
@@ -417,14 +423,14 @@ mod tests {
         {
             // A locally closed stream (i.e. nothing to send)
             let mut conn = build_mock_client_conn(vec![]);
-            conn.state.insert_stream(prepare_stream(1, None));
+            conn.state.insert_outgoing(prepare_stream(1, None));
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // A stream with some data
             let mut conn = build_mock_client_conn(vec![]);
-            conn.state.insert_stream(prepare_stream(1, Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(1, Some(vec![1, 2, 3])));
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Sent);
 
@@ -435,9 +441,9 @@ mod tests {
         {
             // Multiple streams with data
             let mut conn = build_mock_client_conn(vec![]);
-            conn.state.insert_stream(prepare_stream(1, Some(vec![1, 2, 3])));
-            conn.state.insert_stream(prepare_stream(3, Some(vec![1, 2, 3])));
-            conn.state.insert_stream(prepare_stream(5, Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(1, Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(3, Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(5, Some(vec![1, 2, 3])));
             for _ in 0..3 {
                 let res = conn.send_next_data().unwrap();
                 assert_eq!(res, SendStatus::Sent);
@@ -509,8 +515,8 @@ mod tests {
     /// in the same time...
     #[test]
     fn test_client_session_notifies_stream() {
-        let mut state = DefaultSessionState::<TestStream>::new();
-        state.insert_stream(TestStream::new(1));
+        let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+        state.insert_outgoing(TestStream::new(1));
 
         {
             // Registering some data to stream 1...
@@ -535,7 +541,7 @@ mod tests {
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
                    headers);
         // Add another stream in the mix
-        state.insert_stream(TestStream::new(3));
+        state.insert_outgoing(TestStream::new(3));
         {
             // and send it some data
             let mut session = ClientSession::new(&mut state);
@@ -556,7 +562,6 @@ mod tests {
         // The closed stream is returned...
         let closed = state.get_closed();
         assert_eq!(closed.len(), 1);
-        assert_eq!(closed[0].id(), 1);
         // ...and is also removed from the session!
         assert_eq!(state.iter().collect::<Vec<_>>().len(), 1);
     }

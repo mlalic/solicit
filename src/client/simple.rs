@@ -3,7 +3,13 @@
 use http::{StreamId, HttpResult, HttpError, Response, Header};
 use http::transport::TransportStream;
 use http::connection::{HttpConnection, SendStatus};
-use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
+use http::session::{
+    SessionState,
+    DefaultSessionState,
+    DefaultStream,
+    Stream,
+    Client as ClientMarker,
+};
 use http::client::{ClientConnection, HttpConnect, RequestStream};
 
 /// A struct implementing a simple HTTP/2 client.
@@ -109,8 +115,9 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// client preface.
     pub fn with_connection(conn: HttpConnection<S, S>, host: String)
             -> HttpResult<SimpleClient<S>> {
+        let state = DefaultSessionState::<ClientMarker, _>::new();
         let mut client = SimpleClient {
-            conn: ClientConnection::with_connection(conn, DefaultSessionState::new()),
+            conn: ClientConnection::with_connection(conn, state),
             next_stream_id: 1,
             host: host.as_bytes().to_vec(),
         };
@@ -160,10 +167,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
             -> HttpResult<StreamId> {
         // Prepares the request stream
         let stream = self.new_stream(method, path, extras, body);
-        // Remember the stream's ID before passing on the ownership to the connection
-        let stream_id = stream.stream.id();
         // Starts the request (i.e. sends out the headers)
-        try!(self.conn.start_request(stream));
+        let stream_id = try!(self.conn.start_request(stream));
 
         // And now makes sure the data is sent out...
         // Note: Since for now there is no flow control, sending data will always continue
@@ -196,7 +201,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
             if let Some(stream) = self.conn.state.get_stream_ref(stream_id) {
                 if stream.is_closed() {
                     return Ok(Response {
-                        stream_id: stream.id(),
+                        stream_id: stream_id,
                         headers: stream.headers.clone().unwrap(),
                         body: stream.body.clone(),
                     });

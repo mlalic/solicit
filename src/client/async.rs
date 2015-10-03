@@ -14,7 +14,13 @@ use http::{StreamId, HttpError, Response, Header, HttpResult};
 use http::frame::RawFrame;
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnection};
-use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
+use http::session::{
+    SessionState,
+    DefaultSessionState,
+    DefaultStream,
+    Stream,
+    Client as ClientMarker,
+};
 use http::client::{ClientConnection, HttpConnect, ClientStream, RequestStream};
 
 /// A struct representing an asynchronously dispatched request. It is used
@@ -316,7 +322,7 @@ impl ClientService {
                     send_handle,
                     recv_handle,
                     scheme),
-                DefaultSessionState::new());
+                DefaultSessionState::<ClientMarker, _>::new());
 
         let service = ClientService {
             next_stream_id: 1,
@@ -440,10 +446,10 @@ impl ClientService {
     fn send_request(&mut self, async_req: AsyncRequest) {
         let (req, tx) = self.create_request(async_req);
 
-        debug!("Sending new request... id = {}", req.stream.id());
+        trace!("Sending new request...");
 
-        self.chans.insert(req.stream.id(), tx);
-        self.conn.start_request(req).ok().unwrap();
+        let stream_id = self.conn.start_request(req).ok().unwrap();
+        self.chans.insert(stream_id, tx);
         self.outstanding_reqs += 1;
     }
 

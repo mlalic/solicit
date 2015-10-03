@@ -20,6 +20,7 @@ use http::session::{
     Stream,
     StreamState,
     StreamDataChunk, StreamDataError,
+    Client as ClientMarker,
 };
 use http::priority::DataPrioritizer;
 use http::transport::TransportStream;
@@ -346,7 +347,6 @@ impl Stream for TestStream {
         Ok(chunk)
     }
 
-    fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
 }
 
@@ -387,12 +387,12 @@ impl DataPrioritizer for StubDataPrioritizer {
 /// A type alias for a `ClientConnection` with mock replacements for its dependent types.
 pub type MockClientConnection = ClientConnection<MockSendFrame,
                                                  MockReceiveFrame,
-                                                 DefaultSessionState<TestStream>>;
+                                                 DefaultSessionState<ClientMarker, TestStream>>;
 
 /// Returns a `ClientConnection` suitable for use in tests.
 #[inline]
 pub fn build_mock_client_conn(frames: Vec<HttpFrame>) -> MockClientConnection {
     ClientConnection::with_connection(
         build_mock_http_conn(frames),
-        DefaultSessionState::<TestStream>::new())
+        DefaultSessionState::<ClientMarker, TestStream>::new())
 }

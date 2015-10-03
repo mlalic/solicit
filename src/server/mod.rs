@@ -3,7 +3,13 @@
 use http::{Response, HttpResult, HttpError, HttpScheme, Header, StreamId};
 use http::transport::TransportStream;
 use http::connection::{HttpConnection, EndStream, SendStatus};
-use http::session::{DefaultSessionState, SessionState, Stream, DefaultStream};
+use http::session::{
+    DefaultSessionState,
+    SessionState,
+    Stream,
+    DefaultStream,
+    Server as ServerMarker,
+};
 use http::server::{ServerConnection, StreamFactory};
 
 /// The struct represents a fully received request.
@@ -97,8 +103,10 @@ impl<TS, H> SimpleServer<TS, H>
         }
 
         let conn = HttpConnection::<TS, TS>::with_stream(stream, HttpScheme::Http);
+        let state = DefaultSessionState::<ServerMarker, _>::new();
+        let conn = ServerConnection::with_connection(conn, state, SimpleFactory);
         let mut server = SimpleServer {
-            conn: ServerConnection::with_connection(conn, DefaultSessionState::new(), SimpleFactory),
+            conn: conn,
             handler: handler,
         };
 
@@ -128,14 +136,18 @@ impl<TS, H> SimpleServer<TS, H>
     /// into the returned `Vec`.
     fn handle_requests(&mut self) -> HttpResult<Vec<Response>> {
         let handler = &mut self.handler;
-        Ok(self.conn.state.iter().filter(|s| s.is_closed_remote()).map(|stream| {
+        let closed = self.conn.state.iter()
+                       .filter(|&(_, ref s)| s.is_closed_remote());
+        let responses = closed.map(|(&stream_id, stream)| {
             let req = ServerRequest {
-                stream_id: stream.stream_id,
+                stream_id: stream_id,
                 headers: stream.headers.as_ref().unwrap(),
                 body: &stream.body,
             };
             handler(req)
-        }).collect())
+        });
+
+        Ok(responses.collect())
     }
 
     /// Prepares the streams for each of the given responses. Headers for each response are
