@@ -452,11 +452,11 @@ mod tests {
     fn test_default_session_state_client() {
         let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
         // Outgoing streams are odd-numbered...
-        assert_eq!(state.insert_outgoing(TestStream::new(1)), 1);
-        assert_eq!(state.insert_outgoing(TestStream::new(1)), 3);
+        assert_eq!(state.insert_outgoing(TestStream::new()), 1);
+        assert_eq!(state.insert_outgoing(TestStream::new()), 3);
         // ...while incoming are only allowed to be even-numbered.
-        assert!(state.insert_incoming(2, TestStream::new(1)).is_ok());
-        assert!(state.insert_incoming(3, TestStream::new(1)).is_err());
+        assert!(state.insert_incoming(2, TestStream::new()).is_ok());
+        assert!(state.insert_incoming(3, TestStream::new()).is_err());
     }
 
     /// Tests that the `DefaultSessionState` when instantiated in server-mode correctly assigns
@@ -465,11 +465,11 @@ mod tests {
     fn test_default_session_state_server() {
         let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
         // Outgoing streams are even-numbered...
-        assert_eq!(state.insert_outgoing(TestStream::new(1)), 2);
-        assert_eq!(state.insert_outgoing(TestStream::new(1)), 4);
+        assert_eq!(state.insert_outgoing(TestStream::new()), 2);
+        assert_eq!(state.insert_outgoing(TestStream::new()), 4);
         // ...while incoming are only allowed to be odd-numbered.
-        assert!(state.insert_incoming(2, TestStream::new(1)).is_err());
-        assert!(state.insert_incoming(3, TestStream::new(1)).is_ok());
+        assert!(state.insert_incoming(2, TestStream::new()).is_err());
+        assert!(state.insert_incoming(3, TestStream::new()).is_ok());
     }
 
     /// Tests for the `DefaultSessionState` implementation of the `SessionState` trait.
@@ -482,35 +482,35 @@ mod tests {
         {
             // Test insert
             let mut state = new_mock_state();
-            let assigned_id = state.insert_outgoing(TestStream::new(1));
+            let assigned_id = state.insert_outgoing(TestStream::new());
             assert_eq!(assigned_id, 1);
         }
         {
             // Test remove: known stream ID
             let mut state = new_mock_state();
-            let id = state.insert_outgoing(TestStream::new(101));
+            let id = state.insert_outgoing(TestStream::new());
 
             let _ = state.remove_stream(id).unwrap();
         }
         {
             // Test remove: unknown stream ID
             let mut state = new_mock_state();
-            state.insert_outgoing(TestStream::new(101));
+            state.insert_outgoing(TestStream::new());
 
             assert!(state.remove_stream(101).is_none());
         }
         {
             // Test get stream -- unknown ID
             let mut state = new_mock_state();
-            state.insert_outgoing(TestStream::new(1));
+            state.insert_outgoing(TestStream::new());
             assert!(state.get_stream_ref(3).is_none());
         }
         {
             // Test iterate
-            let mut state: DefaultSessionState<ClientMarker, TestStream> = new_mock_state();
-            state.insert_outgoing(TestStream::new(1));
-            state.insert_outgoing(TestStream::new(7));
-            state.insert_outgoing(TestStream::new(3));
+            let mut state = new_mock_state();
+            state.insert_outgoing(TestStream::new());
+            state.insert_outgoing(TestStream::new());
+            state.insert_outgoing(TestStream::new());
 
             let mut stream_ids: Vec<_> = state.iter().map(|(&id, _)| id).collect();
             stream_ids.sort();
@@ -526,9 +526,9 @@ mod tests {
         {
             // Test `get_closed`
             let mut state = new_mock_state();
-            state.insert_outgoing(TestStream::new(1));
-            state.insert_outgoing(TestStream::new(7));
-            state.insert_outgoing(TestStream::new(3));
+            state.insert_outgoing(TestStream::new());
+            state.insert_outgoing(TestStream::new());
+            state.insert_outgoing(TestStream::new());
             // Close some streams now
             state.get_stream_mut(1).unwrap().close();
             state.get_stream_mut(5).unwrap().close();

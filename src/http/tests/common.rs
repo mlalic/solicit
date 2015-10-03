@@ -291,7 +291,6 @@ impl Session for TestSession {
 
 /// A stream that can be used for testing purposes.
 pub struct TestStream {
-    pub id: StreamId,
     pub body: Vec<u8>,
     pub headers: Option<Vec<Header>>,
     pub state: StreamState,
@@ -299,9 +298,8 @@ pub struct TestStream {
 }
 
 impl TestStream {
-    pub fn new(stream_id: StreamId) -> TestStream {
+    pub fn new() -> TestStream {
         TestStream {
-            id: stream_id,
             body: Vec::new(),
             headers: None,
             state: StreamState::Open,
@@ -353,8 +351,8 @@ impl Stream for TestStream {
 pub struct TestStreamFactory;
 impl StreamFactory for TestStreamFactory {
     type Stream = TestStream;
-    fn create(&mut self, id: StreamId) -> TestStream {
-        TestStream::new(id)
+    fn create(&mut self, _id: StreamId) -> TestStream {
+        TestStream::new()
     }
 }
 

@@ -109,7 +109,7 @@ mod tests {
             // One stream, one chunk
             let mut buf = [0; 5];
             let mut state = prepare_state();
-            let mut stream = TestStream::new(1);
+            let mut stream = TestStream::new();
             stream.set_outgoing(vec![1, 2, 3]);
             state.insert_outgoing(stream);
             let mut prioritizer = SimplePrioritizer::new(&mut state, &mut buf);
@@ -126,7 +126,7 @@ mod tests {
             // One stream, two chunks
             let mut buf = [0; 2];
             let mut state = prepare_state();
-            let mut stream = TestStream::new(1);
+            let mut stream = TestStream::new();
             stream.set_outgoing(vec![1, 2, 3]);
             state.insert_outgoing(stream);
             let mut prioritizer = SimplePrioritizer::new(&mut state, &mut buf);
@@ -147,8 +147,8 @@ mod tests {
             // Multiple streams
             let mut buf = [0; 10];
             let mut state = prepare_state();
-            for id in 0..3 {
-                let mut stream = TestStream::new(id);
+            for _ in 0..3 {
+                let mut stream = TestStream::new();
                 stream.set_outgoing(vec![1, 2, 3]);
                 state.insert_outgoing(stream);
             }

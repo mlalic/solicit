@@ -344,7 +344,6 @@ mod tests {
 
     use std::mem;
 
-    use http::StreamId;
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
@@ -401,8 +400,8 @@ mod tests {
     }
 
     /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
-    fn prepare_stream(id: StreamId, data: Option<Vec<u8>>) -> TestStream {
-        let mut stream = TestStream::new(id);
+    fn prepare_stream(data: Option<Vec<u8>>) -> TestStream {
+        let mut stream = TestStream::new();
         match data {
             None => stream.close_local(),
             Some(d) => stream.set_outgoing(d),
@@ -423,14 +422,14 @@ mod tests {
         {
             // A locally closed stream (i.e. nothing to send)
             let mut conn = build_mock_client_conn(vec![]);
-            conn.state.insert_outgoing(prepare_stream(1, None));
+            conn.state.insert_outgoing(prepare_stream(None));
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // A stream with some data
             let mut conn = build_mock_client_conn(vec![]);
-            conn.state.insert_outgoing(prepare_stream(1, Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Sent);
 
@@ -441,9 +440,9 @@ mod tests {
         {
             // Multiple streams with data
             let mut conn = build_mock_client_conn(vec![]);
-            conn.state.insert_outgoing(prepare_stream(1, Some(vec![1, 2, 3])));
-            conn.state.insert_outgoing(prepare_stream(3, Some(vec![1, 2, 3])));
-            conn.state.insert_outgoing(prepare_stream(5, Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
+            conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             for _ in 0..3 {
                 let res = conn.send_next_data().unwrap();
                 assert_eq!(res, SendStatus::Sent);
@@ -465,7 +464,7 @@ mod tests {
                 headers: vec![
                     (b":method".to_vec(), b"GET".to_vec()),
                 ],
-                stream: prepare_stream(1, None),
+                stream: prepare_stream(None),
             }).unwrap();
 
             // The stream is in the connection state?
@@ -489,7 +488,7 @@ mod tests {
                 headers: vec![
                     (b":method".to_vec(), b"POST".to_vec()),
                 ],
-                stream: prepare_stream(1, Some(vec![1, 2, 3])),
+                stream: prepare_stream(Some(vec![1, 2, 3])),
             }).unwrap();
 
             // The stream is in the connection state?
@@ -516,7 +515,7 @@ mod tests {
     #[test]
     fn test_client_session_notifies_stream() {
         let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
-        state.insert_outgoing(TestStream::new(1));
+        state.insert_outgoing(TestStream::new());
 
         {
             // Registering some data to stream 1...
@@ -541,7 +540,7 @@ mod tests {
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
                    headers);
         // Add another stream in the mix
-        state.insert_outgoing(TestStream::new(3));
+        state.insert_outgoing(TestStream::new());
         {
             // and send it some data
             let mut session = ClientSession::new(&mut state);
