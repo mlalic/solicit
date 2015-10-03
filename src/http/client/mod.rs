@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn test_client_session_notifies_stream() {
         let mut state = DefaultSessionState::<TestStream>::new();
-        state.insert_stream(Stream::new(1));
+        state.insert_stream(TestStream::new(1));
 
         {
             // Registering some data to stream 1...
@@ -535,7 +535,7 @@ mod tests {
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
                    headers);
         // Add another stream in the mix
-        state.insert_stream(Stream::new(3));
+        state.insert_stream(TestStream::new(3));
         {
             // and send it some data
             let mut session = ClientSession::new(&mut state);

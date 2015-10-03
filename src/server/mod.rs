@@ -3,14 +3,24 @@
 use http::{Response, HttpResult, HttpError, HttpScheme, Header, StreamId};
 use http::transport::TransportStream;
 use http::connection::{HttpConnection, EndStream, SendStatus};
-use http::session::{DefaultSessionState, SessionState, Stream};
-use http::server::ServerConnection;
+use http::session::{DefaultSessionState, SessionState, Stream, DefaultStream};
+use http::server::{ServerConnection, StreamFactory};
 
 /// The struct represents a fully received request.
 pub struct ServerRequest<'a> {
     pub stream_id: StreamId,
     pub headers: &'a [Header],
     pub body: &'a [u8],
+}
+
+/// A simple implementation of the `http::server::StreamFactory` trait that creates new
+/// `DefaultStream` instances.
+struct SimpleFactory;
+impl StreamFactory for SimpleFactory {
+    type Stream = DefaultStream;
+    fn create(&mut self, id: StreamId) -> DefaultStream {
+        DefaultStream::new(id)
+    }
 }
 
 /// The struct implements a simple HTTP/2 server that allows users to register a request handler (a
@@ -70,7 +80,7 @@ pub struct ServerRequest<'a> {
 /// }
 /// ```
 pub struct SimpleServer<TS, H> where TS: TransportStream, H: FnMut(ServerRequest) -> Response {
-    conn: ServerConnection<TS, TS>,
+    conn: ServerConnection<TS, TS, SimpleFactory>,
     handler: H,
 }
 
@@ -88,7 +98,7 @@ impl<TS, H> SimpleServer<TS, H>
 
         let conn = HttpConnection::<TS, TS>::with_stream(stream, HttpScheme::Http);
         let mut server = SimpleServer {
-            conn: ServerConnection::with_connection(conn, DefaultSessionState::new()),
+            conn: ServerConnection::with_connection(conn, DefaultSessionState::new(), SimpleFactory),
             handler: handler,
         };
 

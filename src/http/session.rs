@@ -181,8 +181,6 @@ pub enum StreamDataChunk {
 /// sent to the peer, without having to worry about the lower-level details of session and
 /// connection management (e.g. handling raw frames or tracking stream status).
 pub trait Stream {
-    /// Create a new stream with the given ID
-    fn new(stream_id: StreamId) -> Self;
     /// Handle a new data chunk that has arrived for the stream.
     fn new_data_chunk(&mut self, data: &[u8]);
     /// Set headers for a stream. A stream is only allowed to have one set of
@@ -295,10 +293,6 @@ impl DefaultStream {
 }
 
 impl Stream for DefaultStream {
-    fn new(stream_id: StreamId) -> DefaultStream {
-        DefaultStream::new(stream_id)
-    }
-
     fn new_data_chunk(&mut self, data: &[u8]) {
         self.body.extend(data.to_vec().into_iter());
     }
@@ -360,13 +354,13 @@ mod tests {
         {
             // Test insert
             let mut state = new_mock_state();
-            state.insert_stream(Stream::new(1));
+            state.insert_stream(TestStream::new(1));
             assert_eq!(state.get_stream_ref(1).unwrap().id(), 1);
         }
         {
             // Test remove
             let mut state = new_mock_state();
-            state.insert_stream(Stream::new(101));
+            state.insert_stream(TestStream::new(101));
 
             let stream = state.remove_stream(101).unwrap();
 
@@ -375,15 +369,15 @@ mod tests {
         {
             // Test get stream -- unknown ID
             let mut state = new_mock_state();
-            state.insert_stream(Stream::new(1));
+            state.insert_stream(TestStream::new(1));
             assert!(state.get_stream_ref(3).is_none());
         }
         {
             // Test iterate
             let mut state = new_mock_state();
-            state.insert_stream(Stream::new(1));
-            state.insert_stream(Stream::new(7));
-            state.insert_stream(Stream::new(3));
+            state.insert_stream(TestStream::new(1));
+            state.insert_stream(TestStream::new(7));
+            state.insert_stream(TestStream::new(3));
 
             let mut streams: Vec<_> = state.iter().collect();
             streams.sort_by(|s1, s2| s1.id().cmp(&s2.id()));
@@ -399,9 +393,9 @@ mod tests {
         {
             // Test `get_closed`
             let mut state = new_mock_state();
-            state.insert_stream(Stream::new(1));
-            state.insert_stream(Stream::new(7));
-            state.insert_stream(Stream::new(3));
+            state.insert_stream(TestStream::new(1));
+            state.insert_stream(TestStream::new(7));
+            state.insert_stream(TestStream::new(3));
             // Close some streams now
             state.get_stream_mut(1).unwrap().close();
             state.get_stream_mut(7).unwrap().close();

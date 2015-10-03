@@ -22,21 +22,40 @@ use http::session::{
 };
 use http::priority::SimplePrioritizer;
 
-/// An implementation of the `Session` trait for a server-side HTTP/2 connection.
-pub struct ServerSession<'a, State> where State: SessionState + 'a {
-    state: &'a mut State,
+/// The `ServerSession` requires an instance of a type that implements this trait in order to
+/// create a new `Stream` instance once it detects that a client has initiated a new stream. The
+/// factory should take care to provide an appropriate `Stream` implementation that will be able to
+/// handle reading the request and generating the response, according to the needs of the
+/// underlying application.
+pub trait StreamFactory {
+    type Stream: Stream;
+    /// Create a new `Stream` with the given ID.
+    fn create(&mut self, id: StreamId) -> Self::Stream;
 }
 
-impl<'a, State> ServerSession<'a, State> where State: SessionState + 'a {
+/// An implementation of the `Session` trait for a server-side HTTP/2 connection.
+pub struct ServerSession<'a, State, F>
+        where State: SessionState + 'a,
+              F: StreamFactory<Stream=State::Stream> + 'a {
+    state: &'a mut State,
+    factory: &'a mut F,
+}
+
+impl<'a, State, F> ServerSession<'a, State, F>
+        where State: SessionState + 'a,
+              F: StreamFactory<Stream=State::Stream> + 'a {
     #[inline]
-    pub fn new(state: &'a mut State) -> ServerSession<State> {
+    pub fn new(state: &'a mut State, factory: &'a mut F) -> ServerSession<'a, State, F> {
         ServerSession {
             state: state,
+            factory: factory,
         }
     }
 }
 
-impl<'a, State> Session for ServerSession<'a, State> where State: SessionState + 'a {
+impl<'a, State, F> Session for ServerSession<'a, State, F>
+        where State: SessionState + 'a,
+              F: StreamFactory<Stream=State::Stream> + 'a {
     fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
@@ -60,7 +79,7 @@ impl<'a, State> Session for ServerSession<'a, State> where State: SessionState +
             None => {},
         };
         // New stream initiated by the client
-        let mut stream: State::Stream = Stream::new(stream_id);
+        let mut stream = self.factory.create(stream_id);
         stream.set_headers(headers);
         self.state.insert_stream(stream);
     }
@@ -80,25 +99,34 @@ impl<'a, State> Session for ServerSession<'a, State> where State: SessionState +
 
 /// The struct provides a more convenient API for server-related functionality of an HTTP/2
 /// connection, such as sending a response back to the client.
-pub struct ServerConnection<S, R, State=DefaultSessionState<DefaultStream>>
-        where S: SendFrame, R: ReceiveFrame, State: SessionState {
+pub struct ServerConnection<S, R, F, State=DefaultSessionState<DefaultStream>>
+        where S: SendFrame,
+              R: ReceiveFrame,
+              State: SessionState,
+              F: StreamFactory<Stream=State::Stream> {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection<S, R>,
     /// The state of the session associated to this client connection. Maintains the status of the
     /// connection streams.
     pub state: State,
+    /// Creates `Stream` instances for client-initiated streams. This allows the client of the
+    /// `ServerConnection` to implement custom handling of a newly initiated stream.
+    factory: F,
 }
 
-impl<S, R, State> ServerConnection<S, R, State>
-        where S: SendFrame, R: ReceiveFrame, State: SessionState {
+impl<S, R, F, State> ServerConnection<S, R, F, State>
+        where S: SendFrame, R: ReceiveFrame, State: SessionState, F: StreamFactory<Stream=State::Stream> {
     /// Creates a new `ServerConnection` that will use the given `HttpConnection` for its
-    /// underlying HTTP/2 communication.
-    pub fn with_connection(conn: HttpConnection<S, R>, state: State)
-            -> ServerConnection<S, R, State> {
+    /// underlying HTTP/2 communication. The `state` and `factory` represent, respectively, the
+    /// initial state of the connection and an instance of the `StreamFactory` type (allowing the
+    /// client to handle newly created streams).
+    pub fn with_connection(conn: HttpConnection<S, R>, state: State, factory: F)
+            -> ServerConnection<S, R, F, State> {
         ServerConnection {
             conn: conn,
             state: state,
+            factory: factory,
         }
     }
 
@@ -123,7 +151,7 @@ impl<S, R, State> ServerConnection<S, R, State>
     /// Reads and handles the settings frame of the client preface. If the settings frame is not
     /// the next frame received on the underlying connection, returns an error.
     fn read_preface(&mut self) -> HttpResult<()> {
-        let mut session = ServerSession::new(&mut self.state);
+        let mut session = ServerSession::new(&mut self.state, &mut self.factory);
         self.conn.expect_settings(&mut session)
     }
 
@@ -131,7 +159,7 @@ impl<S, R, State> ServerConnection<S, R, State>
     /// instance.
     #[inline]
     pub fn handle_next_frame(&mut self) -> HttpResult<()> {
-        let mut session = ServerSession::new(&mut self.state);
+        let mut session = ServerSession::new(&mut self.state, &mut self.factory);
         self.conn.handle_next_frame(&mut session)
     }
 
@@ -169,7 +197,7 @@ impl<S, R, State> ServerConnection<S, R, State>
 mod tests {
     use super::ServerSession;
 
-    use http::tests::common::TestStream;
+    use http::tests::common::{TestStream, TestStreamFactory};
 
     use http::session::{DefaultSessionState, SessionState, Stream, Session};
 
@@ -181,7 +209,8 @@ mod tests {
         // Receiving new headers results in a new stream being created
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         {
-            let mut session = ServerSession::new(&mut state);
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory);
             session.new_headers(1, headers.clone());
         }
         assert!(state.get_stream_ref(1).is_some());
@@ -189,21 +218,24 @@ mod tests {
                    headers);
         // Now some data arrives on the stream...
         {
-            let mut session = ServerSession::new(&mut state);
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory);
             session.new_data_chunk(1, &[1, 2, 3]);
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
         // Some more data...
         {
-            let mut session = ServerSession::new(&mut state);
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory);
             session.new_data_chunk(1, &[4]);
         }
         // ...all good.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
         // Add another stream in the mix
         {
-            let mut session = ServerSession::new(&mut state);
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory);
             session.new_headers(3, headers.clone());
             session.new_data_chunk(3, &[100]);
         }
@@ -213,7 +245,8 @@ mod tests {
         assert_eq!(state.get_stream_ref(3).unwrap().body, vec![100]);
         {
             // Finally, the stream 1 ends...
-            let mut session = ServerSession::new(&mut state);
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory);
             session.end_of_stream(1);
         }
         // ...and gets closed.

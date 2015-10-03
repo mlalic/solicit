@@ -32,6 +32,7 @@ use http::connection::{
     DataChunk,
 };
 use http::client::ClientConnection;
+use http::server::StreamFactory;
 
 /// A mock `SendFrame` implementation that simply saves all frames that it is to send to a `Vec`.
 pub struct MockSendFrame {
@@ -297,14 +298,7 @@ pub struct TestStream {
 }
 
 impl TestStream {
-    #[inline]
-    pub fn set_outgoing(&mut self, outgoing: Vec<u8>) {
-        self.outgoing = Some(Cursor::new(outgoing));
-    }
-}
-
-impl Stream for TestStream {
-    fn new(stream_id: StreamId) -> TestStream {
+    pub fn new(stream_id: StreamId) -> TestStream {
         TestStream {
             id: stream_id,
             body: Vec::new(),
@@ -313,6 +307,14 @@ impl Stream for TestStream {
             outgoing: None,
         }
     }
+
+    #[inline]
+    pub fn set_outgoing(&mut self, outgoing: Vec<u8>) {
+        self.outgoing = Some(Cursor::new(outgoing));
+    }
+}
+
+impl Stream for TestStream {
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
     fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
@@ -346,6 +348,14 @@ impl Stream for TestStream {
 
     fn id(&self) -> StreamId { self.id }
     fn state(&self) -> StreamState { self.state }
+}
+
+pub struct TestStreamFactory;
+impl StreamFactory for TestStreamFactory {
+    type Stream = TestStream;
+    fn create(&mut self, id: StreamId) -> TestStream {
+        TestStream::new(id)
+    }
 }
 
 /// A `DataPrioritizer` implementation that returns data chunks from a predefined buffer given to
