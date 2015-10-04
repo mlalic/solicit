@@ -245,8 +245,6 @@ enum WorkItem {
 ///       imagined; the async client is (for now) supposed to be a proof-of-concept
 ///       implementation of a high-level async/concurrent HTTP/2 client.
 struct ClientService {
-    /// The ID that will be assigned to the next client-initiated stream.
-    next_stream_id: StreamId,
     /// The number of requests that have been sent, but are yet unanswered.
     outstanding_reqs: u32,
     /// The limit to the number of requests that can be pending (unanswered,
@@ -325,7 +323,6 @@ impl ClientService {
                 DefaultSessionState::<ClientMarker, _>::new());
 
         let service = ClientService {
-            next_stream_id: 1,
             outstanding_reqs: 0,
             limit: 3,
             conn: conn,
@@ -449,6 +446,11 @@ impl ClientService {
         trace!("Sending new request...");
 
         let stream_id = self.conn.start_request(req).ok().unwrap();
+        // The ID has been assigned to the stream, so attach it to the stream instance too.
+        // TODO(mlalic): The `Stream` trait should grow an `on_id_assigned` method which can
+        //               then be called by the session (i.e. the `ClientConnection` in this case).
+        self.conn.state.get_stream_mut(stream_id).unwrap().stream_id = Some(stream_id);
+
         self.chans.insert(stream_id, tx);
         self.outstanding_reqs += 1;
     }
@@ -469,8 +471,7 @@ impl ClientService {
         ].into_iter());
         headers.extend(async_req.headers.into_iter());
 
-        let mut stream = DefaultStream::new(self.next_stream_id);
-        self.next_stream_id += 2;
+        let mut stream = DefaultStream::new();
         match async_req.body {
             Some(body) => stream.set_full_data(body),
             None => stream.close_local(),
@@ -490,7 +491,8 @@ impl ClientService {
     ///
     /// The given `stream` instance is consumed by this method.
     fn send_response(&mut self, stream: DefaultStream) {
-        match self.chans.remove(&stream.stream_id) {
+        let stream_id = stream.stream_id.unwrap();
+        match self.chans.remove(&stream_id) {
             None => {
                 // This should never happen, it means the session gave us
                 // a response that we didn't request.
@@ -498,7 +500,7 @@ impl ClientService {
             },
             Some(tx) => {
                 let _ = tx.send(Response {
-                    stream_id: stream.stream_id,
+                    stream_id: stream_id,
                     headers: stream.headers.unwrap(),
                     body: stream.body,
                 });

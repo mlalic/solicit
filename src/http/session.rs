@@ -349,8 +349,8 @@ pub trait Stream {
 /// Stores its outgoing data as a `Vec<u8>`.
 #[derive(Clone)]
 pub struct DefaultStream {
-    /// The ID of the stream
-    pub stream_id: StreamId,
+    /// The ID of the stream, if already assigned by the connection.
+    pub stream_id: Option<StreamId>,
     /// The headers associated with the stream (i.e. the response headers)
     pub headers: Option<Vec<Header>>,
     /// The body of the stream (i.e. the response body)
@@ -363,10 +363,21 @@ pub struct DefaultStream {
 }
 
 impl DefaultStream {
-    /// Create a new `DefaultStream` with the given ID.
-    pub fn new(stream_id: StreamId) -> DefaultStream {
+    /// Create a new `DefaultStream`, where the ID is not yet assigned.
+    pub fn new() -> DefaultStream {
         DefaultStream {
-            stream_id: stream_id,
+            stream_id: None,
+            headers: None,
+            body: Vec::new(),
+            state: StreamState::Open,
+            data: None,
+        }
+    }
+
+    /// Create a new `DefaultStream` with the given ID.
+    pub fn with_id(stream_id: StreamId) -> DefaultStream {
+        DefaultStream {
+            stream_id: Some(stream_id),
             headers: None,
             body: Vec::new(),
             state: StreamState::Open,
@@ -552,13 +563,13 @@ mod tests {
 
         {
             // A newly open stream has no available data.
-            let mut stream = DefaultStream::new(1);
+            let mut stream = DefaultStream::new();
             let res = stream.get_data_chunk(&mut buf).ok().unwrap();
             assert_eq!(res, StreamDataChunk::Unavailable);
         }
         {
             // A closed stream returns an error
-            let mut stream = DefaultStream::new(1);
+            let mut stream = DefaultStream::new();
             stream.close();
             let res = stream.get_data_chunk(&mut buf).err().unwrap();
             assert!(match res {
@@ -568,7 +579,7 @@ mod tests {
         }
         {
             // A locally closed stream returns an error
-            let mut stream = DefaultStream::new(1);
+            let mut stream = DefaultStream::new();
             stream.close_local();
             let res = stream.get_data_chunk(&mut buf).err().unwrap();
             assert!(match res {
@@ -577,7 +588,7 @@ mod tests {
             });
         }
         {
-            let mut stream = DefaultStream::new(1);
+            let mut stream = DefaultStream::new();
             stream.set_full_data(vec![1, 2, 3, 4]);
 
             // A stream with data returns the first full chunk
@@ -598,7 +609,7 @@ mod tests {
             });
         }
         {
-            let mut stream = DefaultStream::new(1);
+            let mut stream = DefaultStream::new();
             stream.set_full_data(vec![1, 2, 3, 4, 5]);
 
             let res = stream.get_data_chunk(&mut buf).ok().unwrap();
@@ -615,7 +626,7 @@ mod tests {
         }
         {
             // Empty data
-            let mut stream = DefaultStream::new(1);
+            let mut stream = DefaultStream::new();
             stream.set_full_data(vec![]);
 
             let res = stream.get_data_chunk(&mut buf).ok().unwrap();

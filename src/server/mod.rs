@@ -25,7 +25,7 @@ struct SimpleFactory;
 impl StreamFactory for SimpleFactory {
     type Stream = DefaultStream;
     fn create(&mut self, id: StreamId) -> DefaultStream {
-        DefaultStream::new(id)
+        DefaultStream::with_id(id)
     }
 }
 

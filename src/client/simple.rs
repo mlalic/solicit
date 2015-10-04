@@ -100,9 +100,6 @@ use http::client::{ClientConnection, HttpConnect, RequestStream};
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
     conn: ClientConnection<S, S>,
-    /// Holds the ID that can be assigned to the next stream to be opened by the
-    /// client.
-    next_stream_id: u32,
     /// The name of the host to which the client is connected to.
     host: Vec<u8>,
 }
@@ -118,7 +115,6 @@ impl<S> SimpleClient<S> where S: TransportStream {
         let state = DefaultSessionState::<ClientMarker, _>::new();
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, state),
-            next_stream_id: 1,
             host: host.as_bytes().to_vec(),
         };
 
@@ -169,6 +165,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
         let stream = self.new_stream(method, path, extras, body);
         // Starts the request (i.e. sends out the headers)
         let stream_id = try!(self.conn.start_request(stream));
+        // TODO(mlalic): Remove when `Stream::on_id_assigned` is invoked by the session. 
+        self.conn.state.get_stream_mut(stream_id).unwrap().stream_id = Some(stream_id);
 
         // And now makes sure the data is sent out...
         // Note: Since for now there is no flow control, sending data will always continue
@@ -233,8 +231,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// start the request.
     fn new_stream(&mut self, method: &[u8], path: &[u8], extras: &[Header], body: Option<Vec<u8>>)
             -> RequestStream<DefaultStream> {
-        let stream_id = self.get_next_stream_id();
-        let mut stream = DefaultStream::new(stream_id);
+        let mut stream = DefaultStream::new();
         match body {
             Some(body) => stream.set_full_data(body),
             None => stream.close_local(),
@@ -252,14 +249,6 @@ impl<S> SimpleClient<S> where S: TransportStream {
             headers: headers,
             stream: stream,
         }
-    }
-
-    /// Internal helper method that gets the next valid stream ID number.
-    fn get_next_stream_id(&mut self) -> StreamId {
-        let ret = self.next_stream_id;
-        self.next_stream_id += 2;
-
-        ret
     }
 
     /// Internal helper method that triggers the client to handle the next
