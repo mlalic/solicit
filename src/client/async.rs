@@ -52,7 +52,7 @@ struct AsyncRequest {
 /// implementation that will block until the frame is sent on a separate thread.
 struct ChannelFrameSender<S> where S: SendFrame {
     /// The receiving end of the channel. Buffers the frames that are to be sent.
-    rx: Receiver<RawFrame>,
+    rx: Receiver<Vec<u8>>,
     /// The `SendFrame` instance that will perform the actual writes from within the `send_next`
     /// method.
     inner: S,
@@ -88,7 +88,7 @@ impl<S> ChannelFrameSender<S> where S: SendFrame {
                    })
         );
         debug!("Performing the actual send frame IO");
-        self.inner.send_raw_frame(frame)
+        self.inner.send_raw_frame(From::from(frame))
     }
 }
 
@@ -98,12 +98,12 @@ impl<S> ChannelFrameSender<S> where S: SendFrame {
 struct ChannelFrameSenderHandle {
     /// The sender side of the channel that buffers the frames to be written. Allows the handle to
     /// queue the frame for future writing without blocking on the IO.
-    tx: Sender<RawFrame>,
+    tx: Sender<Vec<u8>>,
 }
 
 impl SendFrame for ChannelFrameSenderHandle {
     fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
-        try!(self.tx.send(frame)
+        try!(self.tx.send(frame.into())
                     .map_err(|_| {
                         io::Error::new(io::ErrorKind::Other, "Unable to send frame")
                     }));
