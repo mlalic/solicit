@@ -351,7 +351,6 @@ mod tests {
     use http::frame::{
         SettingsFrame,
         DataFrame,
-        RawFrame,
         Frame,
         unpack_header,
     };
@@ -581,7 +580,7 @@ mod tests {
             });
             let len = headers.0 as usize;
 
-            let raw = RawFrame::from_buf(&buf[..9 + len]).unwrap();
+            let raw = (&buf[..9 + len]).into();
             let frame = Frame::from_raw(raw).unwrap();
 
             (frame, len + 9)

@@ -41,10 +41,40 @@ use http::frame::{
 };
 use hpack;
 
-/// An enum representing all frame variants that can be returned by an
-/// `HttpConnection`.
+/// A thin wrapper around an unknown frame that guarantees that the frame's content is owned.
+/// This makes it suitable for inclusion in the `HttpFrame` enum which needs to be `Send`
+/// (for now).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnknownFrame {
+    buf: Vec<u8>,
+}
+impl UnknownFrame {
+    pub fn serialize(&self) -> Vec<u8> {
+        self.buf.clone()
+    }
+}
+// Conversion traits: from and into a `RawFrame`, as well as an owned and borrowed byte buffer.
+impl<'a> From<RawFrame<'a>> for UnknownFrame {
+    fn from(raw: RawFrame<'a>) -> UnknownFrame {
+        UnknownFrame { buf: raw.into() }
+    }
+}
+impl<'a> Into<RawFrame<'a>> for UnknownFrame {
+    fn into(self) -> RawFrame<'a> {
+        self.buf.into()
+    }
+}
+impl Into<Vec<u8>> for UnknownFrame {
+    fn into(self) -> Vec<u8> { self.buf }
+}
+impl AsRef<[u8]> for UnknownFrame {
+    fn as_ref(&self) -> &[u8] { &self.buf }
+}
+
+/// An enum representing all frame variants that can be returned by an `HttpConnection` can handle.
 ///
-/// The variants wrap the appropriate `Frame` implementation.
+/// The variants wrap the appropriate `Frame` implementation, except for the `UnknownFrame`
+/// variant, which provides an owned representation of the underlying `RawFrame`
 #[derive(PartialEq)]
 #[derive(Debug)]
 #[derive(Clone)]
@@ -52,7 +82,7 @@ pub enum HttpFrame {
     DataFrame(DataFrame),
     HeadersFrame(HeadersFrame),
     SettingsFrame(SettingsFrame),
-    UnknownFrame(RawFrame),
+    UnknownFrame(UnknownFrame),
 }
 
 impl HttpFrame {
@@ -61,7 +91,7 @@ impl HttpFrame {
             0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(raw_frame))),
-            _ => HttpFrame::UnknownFrame(raw_frame),
+            _ => HttpFrame::UnknownFrame(From::from(raw_frame)),
         };
 
         Ok(frame)
@@ -456,8 +486,8 @@ impl<S, R> HttpConnection<S, R> where S: SendFrame, R: ReceiveFrame {
                 debug!("Settings frame received");
                 self.handle_settings_frame::<Sess>(frame, session)
             },
-            HttpFrame::UnknownFrame(_) => {
-                debug!("Unknown frame received");
+            HttpFrame::UnknownFrame(frame) => {
+                debug!("Unknown frame received; raw = {:?}", frame);
                 // We simply drop any unknown frames...
                 // TODO Signal this to the session so that a hook is available
                 //      for implementing frame-level protocol extensions.
@@ -563,7 +593,7 @@ mod tests {
             HttpFrame::DataFrame(DataFrame::new(1)),
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(RawFrame::from(vec![1, 2, 3, 4])),
+            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![1, 2, 3, 4]))),
         ];
         for frame in frames.into_iter() {
             let mut writeable = Vec::new();
@@ -585,7 +615,7 @@ mod tests {
                 },
                 HttpFrame::UnknownFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_raw_frame(frame).unwrap();
+                    writeable.send_raw_frame(frame.into()).unwrap();
                     ret
                 },
             };
@@ -602,7 +632,7 @@ mod tests {
             HttpFrame::DataFrame(DataFrame::new(1)),
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(RawFrame::from(vec![1, 2, 3, 4])),
+            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![1, 2, 3, 4]))),
         ];
         let mut writeable = Vec::new();
         let mut previous = 0;
@@ -625,7 +655,7 @@ mod tests {
                 },
                 HttpFrame::UnknownFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_raw_frame(frame).unwrap();
+                    writeable.send_raw_frame(frame.into()).unwrap();
                     ret
                 },
             };
@@ -650,20 +680,20 @@ mod tests {
     /// works correctly.
     #[test]
     fn test_recv_frame_for_transport_stream() {
-        let unknown_frame = RawFrame::from_buf(&{
+        let unknown_frame = RawFrame::from({
             let mut buf: Vec<u8> = Vec::new();
             // Frame type 10 with a payload of length 1 on stream 1
             let header = (1u32, 10u8, 0u8, 1u32);
             buf.extend(pack_header(&header).to_vec().into_iter());
             buf.push(1);
             buf
-        }).unwrap();
+        });
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
             HttpFrame::DataFrame(DataFrame::new(1)),
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(unknown_frame),
+            HttpFrame::UnknownFrame(From::from(unknown_frame)),
         ];
         let mut stream = StubTransportStream::with_stub_content(&build_stub_from_frames(&frames));
 
@@ -714,8 +744,8 @@ mod tests {
     /// type from the header and returns the corresponding variant.
     #[test]
     fn test_http_frame_from_raw() {
-        fn to_raw<F: Frame>(frame: F) -> RawFrame {
-            RawFrame::from_buf(&frame.serialize()).unwrap()
+        fn to_raw<'a, F: Frame>(frame: F) -> RawFrame<'a> {
+            RawFrame::from(frame.serialize())
         }
 
         assert!(match HttpFrame::from_raw(to_raw(DataFrame::new(1))) {
@@ -733,14 +763,14 @@ mod tests {
             _ => false,
         });
 
-        let unknown_frame = RawFrame::from_buf(&{
+        let unknown_frame = RawFrame::from({
             let mut buf: Vec<u8> = Vec::new();
             // Frame type 10 with a payload of length 1 on stream 1
             let header = (1u32, 10u8, 0u8, 1u32);
             buf.extend(pack_header(&header).to_vec().into_iter());
             buf.push(1);
             buf
-        }).unwrap();
+        });
         assert!(match HttpFrame::from_raw(unknown_frame) {
             Ok(HttpFrame::UnknownFrame(_)) => true,
             _ => false,
@@ -818,15 +848,15 @@ mod tests {
     /// frame is still returned wrapped in an `HttpFrame::UnknownFrame` variant.
     #[test]
     fn test_read_unknown_frame() {
-        let unknown_frame = RawFrame::from_buf(&{
+        let unknown_frame = RawFrame::from({
             let mut buf: Vec<u8> = Vec::new();
             // Frame type 10 with a payload of length 1 on stream 1
             let header = (1u32, 10u8, 0u8, 1u32);
             buf.extend(pack_header(&header).to_vec().into_iter());
             buf.push(1);
             buf
-        }).unwrap();
-        let mut conn = build_mock_http_conn(vec![HttpFrame::UnknownFrame(unknown_frame)]);
+        });
+        let mut conn = build_mock_http_conn(vec![HttpFrame::UnknownFrame(From::from(unknown_frame))]);
 
         // Unknown frame
         assert!(match conn.recv_frame() {

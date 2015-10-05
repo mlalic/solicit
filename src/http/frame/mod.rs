@@ -1,6 +1,7 @@
 //! The module contains the implementation of HTTP/2 frames.
 
 use std::mem;
+use std::borrow::Cow;
 
 use http::StreamId;
 
@@ -161,65 +162,30 @@ pub trait Frame: Sized {
 #[derive(PartialEq)]
 #[derive(Debug)]
 #[derive(Clone)]
-pub struct RawFrame {
+pub struct RawFrame<'a> {
     /// The raw frame representation, including both the raw header representation
     /// (in the first 9 bytes), followed by the raw payload representation.
-    raw_content: Vec<u8>,
+    raw_content: Cow<'a, [u8]>,
 }
 
-impl RawFrame {
-    /// Creates a new `RawFrame` with the given `FrameHeader`. The payload is
-    /// left empty.
-    pub fn new(header: FrameHeader) -> RawFrame {
-        RawFrame::with_payload(header, Vec::new())
-    }
-
+impl<'a> RawFrame<'a> {
     /// Creates a new `RawFrame` with the given header and payload.
     /// Does not do any validation to determine whether the frame is in a correct
     /// state as constructed.
-    pub fn with_payload(header: FrameHeader, payload: Vec<u8>) -> RawFrame {
+    pub fn with_payload(header: FrameHeader, payload: Vec<u8>) -> RawFrame<'a> {
         let mut raw = Vec::new();
         raw.extend(pack_header(&header).into_iter().map(|x| *x));
         raw.extend(payload);
 
         RawFrame {
-            raw_content: raw,
+            raw_content: Cow::Owned(raw),
         }
-    }
-
-    /// Creates a new `RawFrame` by parsing the given buffer.
-    ///
-    /// # Returns
-    ///
-    /// A `RawFrame` instance constructed from the given buffer.
-    ///
-    /// If the buffer cannot be parsed into a frame, which includes the payload
-    /// section having a different length than what was found in the header,
-    /// `None` is returned.
-    pub fn from_buf(buf: &[u8]) -> Option<RawFrame> {
-        if buf.len() < 9 {
-            return None;
-        }
-        let header = unpack_header(unsafe {
-            assert!(buf.len() >= 9);
-            // We just asserted that this transmute is safe.
-            mem::transmute(buf.as_ptr())
-        });
-        let payload_len = header.0 as usize;
-
-        if buf[9..].len() != payload_len {
-            return None;
-        }
-
-        Some(RawFrame {
-            raw_content: buf.to_vec(),
-        })
     }
 
     /// Returns a `Vec` of bytes representing the serialized (on-the-wire)
     /// representation of this raw frame.
     pub fn serialize(&self) -> Vec<u8> {
-        self.raw_content.clone()
+        self.raw_content.clone().into_owned()
     }
 
     /// Returns a `FrameHeader` instance corresponding to the headers of the
@@ -238,17 +204,21 @@ impl RawFrame {
     }
 }
 
-/// Provide a conversion into a `Vec`.
-impl Into<Vec<u8>> for RawFrame {
-    fn into(self) -> Vec<u8> { self.raw_content }
+impl<'a> Into<Vec<u8>> for RawFrame<'a> {
+    fn into(self) -> Vec<u8> { self.raw_content.into_owned() }
 }
-
+impl<'a> AsRef<[u8]> for RawFrame<'a> {
+    fn as_ref(&self) -> &[u8] { self.raw_content.as_ref() }
+}
 /// Provide a conversion from a `Vec`.
 ///
 /// This conversion is unchecked and could cause the resulting `RawFrame` to be an
 /// invalid HTTP/2 frame.
-impl From<Vec<u8>> for RawFrame {
-    fn from(raw: Vec<u8>) -> RawFrame { RawFrame { raw_content: raw } }
+impl<'a> From<Vec<u8>> for RawFrame<'a> {
+    fn from(raw: Vec<u8>) -> RawFrame<'a> { RawFrame { raw_content: Cow::Owned(raw) } }
+}
+impl<'a> From<&'a [u8]> for RawFrame<'a> {
+    fn from(raw: &'a [u8]) -> RawFrame<'a> { RawFrame { raw_content: Cow::Borrowed(raw) } }
 }
 
 #[cfg(test)]
@@ -409,70 +379,6 @@ mod tests {
         }
     }
 
-    /// Tests that the `RawFrame::from_buf` method correctly constructs a
-    /// `RawFrame` from a given buffer.
-    #[test]
-    fn test_raw_frame_from_buffer() {
-        // Correct frame
-        {
-            let data = b"123";
-            let header = (data.len() as u32, 0x1, 0, 1);
-            let buf = {
-                let mut buf = Vec::new();
-                buf.extend(pack_header(&header).to_vec().into_iter());
-                buf.extend(data.to_vec().into_iter());
-                buf
-            };
-
-            let raw = RawFrame::from_buf(&buf).unwrap();
-
-            assert_eq!(raw.header(), header);
-            assert_eq!(raw.payload(), data)
-        }
-        // Correct frame with trailing data
-        {
-            let data = b"123";
-            let header = (data.len() as u32, 0x1, 0, 1);
-            let buf = {
-                let mut buf = Vec::new();
-                buf.extend(pack_header(&header).to_vec().into_iter());
-                buf.extend(data.to_vec().into_iter());
-                buf.extend(vec![1, 2, 3, 4, 5].into_iter());
-                buf
-            };
-
-            assert!(RawFrame::from_buf(&buf).is_none());
-        }
-        // Missing payload chunk
-        {
-            let data = b"123";
-            let header = (data.len() as u32, 0x1, 0, 1);
-            let buf = {
-                let mut buf = Vec::new();
-                buf.extend(pack_header(&header).to_vec().into_iter());
-                buf.extend(data[..2].to_vec().into_iter());
-                buf
-            };
-
-            assert!(RawFrame::from_buf(&buf).is_none());
-        }
-        // Missing header chunk
-        {
-            let header = (0, 0x1, 0, 1);
-            let buf = {
-                let mut buf = Vec::new();
-                buf.extend(pack_header(&header)[..5].to_vec().into_iter());
-                buf
-            };
-
-            assert!(RawFrame::from_buf(&buf).is_none());
-        }
-        // Completely empty buffer
-        {
-            assert!(RawFrame::from_buf(&[]).is_none());
-        }
-    }
-
     /// Tests that constructing a `RawFrame` from a `Vec<u8>` by using the `From<Vec<u8>>`
     /// trait implementation works as expected.
     #[test]
@@ -552,6 +458,15 @@ mod tests {
         }
     }
 
+    /// Tests that a borrowed slice can be converted into a `RawFrame` due to the implementation of
+    /// the `From<&'a [u8]>` trait.
+    #[test]
+    fn test_from_slice() {
+        let buf = &b""[..];
+        let frame = RawFrame::from(buf);
+        assert_eq!(frame.as_ref(), buf);
+    }
+
     /// Tests that the `RawFrame::serialize` method correctly serializes a
     /// `RawFrame`.
     #[test]
@@ -564,7 +479,7 @@ mod tests {
             buf.extend(data.to_vec().into_iter());
             buf
         };
-        let raw = RawFrame::from_buf(&buf).unwrap();
+        let raw: RawFrame = buf.clone().into();
 
         assert_eq!(raw.serialize(), buf);
     }
@@ -580,7 +495,7 @@ mod tests {
             buf.extend(data.to_vec().into_iter());
             buf
         };
-        let raw = RawFrame::from_buf(&buf).unwrap();
+        let raw: RawFrame = buf.clone().into();
 
         let serialized = raw.serialize();
         let vec: Vec<_> = raw.into();
