@@ -251,7 +251,10 @@ struct ClientService {
     /// but sent).
     limit: u32,
     /// The connection that is used for underlying HTTP/2 communication.
-    conn: ClientConnection<ChannelFrameSenderHandle, ChannelFrameReceiverHandle>,
+    conn: ClientConnection<ChannelFrameSenderHandle>,
+    /// The handle allows the service to get the HTTP/2 frame that has been extracted from the data
+    /// read from the socket on another thread.
+    recv_handle: ChannelFrameReceiverHandle,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
     chans: HashMap<StreamId, Sender<Response>>,
@@ -316,10 +319,7 @@ impl ClientService {
         // ...and pass the non-blocking/buffering ends into the `HttpConnect` instead of the
         // blocking socket itself.
         let conn = ClientConnection::with_connection(
-                HttpConnection::new(
-                    send_handle,
-                    recv_handle,
-                    scheme),
+                HttpConnection::new(send_handle, scheme),
                 DefaultSessionState::<ClientMarker, _>::new());
 
         let service = ClientService {
@@ -328,6 +328,7 @@ impl ClientService {
             conn: conn,
             chans: HashMap::new(),
             work_queue: rx,
+            recv_handle: recv_handle,
             request_queue: Vec::new(),
             client_count: 0,
             host: host.as_bytes().to_vec(),
@@ -390,7 +391,7 @@ impl ClientService {
             },
             WorkItem::HandleFrame => {
                 if !self.initialized {
-                    try!(self.conn.init());
+                    try!(self.conn.expect_settings(&mut self.recv_handle));
                     self.initialized = true;
                     Ok(())
                 } else {
@@ -425,7 +426,7 @@ impl ClientService {
     fn handle_frame(&mut self) -> Result<(), ClientServiceErr> {
         // Handles the next frame...
         debug!("Handling next frame");
-        try!(self.conn.handle_next_frame());
+        try!(self.conn.handle_next_frame(&mut self.recv_handle));
         // ...and then any connections that may have been closed in the meantime
         // are converted to responses and notifications sent to appropriate
         // channels.

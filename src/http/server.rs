@@ -102,14 +102,13 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
 
 /// The struct provides a more convenient API for server-related functionality of an HTTP/2
 /// connection, such as sending a response back to the client.
-pub struct ServerConnection<S, R, F, State=DefaultSessionState<ServerMarker, DefaultStream>>
+pub struct ServerConnection<S, F, State=DefaultSessionState<ServerMarker, DefaultStream>>
         where S: SendFrame,
-              R: ReceiveFrame,
               State: SessionState,
               F: StreamFactory<Stream=State::Stream> {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
-    conn: HttpConnection<S, R>,
+    conn: HttpConnection<S>,
     /// The state of the session associated to this client connection. Maintains the status of the
     /// connection streams.
     pub state: State,
@@ -118,14 +117,14 @@ pub struct ServerConnection<S, R, F, State=DefaultSessionState<ServerMarker, Def
     factory: F,
 }
 
-impl<S, R, F, State> ServerConnection<S, R, F, State>
-        where S: SendFrame, R: ReceiveFrame, State: SessionState, F: StreamFactory<Stream=State::Stream> {
+impl<S, F, State> ServerConnection<S, F, State>
+        where S: SendFrame, State: SessionState, F: StreamFactory<Stream=State::Stream> {
     /// Creates a new `ServerConnection` that will use the given `HttpConnection` for its
     /// underlying HTTP/2 communication. The `state` and `factory` represent, respectively, the
     /// initial state of the connection and an instance of the `StreamFactory` type (allowing the
     /// client to handle newly created streams).
-    pub fn with_connection(conn: HttpConnection<S, R>, state: State, factory: F)
-            -> ServerConnection<S, R, F, State> {
+    pub fn with_connection(conn: HttpConnection<S>, state: State, factory: F)
+            -> ServerConnection<S, F, State> {
         ServerConnection {
             conn: conn,
             state: state,
@@ -139,31 +138,25 @@ impl<S, R, F, State> ServerConnection<S, R, F, State>
         self.conn.scheme
     }
 
-    /// Initializes the `ServerConnection` by sending the server's settings and processing the
-    /// client's.
-    /// If the client does not provide a settings frame, returns an error.
-    ///
-    /// TODO This method should eventually be split into two.
-    pub fn init(&mut self) -> HttpResult<()> {
+    /// Send the current settings associated to the `ServerConnection` to the client.
+    pub fn send_settings(&mut self) -> HttpResult<()> {
         // TODO: `HttpConnection` should provide a better API for sending settings.
-        try!(self.conn.sender.send_frame(SettingsFrame::new()));
-        try!(self.read_preface());
-        Ok(())
+        self.conn.sender.send_frame(SettingsFrame::new())
     }
 
-    /// Reads and handles the settings frame of the client preface. If the settings frame is not
-    /// the next frame received on the underlying connection, returns an error.
-    fn read_preface(&mut self) -> HttpResult<()> {
+    /// Handles the next frame on the given `ReceiveFrame` instance and expects it to be a
+    /// (non-ACK) SETTINGS frame. Returns an error if not.
+    pub fn expect_settings<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
         let mut session = ServerSession::new(&mut self.state, &mut self.factory);
-        self.conn.expect_settings(&mut session)
+        self.conn.expect_settings(rx, &mut session)
     }
 
-    /// Fully handles the next incoming frame. Events are passed on to the internal `session`
-    /// instance.
+    /// Fully handles the next frame provided by the given `ReceiveFrame` instance.
+    /// Handling the frame can cause the session state of the `ServerConnection` to update.
     #[inline]
-    pub fn handle_next_frame(&mut self) -> HttpResult<()> {
+    pub fn handle_next_frame<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
         let mut session = ServerSession::new(&mut self.state, &mut self.factory);
-        self.conn.handle_next_frame(&mut session)
+        self.conn.handle_next_frame(rx, &mut session)
     }
 
     /// Starts a response on the stream with the given ID by sending the given headers.

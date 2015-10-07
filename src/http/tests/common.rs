@@ -86,13 +86,13 @@ impl ReceiveFrame for MockReceiveFrame {
     }
 }
 
-pub type MockHttpConnection = HttpConnection<MockSendFrame, MockReceiveFrame>;
+pub type MockHttpConnection = HttpConnection<MockSendFrame>;
 
 /// A helper function that creates an `HttpConnection` with the `MockSendFrame` and the
 /// `MockReceiveFrame` as its underlying frame handlers.
-pub fn build_mock_http_conn(stub_frames: Vec<HttpFrame>) -> MockHttpConnection {
+pub fn build_mock_http_conn() -> MockHttpConnection {
     HttpConnection::new(
-        MockSendFrame::new(), MockReceiveFrame::new(stub_frames), HttpScheme::Http)
+        MockSendFrame::new(), HttpScheme::Http)
 }
 
 /// A helper stub implementation of a `TransportStream`.
@@ -394,13 +394,12 @@ impl DataPrioritizer for StubDataPrioritizer {
 
 /// A type alias for a `ClientConnection` with mock replacements for its dependent types.
 pub type MockClientConnection = ClientConnection<MockSendFrame,
-                                                 MockReceiveFrame,
                                                  DefaultSessionState<ClientMarker, TestStream>>;
 
 /// Returns a `ClientConnection` suitable for use in tests.
 #[inline]
-pub fn build_mock_client_conn(frames: Vec<HttpFrame>) -> MockClientConnection {
+pub fn build_mock_client_conn() -> MockClientConnection {
     ClientConnection::with_connection(
-        build_mock_http_conn(frames),
+        build_mock_http_conn(),
         DefaultSessionState::<ClientMarker, TestStream>::new())
 }

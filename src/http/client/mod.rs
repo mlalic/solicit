@@ -174,24 +174,24 @@ pub struct RequestStream<S> where S: Stream {
 
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
 /// `start_request`) and wires the `HttpConnection` to the client `Session` callbacks.
-pub struct ClientConnection<S, R, State=DefaultSessionState<ClientMarker, DefaultStream>>
-        where S: SendFrame, R: ReceiveFrame, State: SessionState {
+pub struct ClientConnection<S, State=DefaultSessionState<ClientMarker, DefaultStream>>
+        where S: SendFrame, State: SessionState {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
-    conn: HttpConnection<S, R>,
+    conn: HttpConnection<S>,
     /// The state of the session associated to this client connection. Maintains the status of the
     /// connection streams.
     pub state: State,
 }
 
-impl<S, R, State> ClientConnection<S, R, State>
-        where S: SendFrame, R: ReceiveFrame, State: SessionState {
+impl<S, State> ClientConnection<S, State>
+        where S: SendFrame, State: SessionState {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
     ///
     /// The given `state` instance will handle the maintenance of the session's state.
-    pub fn with_connection(conn: HttpConnection<S, R>, state: State)
-            -> ClientConnection<S, R, State> {
+    pub fn with_connection(conn: HttpConnection<S>, state: State)
+            -> ClientConnection<S, State> {
         ClientConnection {
             conn: conn,
             state: state,
@@ -204,30 +204,15 @@ impl<S, R, State> ClientConnection<S, R, State>
         self.conn.scheme
     }
 
-    /// Performs the initialization of the `ClientConnection`.
+    /// Handles the next frame provided by the given frame receiver and expects it to be a
+    /// `SETTINGS` frame. If it is not, it returns an error.
     ///
-    /// This means that it expects the next frame that it receives to be the server preface -- i.e.
-    /// a `SETTINGS` frame. Returns an `HttpError` if this is not the case.
-    pub fn init(&mut self) -> HttpResult<()> {
-        try!(self.read_preface());
-        Ok(())
-    }
-
-    /// Reads and handles the server preface from the underlying HTTP/2
-    /// connection.
-    ///
-    /// According to the HTTP/2 spec, a server preface consists of a single
-    /// settings frame.
-    ///
-    /// # Returns
-    ///
-    /// Any error raised by the underlying connection is propagated.
-    ///
-    /// Additionally, if it is not possible to decode the server preface,
-    /// it returns the `HttpError::UnableToConnect` variant.
-    fn read_preface(&mut self) -> HttpResult<()> {
+    /// The method is a convenience method that can be used during the initialization of the
+    /// connection, as the first frame that any peer is allowed to send is an initial settings
+    /// frame.
+    pub fn expect_settings<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
         let mut session = ClientSession::new(&mut self.state);
-        self.conn.expect_settings(&mut session)
+        self.conn.expect_settings(rx, &mut session)
     }
 
     /// Starts a new request based on the given `RequestStream`.
@@ -241,12 +226,11 @@ impl<S, R, State> ClientConnection<S, R, State>
         Ok(stream_id)
     }
 
-    /// Fully handles the next incoming frame. Events are passed on to the internal `session`
-    /// instance.
-    #[inline]
-    pub fn handle_next_frame(&mut self) -> HttpResult<()> {
+    /// Fully handles the next incoming frame provided by the given `ReceiveFrame` instance.
+    /// Handling a frame may cause changes to the session state exposed by the `ClientConnection`.
+    pub fn handle_next_frame<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
         let mut session = ClientSession::new(&mut self.state);
-        self.conn.handle_next_frame(&mut session)
+        self.conn.handle_next_frame(rx, &mut session)
     }
 
     /// Queues a new DATA frame onto the underlying `SendFrame`.
@@ -347,6 +331,7 @@ mod tests {
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
+        MockReceiveFrame,
     };
     use http::frame::{
         SettingsFrame,
@@ -371,13 +356,14 @@ mod tests {
     #[test]
     fn test_init_client_conn() {
         let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
-        let mut conn = build_mock_client_conn(frames);
+        let mut conn = build_mock_client_conn();
+        let mut receiver = MockReceiveFrame::new(frames);
 
-        conn.init().unwrap();
+        conn.expect_settings(&mut receiver).unwrap();
 
         // We have read the server's response (the settings frame only, since no panic
         // ocurred)
-        assert_eq!(conn.conn.receiver.recv_list.len(), 0);
+        assert_eq!(receiver.recv_list.len(), 0);
         // We also sent an ACK already.
         let frame = match conn.conn.sender.sent.remove(0) {
             HttpFrame::SettingsFrame(frame) => frame,
@@ -391,11 +377,12 @@ mod tests {
     #[test]
     fn test_init_client_conn_no_settings() {
         let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
-        let mut conn = build_mock_client_conn(frames);
+        let mut conn = build_mock_client_conn();
+        let mut receiver = MockReceiveFrame::new(frames);
 
         // We get an error since the first frame sent by the server was not
         // SETTINGS.
-        assert!(conn.init().is_err());
+        assert!(conn.expect_settings(&mut receiver).is_err());
     }
 
     /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
@@ -414,20 +401,20 @@ mod tests {
     fn test_client_conn_send_next_data() {
         {
             // No streams => nothing sent.
-            let mut conn = build_mock_client_conn(vec![]);
+            let mut conn = build_mock_client_conn();
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // A locally closed stream (i.e. nothing to send)
-            let mut conn = build_mock_client_conn(vec![]);
+            let mut conn = build_mock_client_conn();
             conn.state.insert_outgoing(prepare_stream(None));
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // A stream with some data
-            let mut conn = build_mock_client_conn(vec![]);
+            let mut conn = build_mock_client_conn();
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             let res = conn.send_next_data().unwrap();
             assert_eq!(res, SendStatus::Sent);
@@ -438,7 +425,7 @@ mod tests {
         }
         {
             // Multiple streams with data
-            let mut conn = build_mock_client_conn(vec![]);
+            let mut conn = build_mock_client_conn();
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
@@ -457,7 +444,7 @@ mod tests {
     fn test_client_conn_start_request() {
         {
             // No body
-            let mut conn = build_mock_client_conn(vec![]);
+            let mut conn = build_mock_client_conn();
 
             conn.start_request(RequestStream {
                 headers: vec![
@@ -481,7 +468,7 @@ mod tests {
         }
         {
             // With a body
-            let mut conn = build_mock_client_conn(vec![]);
+            let mut conn = build_mock_client_conn();
 
             conn.start_request(RequestStream {
                 headers: vec![

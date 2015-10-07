@@ -1,6 +1,6 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
-use http::{StreamId, HttpResult, HttpError, Response, Header};
+use http::{StreamId, HttpResult, HttpError, Response, Header, HttpScheme};
 use http::transport::TransportStream;
 use http::connection::{HttpConnection, SendStatus};
 use http::session::{
@@ -10,7 +10,7 @@ use http::session::{
     Stream,
     Client as ClientMarker,
 };
-use http::client::{ClientConnection, HttpConnect, RequestStream};
+use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 
 /// A struct implementing a simple HTTP/2 client.
 ///
@@ -50,11 +50,11 @@ use http::client::{ClientConnection, HttpConnect, RequestStream};
 /// // should usually be preferred for their convenience.
 /// let mut stream = TcpStream::connect(&("http2bin.org", 80)).unwrap();
 /// write_preface(&mut stream);
-/// // Connect to an HTTP/2 aware server
-/// let conn = HttpConnection::<TcpStream, TcpStream>::with_stream(
-///                                stream,
-///                                HttpScheme::Http);
-/// let mut client = SimpleClient::with_connection(conn, "http2bin.org".into()).unwrap();
+/// // So, the preface is written, now give up ownership of the stream to the client...
+/// let mut client = SimpleClient::with_stream(
+///     stream,
+///     "http2bin.org".into(),
+///     HttpScheme::Http).unwrap();
 /// let response = client.get(b"/", &[]).unwrap();
 /// assert_eq!(response.stream_id, 1);
 /// assert_eq!(response.status_code().unwrap(), 200);
@@ -99,23 +99,30 @@ use http::client::{ClientConnection, HttpConnect, RequestStream};
 /// ```
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
-    conn: ClientConnection<S, S>,
+    conn: ClientConnection<S>,
     /// The name of the host to which the client is connected to.
     host: Vec<u8>,
+    /// The receiving end of the underlying transport stream. Allows us to extract the next frame
+    /// that the HTTP connection should process.
+    receiver: S,
 }
 
 impl<S> SimpleClient<S> where S: TransportStream {
-    /// Create a new `SimpleClient` instance that will use the given `HttpConnection`
-    /// to communicate to the server.
+    /// Creates a new `SimpleClient` instance that will use the given `stream` instance for its
+    /// underlying communication with the host. Additionally, requires the host identifier and the
+    /// scheme of the connection.
     ///
-    /// It assumes that the connection stream is initialized and will *not* automatically write the
-    /// client preface.
-    pub fn with_connection(conn: HttpConnection<S, S>, host: String)
+    /// It assumes that the given `stream` has already been initialized for HTTP/2 communication
+    /// (by having the required protocol negotiation done and writing the client preface).
+    pub fn with_stream(stream: S, host: String, scheme: HttpScheme)
             -> HttpResult<SimpleClient<S>> {
         let state = DefaultSessionState::<ClientMarker, _>::new();
+        let receiver = try!(stream.try_split());
+        let conn = HttpConnection::<S>::with_stream(stream, scheme);
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, state),
             host: host.as_bytes().to_vec(),
+            receiver: receiver,
         };
 
         try!(client.init());
@@ -132,16 +139,15 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// Currently, it panics if the connector returns an error.
     pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
             where C: HttpConnect<Stream=S> {
-        let stream = try!(connector.connect());
-        let conn = HttpConnection::<S, S>::with_stream(stream.0, stream.1);
-        SimpleClient::with_connection(conn, stream.2)
+        let ClientStream(stream, scheme, host) = try!(connector.connect());
+        SimpleClient::with_stream(stream, host, scheme)
     }
 
     /// Internal helper method that performs the initialization of the client's
     /// connection.
     #[inline]
     fn init(&mut self) -> HttpResult<()> {
-        self.conn.init()
+        self.conn.expect_settings(&mut self.receiver)
     }
 
     /// Send a request to the server. Blocks until the entire request has been
@@ -255,6 +261,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// frame off the HTTP/2 connection.
     #[inline]
     fn handle_next_frame(&mut self) -> HttpResult<()> {
-        self.conn.handle_next_frame()
+        let receiver = &mut self.receiver;
+        self.conn.handle_next_frame(receiver)
     }
 }
