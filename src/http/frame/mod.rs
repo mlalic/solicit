@@ -169,6 +169,62 @@ pub struct RawFrame<'a> {
 }
 
 impl<'a> RawFrame<'a> {
+    /// Parses a `RawFrame` from the bytes starting at the beginning of the given buffer.
+    ///
+    /// Returns the `None` variant when it is not possible to parse a raw frame from the buffer
+    /// (due to there not being enough bytes in the buffer). If the `RawFrame` is successfully
+    /// parsed it returns the frame, borrowing a part of the original buffer. Therefore, this
+    /// method makes no copies, nor does it perform any extra allocations.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use solicit::http::frame::RawFrame;
+    ///
+    /// let buf = b"123";
+    /// // Not enough bytes for even the header of the frame
+    /// assert!(RawFrame::parse(&buf[..]).is_none());
+    /// ```
+    ///
+    /// ```rust
+    /// use solicit::http::frame::RawFrame;
+    ///
+    /// let buf = vec![0, 0, 1, 0, 0, 0, 0, 0, 0];
+    /// // Full header, but not enough bytes for the payload
+    /// assert!(RawFrame::parse(&buf[..]).is_none());
+    /// ```
+    ///
+    /// ```rust
+    /// use solicit::http::frame::RawFrame;
+    ///
+    /// let buf = vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 1];
+    /// // A full frame is extracted, even if in this case the frame itself is not valid (a DATA
+    /// // frame associated to stream 0 is not valid in HTTP/2!). This, however, is not the
+    /// // responsibility of the RawFrame.
+    /// let frame = RawFrame::parse(&buf[..]).unwrap();
+    /// assert_eq!(frame.as_ref(), &buf[..]);
+    /// ```
+    pub fn parse(buf: &'a [u8]) -> Option<RawFrame<'a>> {
+        // TODO(mlalic): This might allow an extra parameter that specifies the maximum frame
+        //               payload length?
+        if buf.len() < 9 {
+            return None;
+        }
+        let header = unpack_header(unsafe {
+            assert!(buf.len() >= 9);
+            // We just asserted that this transmute is safe.
+            mem::transmute(buf.as_ptr())
+        });
+
+        let payload_len = header.0 as usize;
+        if buf[9..].len() < payload_len {
+            return None;
+        }
+
+        let raw = &buf[..9 + payload_len];
+        Some(raw.into())
+    }
+
     /// Returns a `Vec` of bytes representing the serialized (on-the-wire)
     /// representation of this raw frame.
     pub fn serialize(&self) -> Vec<u8> {
