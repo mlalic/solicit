@@ -190,34 +190,26 @@ pub trait ReceiveFrame {
 /// A blanket implementation of the trait for `TransportStream`s.
 impl<TS> ReceiveFrame for TS where TS: TransportStream {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
-        // A helper function that reads the header of an HTTP/2 frame.
-        // Simply reads the next 9 octets (and no more than 9).
-        let read_header_bytes = |stream: &mut TS| -> HttpResult<[u8; 9]> {
+        let raw_header = {
             let mut buf = [0; 9];
-            try!(TransportStream::read_exact(stream, &mut buf));
-
-            Ok(buf)
+            try!(TransportStream::read_exact(self, &mut buf));
+            buf
         };
-        // A helper function that reads the payload of a frame with the given length.
-        // Reads exactly the length of the frame from the given stream.
-        let read_payload = |stream: &mut TS, len: u32| -> HttpResult<Vec<u8>> {
-            debug!("Trying to read {} bytes of frame payload", len);
-            let length = len as usize;
-            let mut buf: Vec<u8> = Vec::with_capacity(length);
-            // This is completely safe since we *just* allocated the vector with
-            // the same capacity.
-            unsafe { buf.set_len(length); }
-            try!(TransportStream::read_exact(stream, &mut buf));
+        let header = unpack_header(&raw_header);
+        trace!("Received frame header {:?}", header);
 
-            Ok(buf)
-        };
+        let total_len = 9 + header.0 as usize;
+        // Now prepare the buffer that will hold the entire frame.
+        let mut full_frame = Vec::with_capacity(total_len);
+        // First copy the header into the buffer...
+        try!(io::copy(&mut &raw_header[..], &mut full_frame));
+        // Now expand it to its full size...
+        unsafe { full_frame.set_len(total_len); }
+        // ...and have the stream read into the payload section the exact number of bytes that the
+        // header indicated.
+        try!(TransportStream::read_exact(self, &mut full_frame[9..]));
 
-        let header = unpack_header(&try!(read_header_bytes(self)));
-        debug!("Received frame header {:?}", header);
-
-        let payload = try!(read_payload(self, header.0));
-        let raw_frame = RawFrame::with_payload(header, payload);
-
+        let raw_frame = RawFrame::from(full_frame);
         // TODO: The reason behind being unable to decode the frame should be
         //       extracted to allow an appropriate connection-level action to be
         //       taken (e.g. responding with a PROTOCOL_ERROR).
