@@ -323,7 +323,8 @@ impl Frame for HeadersFrame {
 mod tests {
     use super::{HeadersFrame, HeadersFlag, StreamDependency};
     use http::frame::tests::{build_test_frame, build_padded_frame_payload};
-    use http::frame::{pack_header, Frame, RawFrame};
+    use http::tests::common::raw_frame_from_parts;
+    use http::frame::{pack_header, Frame};
 
     /// Tests that a stream dependency structure can be correctly parsed by the
     /// `StreamDependency::parse` method.
@@ -495,7 +496,7 @@ mod tests {
         let header = (payload.len() as u32, 0x1, 0, 0);
 
         let frame: Option<HeadersFrame> = Frame::from_raw(
-            RawFrame::with_payload(header, payload));
+            raw_frame_from_parts(header, payload));
         
         assert!(frame.is_none());
     }
@@ -509,7 +510,7 @@ mod tests {
         let header = (payload.len() as u32, 0x2, 0, 1);
 
         let frame: Option<HeadersFrame> = Frame::from_raw(
-            RawFrame::with_payload(header, payload));
+            raw_frame_from_parts(header, payload));
         
         assert!(frame.is_none());
     }

@@ -169,19 +169,6 @@ pub struct RawFrame<'a> {
 }
 
 impl<'a> RawFrame<'a> {
-    /// Creates a new `RawFrame` with the given header and payload.
-    /// Does not do any validation to determine whether the frame is in a correct
-    /// state as constructed.
-    pub fn with_payload(header: FrameHeader, payload: Vec<u8>) -> RawFrame<'a> {
-        let mut raw = Vec::new();
-        raw.extend(pack_header(&header).into_iter().map(|x| *x));
-        raw.extend(payload);
-
-        RawFrame {
-            raw_content: Cow::Owned(raw),
-        }
-    }
-
     /// Returns a `Vec` of bytes representing the serialized (on-the-wire)
     /// representation of this raw frame.
     pub fn serialize(&self) -> Vec<u8> {
@@ -230,6 +217,7 @@ mod tests {
         FrameHeader,
         Frame,
     };
+    use http::tests::common::raw_frame_from_parts;
 
     /// Tests that the `unpack_header` function correctly returns the
     /// components of HTTP/2 frame headers.
@@ -323,7 +311,7 @@ mod tests {
     /// Builds a test frame of the given type with the given header and
     /// payload, by using the `Frame::from_raw` method.
     pub fn build_test_frame<F: Frame>(header: &FrameHeader, payload: &[u8]) -> F {
-        let raw = RawFrame::with_payload(header.clone(), payload.to_vec());
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
         Frame::from_raw(raw).unwrap()
     }
 
@@ -339,44 +327,6 @@ mod tests {
         for _ in 0..pad_len { payload.push(0); }
 
         payload
-    }
-
-    /// Tests that the `RawFrame::with_payload` method correctly constructs a
-    /// `RawFrame` from the given parts.
-    #[test]
-    fn test_raw_frame_with_payload() {
-        // Correct frame
-        {
-            let data = b"123";
-            let header = (data.len() as u32, 0x1, 0, 1);
-
-            let raw = RawFrame::with_payload(header, data.to_vec());
-
-            assert_eq!(raw.header(), header);
-            assert_eq!(raw.payload(), data)
-        }
-        // Correct frame with trailing data
-        {
-            let data = b"123456";
-            let header = (3, 0x1, 0, 1);
-
-            let raw = RawFrame::with_payload(header, data.to_vec());
-
-            // No validation of whether the parts form a correct frame
-            assert_eq!(raw.header(), header);
-            assert_eq!(raw.payload(), data)
-        }
-        // Missing payload chunk
-        {
-            let data = b"123";
-            let header = (6, 0x1, 0, 1);
-
-            let raw = RawFrame::with_payload(header, data.to_vec());
-
-            // No validation of whether the parts form a correct frame
-            assert_eq!(raw.header(), header);
-            assert_eq!(raw.payload(), data)
-        }
     }
 
     /// Tests that constructing a `RawFrame` from a `Vec<u8>` by using the `From<Vec<u8>>`

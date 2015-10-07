@@ -12,7 +12,7 @@ use http::{
     StreamId,
     Header,
 };
-use http::frame::{RawFrame, Frame};
+use http::frame::{RawFrame, Frame, FrameHeader, pack_header};
 use http::session::{
     Session,
     DefaultSessionState,
@@ -34,6 +34,16 @@ use http::connection::{
 };
 use http::client::ClientConnection;
 use http::server::StreamFactory;
+
+/// Creates a new `RawFrame` from two separate parts: the header and the payload.
+/// Useful for tests that need to create frames, since they can easily specify the header and the
+/// payload separately and use this function to stitch them together into a `RawFrame`.
+pub fn raw_frame_from_parts<'a>(header: FrameHeader, payload: Vec<u8>) -> RawFrame<'a> {
+    let mut buf = Vec::new();
+    assert_eq!(9, buf.write(&pack_header(&header)[..]).unwrap());
+    assert_eq!(payload.len(), buf.write(&payload).unwrap());
+    buf.into()
+}
 
 /// A mock `SendFrame` implementation that simply saves all frames that it is to send to a `Vec`.
 pub struct MockSendFrame {

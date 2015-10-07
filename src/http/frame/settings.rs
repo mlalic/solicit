@@ -311,7 +311,8 @@ impl Frame for SettingsFrame {
 mod tests {
     use super::{HttpSetting, SettingsFrame};
     use http::frame::tests::{build_test_frame};
-    use http::frame::{pack_header, Frame, RawFrame};
+    use http::tests::common::raw_frame_from_parts;
+    use http::frame::{pack_header, Frame};
 
     /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with
     /// no ACK flag and only a single setting.
@@ -446,7 +447,7 @@ mod tests {
         let header = (payload.len() as u32, 4, 1, 0);
 
         let frame: Option<SettingsFrame> = Frame::from_raw(
-            RawFrame::with_payload(header, payload));
+            raw_frame_from_parts(header, payload));
 
         assert!(frame.is_none());
     }
@@ -460,7 +461,7 @@ mod tests {
         let header = (payload.len() as u32, 4, 1, 1);
 
         let frame: Option<SettingsFrame> = Frame::from_raw(
-            RawFrame::with_payload(header, payload));
+            raw_frame_from_parts(header, payload));
 
         assert!(frame.is_none());
     }
@@ -474,7 +475,7 @@ mod tests {
         let header = (payload.len() as u32, 4, 0, 0);
 
         let frame: Option<SettingsFrame> = Frame::from_raw(
-            RawFrame::with_payload(header, payload));
+            raw_frame_from_parts(header, payload));
 
         assert!(frame.is_none());
     }

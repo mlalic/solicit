@@ -216,7 +216,8 @@ impl Frame for DataFrame {
 mod tests {
     use super::{DataFlag, DataFrame};
     use http::frame::tests::{build_test_frame, build_padded_frame_payload};
-    use http::frame::{pack_header, Frame, RawFrame};
+    use http::tests::common::raw_frame_from_parts;
+    use http::frame::{pack_header, Frame};
 
     /// Tests that the `DataFrame` struct correctly interprets a DATA frame
     /// with no padding set.
@@ -290,12 +291,12 @@ mod tests {
     /// equal to the total size of the frame.
     #[test]
     fn test_data_frame_padding_invalid() {
-        let payload = [5, b'a', b's', b'd', b'f'];
+        let payload = vec![5, b'a', b's', b'd', b'f'];
         // A header with the flag indicating padding
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
         let frame: Option<DataFrame> = Frame::from_raw(
-            RawFrame::with_payload(header.clone(), payload.to_vec()));
+            raw_frame_from_parts(header, payload));
 
         // The frame was not even created since the raw bytes are invalid
         assert!(frame.is_none())
@@ -311,7 +312,7 @@ mod tests {
         let header = (payload.len() as u32, 0u8, 0u8, 0u32);
 
         let frame: Option<DataFrame> = Frame::from_raw(
-            RawFrame::with_payload(header.clone(), payload.to_vec()));
+            raw_frame_from_parts(header, payload.to_vec()));
 
         // The frame is not valid.
         assert!(frame.is_none());
@@ -336,11 +337,11 @@ mod tests {
     /// with padding, but an empty payload.
     #[test]
     fn test_data_frame_padding_empty_payload() {
-        let payload = [];
+        let payload = vec![];
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
         let frame: Option<DataFrame> = Frame::from_raw(
-            RawFrame::with_payload(header.clone(), payload.to_vec()));
+            raw_frame_from_parts(header, payload));
 
         // In this case, we cannot receive a frame, since the payload did not
         // contain even the first byte, necessary to find the padding length.
@@ -375,7 +376,7 @@ mod tests {
         let header = (payload.len() as u32, 1u8, 8u8, 1u32);
 
         let frame: Option<DataFrame> = Frame::from_raw(
-            RawFrame::with_payload(header.clone(), payload.to_vec()));
+            raw_frame_from_parts(header, payload));
 
         assert!(frame.is_none());
     }
