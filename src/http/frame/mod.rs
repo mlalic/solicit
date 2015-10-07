@@ -225,6 +225,13 @@ impl<'a> RawFrame<'a> {
         Some(raw.into())
     }
 
+    /// Returns the total length of the `RawFrame`, including both headers, as well as the entire
+    /// payload.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.raw_content.len()
+    }
+
     /// Returns a `Vec` of bytes representing the serialized (on-the-wire)
     /// representation of this raw frame.
     pub fn serialize(&self) -> Vec<u8> {
@@ -509,5 +516,27 @@ mod tests {
         assert_eq!(vec, buf);
         // The vector and the serialized representation are also equivalent
         assert_eq!(vec, serialized);
+    }
+
+    /// Tests the `len` method of the `RawFrame`.
+    #[test]
+    fn test_raw_frame_len() {
+        {
+            // Not enough bytes for even the header of the frame
+            let buf = b"123";
+            let frame = RawFrame::from(&buf[..]);
+            assert_eq!(buf.len(), frame.len());
+        }
+        {
+            // Full header, but not enough bytes for the payload
+            let buf = vec![0, 0, 1, 0, 0, 0, 0, 0, 0];
+            let frame = RawFrame::from(&buf[..]);
+            assert_eq!(buf.len(), frame.len());
+        }
+        {
+            let buf = vec![0, 0, 1, 0, 0, 0, 0, 0, 0, 1];
+            let frame = RawFrame::from(&buf[..]);
+            assert_eq!(buf.len(), frame.len());
+        }
     }
 }
