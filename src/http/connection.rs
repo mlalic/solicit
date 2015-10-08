@@ -474,11 +474,11 @@ impl<S> HttpConnection<S> where S: SendFrame {
     /// Private helper method that handles a received `DataFrame`.
     fn handle_data_frame<Sess: Session>(&mut self, frame: DataFrame, session: &mut Sess)
             -> HttpResult<()> {
-        session.new_data_chunk(frame.get_stream_id(), &frame.data);
+        session.new_data_chunk(frame.get_stream_id(), &frame.data, self);
 
         if frame.is_set(DataFlag::EndStream) {
             debug!("End of stream {}", frame.get_stream_id());
-            session.end_of_stream(frame.get_stream_id())
+            session.end_of_stream(frame.get_stream_id(), self)
         }
 
         Ok(())
@@ -489,18 +489,18 @@ impl<S> HttpConnection<S> where S: SendFrame {
             -> HttpResult<()> {
         let headers = try!(self.decoder.decode(&frame.header_fragment)
                                        .map_err(|e| HttpError::CompressionError(e)));
-        session.new_headers(frame.get_stream_id(), headers);
+        session.new_headers(frame.get_stream_id(), headers, self);
 
         if frame.is_end_of_stream() {
             debug!("End of stream {}", frame.get_stream_id());
-            session.end_of_stream(frame.get_stream_id());
+            session.end_of_stream(frame.get_stream_id(), self);
         }
 
         Ok(())
     }
 
     /// Private helper method that handles a received `SettingsFrame`.
-    fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, _session: &mut Session)
+    fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, _session: &mut Sess)
             -> HttpResult<()> {
         if !frame.is_ack() {
             // TODO: Actually handle the settings change before sending out the ACK

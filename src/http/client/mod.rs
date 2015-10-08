@@ -276,7 +276,8 @@ impl<'a, State> ClientSession<'a, State> where State: SessionState + 'a {
 }
 
 impl<'a, State> Session for ClientSession<'a, State> where State: SessionState + 'a {
-    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
+    fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection<S>)
+            where S: SendFrame {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -289,7 +290,8 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
         stream.new_data_chunk(data);
     }
 
-    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>) {
+    fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
+            where S: SendFrame {
         debug!("Headers for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -302,7 +304,8 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
         stream.set_headers(headers);
     }
 
-    fn end_of_stream(&mut self, stream_id: StreamId) {
+    fn end_of_stream<S>(&mut self, stream_id: StreamId, _: &mut HttpConnection<S>)
+            where S: SendFrame {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -331,6 +334,7 @@ mod tests {
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
+        build_mock_http_conn,
         MockReceiveFrame,
     };
     use http::frame::{
@@ -502,18 +506,19 @@ mod tests {
     fn test_client_session_notifies_stream() {
         let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
         state.insert_outgoing(TestStream::new());
+        let mut conn = build_mock_http_conn();
 
         {
             // Registering some data to stream 1...
             let mut session = ClientSession::new(&mut state);
-            session.new_data_chunk(1, &[1, 2, 3]);
+            session.new_data_chunk(1, &[1, 2, 3], &mut conn);
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
         {
             // Some more...
             let mut session = ClientSession::new(&mut state);
-            session.new_data_chunk(1, &[4]);
+            session.new_data_chunk(1, &[4], &mut conn);
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
@@ -521,7 +526,7 @@ mod tests {
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         {
             let mut session = ClientSession::new(&mut state);
-            session.new_headers(1, headers.clone());
+            session.new_headers(1, headers.clone(), &mut conn);
         }
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
                    headers);
@@ -530,13 +535,13 @@ mod tests {
         {
             // and send it some data
             let mut session = ClientSession::new(&mut state);
-            session.new_data_chunk(3, &[100]);
+            session.new_data_chunk(3, &[100], &mut conn);
         }
         assert_eq!(state.get_stream_ref(3).unwrap().body, vec![100]);
         {
             // Finally, the stream 1 ends...
             let mut session = ClientSession::new(&mut state);
-            session.end_of_stream(1);
+            session.end_of_stream(1, &mut conn);
         }
         // ...and gets closed.
         assert!(state.get_stream_ref(1).unwrap().is_closed());

@@ -10,6 +10,7 @@ use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
 use http::{StreamId, Header};
+use http::connection::{HttpConnection, SendFrame};
 
 /// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
 /// it. Essentially, it allows the `HttpConnection` to pass information onto those higher levels
@@ -24,12 +25,15 @@ pub trait Session {
     /// Notifies the `Session` that a new data chunk has arrived on the
     /// connection for a particular stream. Only the raw data is passed
     /// to the callback (all padding is already discarded by the connection).
-    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]);
+    fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], conn: &mut HttpConnection<S>)
+            where S: SendFrame;
     /// Notifies the `Session` that headers have arrived for a particular
     /// stream. The given list of headers is already decoded by the connection.
-    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>);
+    fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, conn: &mut HttpConnection<S>)
+            where S: SendFrame;
     /// Notifies the `Session` that a particular stream got closed by the peer.
-    fn end_of_stream(&mut self, stream_id: StreamId);
+    fn end_of_stream<S>(&mut self, stream_id: StreamId, conn: &mut HttpConnection<S>)
+            where S: SendFrame;
 }
 
 /// A newtype for an iterator over `Stream`s saved in a `SessionState`.

@@ -57,7 +57,8 @@ impl<'a, State, F> ServerSession<'a, State, F>
 impl<'a, State, F> Session for ServerSession<'a, State, F>
         where State: SessionState + 'a,
               F: StreamFactory<Stream=State::Stream> + 'a {
-    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8]) {
+    fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection<S>)
+            where S: SendFrame {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -69,7 +70,8 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         // Now let the stream handle the data chunk
         stream.new_data_chunk(data);
     }
-    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>) {
+    fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
+            where S: SendFrame {
         debug!("Headers for stream {}", stream_id);
         match self.state.get_stream_mut(stream_id) {
             Some(stream) => {
@@ -87,7 +89,8 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         let _ = self.state.insert_incoming(stream_id, stream);
     }
 
-    fn end_of_stream(&mut self, stream_id: StreamId) {
+    fn end_of_stream<S>(&mut self, stream_id: StreamId, _: &mut HttpConnection<S>)
+            where S: SendFrame {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -193,7 +196,7 @@ impl<S, F, State> ServerConnection<S, F, State>
 mod tests {
     use super::ServerSession;
 
-    use http::tests::common::{TestStream, TestStreamFactory};
+    use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn};
 
     use http::session::{
         DefaultSessionState,
@@ -207,13 +210,14 @@ mod tests {
     #[test]
     fn test_server_session() {
         let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
+        let mut conn = build_mock_http_conn();
 
         // Receiving new headers results in a new stream being created
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_headers(1, headers.clone());
+            session.new_headers(1, headers.clone(), &mut conn);
         }
         assert!(state.get_stream_ref(1).is_some());
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
@@ -222,7 +226,7 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_data_chunk(1, &[1, 2, 3]);
+            session.new_data_chunk(1, &[1, 2, 3], &mut conn);
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
@@ -230,7 +234,7 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_data_chunk(1, &[4]);
+            session.new_data_chunk(1, &[4], &mut conn);
         }
         // ...all good.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
@@ -238,8 +242,8 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_headers(3, headers.clone());
-            session.new_data_chunk(3, &[100]);
+            session.new_headers(3, headers.clone(), &mut conn);
+            session.new_data_chunk(3, &[100], &mut conn);
         }
         assert!(state.get_stream_ref(3).is_some());
         assert_eq!(state.get_stream_ref(3).unwrap().headers.clone().unwrap(),
@@ -249,7 +253,7 @@ mod tests {
             // Finally, the stream 1 ends...
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.end_of_stream(1);
+            session.end_of_stream(1, &mut conn);
         }
         // ...and gets closed.
         assert!(state.get_stream_ref(1).unwrap().is_closed_remote());
