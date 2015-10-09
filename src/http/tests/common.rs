@@ -283,22 +283,30 @@ impl TestSession {
 
 impl Session for TestSession {
     fn new_data_chunk<S>(&mut self, _: StreamId, data: &[u8], _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         if !self.silent {
             assert_eq!(&self.chunks[self.curr_chunk], &data);
         }
         self.curr_chunk += 1;
+        Ok(())
     }
 
     fn new_headers<S>(&mut self, _: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         if !self.silent {
             assert_eq!(self.headers[self.curr_header], headers);
         }
         self.curr_header += 1;
+        Ok(())
     }
 
-    fn end_of_stream<S>(&mut self, _: StreamId, _: &mut HttpConnection<S>) where S: SendFrame {}
+    fn end_of_stream<S>(&mut self, _: StreamId, _: &mut HttpConnection<S>)
+            -> HttpResult<()>
+            where S: SendFrame {
+        Ok(())
+    }
 }
 
 /// A stream that can be used for testing purposes.

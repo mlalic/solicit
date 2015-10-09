@@ -9,7 +9,7 @@ use std::error::Error;
 use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
-use http::{StreamId, Header};
+use http::{StreamId, Header, HttpResult};
 use http::connection::{HttpConnection, SendFrame};
 
 /// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
@@ -18,21 +18,21 @@ use http::connection::{HttpConnection, SendFrame};
 ///
 /// These methods are effectively a set of callbacks that the `HttpConnection` invokes when the
 /// corresponding events arise on the HTTP/2 connection (i.e. frame stream).
-///
-/// TODO Allow the session to influence the `HttpConnection` state and raise
-///      errors (i.e. make the return type -> HttpResult<()>).
 pub trait Session {
     /// Notifies the `Session` that a new data chunk has arrived on the
     /// connection for a particular stream. Only the raw data is passed
     /// to the callback (all padding is already discarded by the connection).
     fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame;
     /// Notifies the `Session` that headers have arrived for a particular
     /// stream. The given list of headers is already decoded by the connection.
     fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame;
     /// Notifies the `Session` that a particular stream got closed by the peer.
     fn end_of_stream<S>(&mut self, stream_id: StreamId, conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame;
 }
 

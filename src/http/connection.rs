@@ -474,11 +474,11 @@ impl<S> HttpConnection<S> where S: SendFrame {
     /// Private helper method that handles a received `DataFrame`.
     fn handle_data_frame<Sess: Session>(&mut self, frame: DataFrame, session: &mut Sess)
             -> HttpResult<()> {
-        session.new_data_chunk(frame.get_stream_id(), &frame.data, self);
+        try!(session.new_data_chunk(frame.get_stream_id(), &frame.data, self));
 
         if frame.is_set(DataFlag::EndStream) {
             debug!("End of stream {}", frame.get_stream_id());
-            session.end_of_stream(frame.get_stream_id(), self)
+            try!(session.end_of_stream(frame.get_stream_id(), self));
         }
 
         Ok(())
@@ -489,11 +489,11 @@ impl<S> HttpConnection<S> where S: SendFrame {
             -> HttpResult<()> {
         let headers = try!(self.decoder.decode(&frame.header_fragment)
                                        .map_err(|e| HttpError::CompressionError(e)));
-        session.new_headers(frame.get_stream_id(), headers, self);
+        try!(session.new_headers(frame.get_stream_id(), headers, self));
 
         if frame.is_end_of_stream() {
             debug!("End of stream {}", frame.get_stream_id());
-            session.end_of_stream(frame.get_stream_id(), self);
+            try!(session.end_of_stream(frame.get_stream_id(), self));
         }
 
         Ok(())

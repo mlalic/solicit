@@ -58,26 +58,29 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         where State: SessionState + 'a,
               F: StreamFactory<Stream=State::Stream> + 'a {
     fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
-                return;
+                return Ok(());
             },
             Some(stream) => stream,
         };
         // Now let the stream handle the data chunk
         stream.new_data_chunk(data);
+        Ok(())
     }
     fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         debug!("Headers for stream {}", stream_id);
         match self.state.get_stream_mut(stream_id) {
             Some(stream) => {
                 // This'd correspond to having received trailers...
                 stream.set_headers(headers);
-                return;
+                return Ok(());
             },
             None => {},
         };
@@ -87,19 +90,22 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         // TODO(mlalic): Once the `Session` trait is able to signal connection failure, handle
         //               the error case here and return the corresponding protocol error.
         let _ = self.state.insert_incoming(stream_id, stream);
+        Ok(())
     }
 
     fn end_of_stream<S>(&mut self, stream_id: StreamId, _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
-                return;
+                return Ok(());
             },
             Some(stream) => stream,
         };
-        stream.close_remote()
+        stream.close_remote();
+        Ok(())
     }
 }
 
@@ -217,7 +223,7 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_headers(1, headers.clone(), &mut conn);
+            session.new_headers(1, headers.clone(), &mut conn).unwrap();
         }
         assert!(state.get_stream_ref(1).is_some());
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
@@ -226,7 +232,7 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_data_chunk(1, &[1, 2, 3], &mut conn);
+            session.new_data_chunk(1, &[1, 2, 3], &mut conn).unwrap();
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
@@ -234,7 +240,7 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_data_chunk(1, &[4], &mut conn);
+            session.new_data_chunk(1, &[4], &mut conn).unwrap();
         }
         // ...all good.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
@@ -242,8 +248,8 @@ mod tests {
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.new_headers(3, headers.clone(), &mut conn);
-            session.new_data_chunk(3, &[100], &mut conn);
+            session.new_headers(3, headers.clone(), &mut conn).unwrap();
+            session.new_data_chunk(3, &[100], &mut conn).unwrap();
         }
         assert!(state.get_stream_ref(3).is_some());
         assert_eq!(state.get_stream_ref(3).unwrap().headers.clone().unwrap(),
@@ -253,7 +259,7 @@ mod tests {
             // Finally, the stream 1 ends...
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory);
-            session.end_of_stream(1, &mut conn);
+            session.end_of_stream(1, &mut conn).unwrap();
         }
         // ...and gets closed.
         assert!(state.get_stream_ref(1).unwrap().is_closed_remote());

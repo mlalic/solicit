@@ -277,47 +277,58 @@ impl<'a, State> ClientSession<'a, State> where State: SessionState + 'a {
 
 impl<'a, State> Session for ClientSession<'a, State> where State: SessionState + 'a {
     fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
-                return;
+                // TODO(mlalic): This can currently indicate two things:
+                //                 1) the stream was idle => PROTOCOL_ERROR
+                //                 2) the stream was closed => STREAM_CLOSED (stream error)
+                return Ok(());
             },
             Some(stream) => stream,
         };
         // Now let the stream handle the data chunk
         stream.new_data_chunk(data);
+        Ok(())
     }
 
     fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         debug!("Headers for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
-                return;
+                // TODO(mlalic): This means that the server's header is not associated to any
+                //               request made by the client nor any server-initiated stream (pushed)
+                return Ok(());
             },
             Some(stream) => stream,
         };
         // Now let the stream handle the headers
         stream.set_headers(headers);
+        Ok(())
     }
 
     fn end_of_stream<S>(&mut self, stream_id: StreamId, _: &mut HttpConnection<S>)
+            -> HttpResult<()>
             where S: SendFrame {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
-                return;
+                return Ok(());
             },
             Some(stream) => stream,
         };
         // Since this implies that the server has closed the stream (i.e. provided a response), we
         // close the local end of the stream, as well as the remote one; there's no need to keep
         // sending out the request body if the server's decided that it doesn't want to see it.
-        stream.close()
+        stream.close();
+        Ok(())
     }
 }
 
@@ -511,14 +522,14 @@ mod tests {
         {
             // Registering some data to stream 1...
             let mut session = ClientSession::new(&mut state);
-            session.new_data_chunk(1, &[1, 2, 3], &mut conn);
+            session.new_data_chunk(1, &[1, 2, 3], &mut conn).unwrap();
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
         {
             // Some more...
             let mut session = ClientSession::new(&mut state);
-            session.new_data_chunk(1, &[4], &mut conn);
+            session.new_data_chunk(1, &[4], &mut conn).unwrap();
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
@@ -526,7 +537,7 @@ mod tests {
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         {
             let mut session = ClientSession::new(&mut state);
-            session.new_headers(1, headers.clone(), &mut conn);
+            session.new_headers(1, headers.clone(), &mut conn).unwrap();
         }
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
                    headers);
@@ -535,13 +546,13 @@ mod tests {
         {
             // and send it some data
             let mut session = ClientSession::new(&mut state);
-            session.new_data_chunk(3, &[100], &mut conn);
+            session.new_data_chunk(3, &[100], &mut conn).unwrap();
         }
         assert_eq!(state.get_stream_ref(3).unwrap().body, vec![100]);
         {
             // Finally, the stream 1 ends...
             let mut session = ClientSession::new(&mut state);
-            session.end_of_stream(1, &mut conn);
+            session.end_of_stream(1, &mut conn).unwrap();
         }
         // ...and gets closed.
         assert!(state.get_stream_ref(1).unwrap().is_closed());
