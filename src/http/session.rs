@@ -10,6 +10,7 @@ use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
 use http::{StreamId, Header, HttpResult};
+use http::frame::HttpSetting;
 use http::connection::{HttpConnection, SendFrame};
 
 /// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
@@ -32,6 +33,11 @@ pub trait Session {
             where S: SendFrame;
     /// Notifies the `Session` that a particular stream got closed by the peer.
     fn end_of_stream<S>(&mut self, stream_id: StreamId, conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
+            where S: SendFrame;
+    /// Notifies the `Session` that the peer has sent a new set of settings. The session itself is
+    /// responsible for acknowledging the receipt of the settings.
+    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, _conn: &mut HttpConnection<S>)
             -> HttpResult<()>
             where S: SendFrame;
 }

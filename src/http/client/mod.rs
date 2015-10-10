@@ -330,6 +330,13 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
         stream.close();
         Ok(())
     }
+
+    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
+            where S: SendFrame {
+        debug!("Sending a SETTINGS ack");
+        conn.send_settings_ack()
+    }
 }
 
 #[cfg(test)]

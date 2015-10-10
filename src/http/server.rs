@@ -7,7 +7,7 @@ use http::{
     HttpResult,
     HttpScheme,
 };
-use http::frame::SettingsFrame;
+use http::frame::{SettingsFrame, HttpSetting};
 use http::connection::{
     SendFrame, ReceiveFrame,
     HttpConnection, EndStream,
@@ -106,6 +106,13 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         };
         stream.close_remote();
         Ok(())
+    }
+
+    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
+            where S: SendFrame {
+        debug!("Sending a SETTINGS ack");
+        conn.send_settings_ack()
     }
 }
 

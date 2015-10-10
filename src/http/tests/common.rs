@@ -12,7 +12,7 @@ use http::{
     StreamId,
     Header,
 };
-use http::frame::{RawFrame, Frame, FrameHeader, pack_header};
+use http::frame::{RawFrame, Frame, FrameHeader, pack_header, HttpSetting};
 use http::session::{
     Session,
     DefaultSessionState,
@@ -306,6 +306,12 @@ impl Session for TestSession {
             -> HttpResult<()>
             where S: SendFrame {
         Ok(())
+    }
+
+    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection<S>)
+            -> HttpResult<()>
+            where S: SendFrame {
+        conn.send_settings_ack()
     }
 }
 

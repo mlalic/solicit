@@ -505,13 +505,13 @@ impl<S> HttpConnection<S> where S: SendFrame {
     }
 
     /// Private helper method that handles a received `SettingsFrame`.
-    fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, _session: &mut Sess)
+    fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, session: &mut Sess)
             -> HttpResult<()> {
         if !frame.is_ack() {
             // TODO: Actually handle the settings change before sending out the ACK
             //       sending out the ACK.
-            debug!("Sending a SETTINGS ack");
-            try!(self.send_frame(SettingsFrame::new_ack()));
+            trace!("New settings frame");
+            try!(session.new_settings(frame.settings, self));
         }
 
         Ok(())
