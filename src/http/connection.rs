@@ -299,6 +299,11 @@ impl<S> HttpConnection<S> where S: SendFrame {
         self.sender.send_frame(frame)
     }
 
+    /// Sends a SETTINGS acknowledge frame to the peer.
+    pub fn send_settings_ack(&mut self) -> HttpResult<()> {
+        self.send_frame(SettingsFrame::new_ack())
+    }
+
     /// A helper function that inserts the frames required to send the given headers onto the
     /// `SendFrame` stream.
     ///
