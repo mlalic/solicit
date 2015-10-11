@@ -174,24 +174,24 @@ pub struct RequestStream<S> where S: Stream {
 
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
 /// `start_request`) and wires the `HttpConnection` to the client `Session` callbacks.
-pub struct ClientConnection<S, State=DefaultSessionState<ClientMarker, DefaultStream>>
-        where S: SendFrame, State: SessionState {
+pub struct ClientConnection<State=DefaultSessionState<ClientMarker, DefaultStream>>
+        where State: SessionState {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
-    conn: HttpConnection<S>,
+    conn: HttpConnection,
     /// The state of the session associated to this client connection. Maintains the status of the
     /// connection streams.
     pub state: State,
 }
 
-impl<S, State> ClientConnection<S, State>
-        where S: SendFrame, State: SessionState {
+impl<State> ClientConnection<State>
+        where State: SessionState {
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
     ///
     /// The given `state` instance will handle the maintenance of the session's state.
-    pub fn with_connection(conn: HttpConnection<S>, state: State)
-            -> ClientConnection<S, State> {
+    pub fn with_connection(conn: HttpConnection, state: State)
+            -> ClientConnection<State> {
         ClientConnection {
             conn: conn,
             state: state,
@@ -210,26 +210,37 @@ impl<S, State> ClientConnection<S, State>
     /// The method is a convenience method that can be used during the initialization of the
     /// connection, as the first frame that any peer is allowed to send is an initial settings
     /// frame.
-    pub fn expect_settings<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
-        let mut session = ClientSession::new(&mut self.state);
+    pub fn expect_settings<Recv: ReceiveFrame, Sender: SendFrame>(
+            &mut self,
+            rx: &mut Recv,
+            tx: &mut Sender)
+            -> HttpResult<()> {
+        let mut session = ClientSession::new(&mut self.state, tx);
         self.conn.expect_settings(rx, &mut session)
     }
 
     /// Starts a new request based on the given `RequestStream`.
     ///
     /// For now it does not perform any validation whether the given `RequestStream` is valid.
-    pub fn start_request(&mut self, req: RequestStream<State::Stream>) -> HttpResult<StreamId> {
+    pub fn start_request<S: SendFrame>(
+            &mut self,
+            req: RequestStream<State::Stream>,
+            sender: &mut S) -> HttpResult<StreamId> {
         let end_stream = if req.stream.is_closed_local() { EndStream::Yes } else { EndStream::No };
         let stream_id = self.state.insert_outgoing(req.stream);
-        try!(self.conn.send_headers(req.headers, stream_id, end_stream));
+        try!(self.conn.sender(sender).send_headers(req.headers, stream_id, end_stream));
 
         Ok(stream_id)
     }
 
     /// Fully handles the next incoming frame provided by the given `ReceiveFrame` instance.
     /// Handling a frame may cause changes to the session state exposed by the `ClientConnection`.
-    pub fn handle_next_frame<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
-        let mut session = ClientSession::new(&mut self.state);
+    pub fn handle_next_frame<Recv: ReceiveFrame, Sender: SendFrame>(
+            &mut self,
+            rx: &mut Recv,
+            tx: &mut Sender)
+            -> HttpResult<()> {
+        let mut session = ClientSession::new(&mut self.state, tx);
         self.conn.handle_next_frame(rx, &mut session)
     }
 
@@ -237,14 +248,14 @@ impl<S, State> ClientConnection<S, State>
     ///
     /// Currently, no prioritization of streams is taken into account and which stream's data is
     /// queued cannot be relied on.
-    pub fn send_next_data(&mut self) -> HttpResult<SendStatus> {
+    pub fn send_next_data<S: SendFrame>(&mut self, sender: &mut S) -> HttpResult<SendStatus> {
         debug!("Sending next data...");
         // A default "maximum" chunk size of 8 KiB is set on all data frames.
         const MAX_CHUNK_SIZE: usize = 8 * 1024;
         let mut buf = [0; MAX_CHUNK_SIZE];
 
         let mut prioritizer = SimplePrioritizer::new(&mut self.state, &mut buf);
-        self.conn.send_next_data(&mut prioritizer)
+        self.conn.sender(sender).send_next_data(&mut prioritizer)
     }
 }
 
@@ -261,24 +272,27 @@ impl<S, State> ClientConnection<S, State>
 /// a client that streams responses directly into a file on the local file system,
 /// instead of keeping it in memory (like the `DefaultStream` does), without
 /// having to change any HTTP/2-specific logic.
-pub struct ClientSession<'a, State> where State: SessionState + 'a {
+pub struct ClientSession<'a, State, S> where State: SessionState + 'a, S: SendFrame + 'a {
     state: &'a mut State,
+    sender: &'a mut S,
 }
 
-impl<'a, State> ClientSession<'a, State> where State: SessionState + 'a {
+impl<'a, State, S> ClientSession<'a, State, S> where State: SessionState + 'a, S: SendFrame + 'a {
     /// Returns a new `ClientSession` associated to the given state.
     #[inline]
-    pub fn new(state: &'a mut State) -> ClientSession<State> {
+    pub fn new(state: &'a mut State, sender: &'a mut S) -> ClientSession<'a, State, S> {
         ClientSession {
             state: state,
+            sender: sender,
         }
     }
 }
 
-impl<'a, State> Session for ClientSession<'a, State> where State: SessionState + 'a {
-    fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+impl<'a, State, S> Session for ClientSession<'a, State, S>
+        where State: SessionState + 'a,
+              S: SendFrame + 'a {
+    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -295,9 +309,8 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
         Ok(())
     }
 
-    fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -313,9 +326,8 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
         Ok(())
     }
 
-    fn end_of_stream<S>(&mut self, stream_id: StreamId, _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn end_of_stream(&mut self, stream_id: StreamId, _: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -331,11 +343,10 @@ impl<'a, State> Session for ClientSession<'a, State> where State: SessionState +
         Ok(())
     }
 
-    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn new_settings(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("Sending a SETTINGS ack");
-        conn.send_settings_ack()
+        conn.sender(self.sender).send_settings_ack()
     }
 }
 
@@ -354,6 +365,7 @@ mod tests {
         build_mock_client_conn,
         build_mock_http_conn,
         MockReceiveFrame,
+        MockSendFrame,
     };
     use http::frame::{
         SettingsFrame,
@@ -379,15 +391,17 @@ mod tests {
     fn test_init_client_conn() {
         let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
         let mut conn = build_mock_client_conn();
+        let mut sender = MockSendFrame::new();
         let mut receiver = MockReceiveFrame::new(frames);
 
-        conn.expect_settings(&mut receiver).unwrap();
+        conn.expect_settings(&mut receiver, &mut sender).unwrap();
 
         // We have read the server's response (the settings frame only, since no panic
         // ocurred)
         assert_eq!(receiver.recv_list.len(), 0);
         // We also sent an ACK already.
-        let frame = match conn.conn.sender.sent.remove(0) {
+        assert_eq!(sender.sent.len(), 1);
+        let frame = match sender.sent.remove(0) {
             HttpFrame::SettingsFrame(frame) => frame,
             _ => panic!("ACK not sent!"),
         };
@@ -400,11 +414,12 @@ mod tests {
     fn test_init_client_conn_no_settings() {
         let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
         let mut conn = build_mock_client_conn();
+        let mut sender = MockSendFrame::new();
         let mut receiver = MockReceiveFrame::new(frames);
 
         // We get an error since the first frame sent by the server was not
         // SETTINGS.
-        assert!(conn.expect_settings(&mut receiver).is_err());
+        assert!(conn.expect_settings(&mut receiver, &mut sender).is_err());
     }
 
     /// A helper function that prepares a `TestStream` with an optional outgoing data stream.
@@ -424,39 +439,43 @@ mod tests {
         {
             // No streams => nothing sent.
             let mut conn = build_mock_client_conn();
-            let res = conn.send_next_data().unwrap();
+            let mut sender = MockSendFrame::new();
+            let res = conn.send_next_data(&mut sender).unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // A locally closed stream (i.e. nothing to send)
             let mut conn = build_mock_client_conn();
+            let mut sender = MockSendFrame::new();
             conn.state.insert_outgoing(prepare_stream(None));
-            let res = conn.send_next_data().unwrap();
+            let res = conn.send_next_data(&mut sender).unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // A stream with some data
             let mut conn = build_mock_client_conn();
+            let mut sender = MockSendFrame::new();
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
-            let res = conn.send_next_data().unwrap();
+            let res = conn.send_next_data(&mut sender).unwrap();
             assert_eq!(res, SendStatus::Sent);
 
             // All of it got sent in the first go, so now we've got nothing?
-            let res = conn.send_next_data().unwrap();
+            let res = conn.send_next_data(&mut sender).unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
         {
             // Multiple streams with data
             let mut conn = build_mock_client_conn();
+            let mut sender = MockSendFrame::new();
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             conn.state.insert_outgoing(prepare_stream(Some(vec![1, 2, 3])));
             for _ in 0..3 {
-                let res = conn.send_next_data().unwrap();
+                let res = conn.send_next_data(&mut sender).unwrap();
                 assert_eq!(res, SendStatus::Sent);
             }
             // All of it got sent in the first go, so now we've got nothing?
-            let res = conn.send_next_data().unwrap();
+            let res = conn.send_next_data(&mut sender).unwrap();
             assert_eq!(res, SendStatus::Nothing);
         }
     }
@@ -467,20 +486,22 @@ mod tests {
         {
             // No body
             let mut conn = build_mock_client_conn();
+            let mut sender = MockSendFrame::new();
 
-            conn.start_request(RequestStream {
+            let stream = RequestStream {
                 headers: vec![
                     (b":method".to_vec(), b"GET".to_vec()),
                 ],
                 stream: prepare_stream(None),
-            }).unwrap();
+            };
+            conn.start_request(stream, &mut sender).unwrap();
 
             // The stream is in the connection state?
             assert!(conn.state.get_stream_ref(1).is_some());
             // The headers got sent?
             // (It'd be so much nicer to assert that the `send_headers` method got called)
-            assert_eq!(conn.conn.sender.sent.len(), 1);
-            match conn.conn.sender.sent[0] {
+            assert_eq!(sender.sent.len(), 1);
+            match sender.sent[0] {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The frame closed the stream?
                     assert!(frame.is_end_of_stream());
@@ -491,20 +512,22 @@ mod tests {
         {
             // With a body
             let mut conn = build_mock_client_conn();
+            let mut sender = MockSendFrame::new();
 
-            conn.start_request(RequestStream {
+            let stream = RequestStream {
                 headers: vec![
                     (b":method".to_vec(), b"POST".to_vec()),
                 ],
                 stream: prepare_stream(Some(vec![1, 2, 3])),
-            }).unwrap();
+            };
+            conn.start_request(stream, &mut sender).unwrap();
 
             // The stream is in the connection state?
             assert!(conn.state.get_stream_ref(1).is_some());
             // The headers got sent?
             // (It'd be so much nicer to assert that the `send_headers` method got called)
-            assert_eq!(conn.conn.sender.sent.len(), 1);
-            match conn.conn.sender.sent[0] {
+            assert_eq!(sender.sent.len(), 1);
+            match sender.sent[0] {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The stream is still open
                     assert!(!frame.is_end_of_stream());
@@ -525,17 +548,18 @@ mod tests {
         let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
         state.insert_outgoing(TestStream::new());
         let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
 
         {
             // Registering some data to stream 1...
-            let mut session = ClientSession::new(&mut state);
+            let mut session = ClientSession::new(&mut state, &mut sender);
             session.new_data_chunk(1, &[1, 2, 3], &mut conn).unwrap();
         }
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3]);
         {
             // Some more...
-            let mut session = ClientSession::new(&mut state);
+            let mut session = ClientSession::new(&mut state, &mut sender);
             session.new_data_chunk(1, &[4], &mut conn).unwrap();
         }
         // ...works.
@@ -543,7 +567,7 @@ mod tests {
         // Now headers?
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         {
-            let mut session = ClientSession::new(&mut state);
+            let mut session = ClientSession::new(&mut state, &mut sender);
             session.new_headers(1, headers.clone(), &mut conn).unwrap();
         }
         assert_eq!(state.get_stream_ref(1).unwrap().headers.clone().unwrap(),
@@ -552,13 +576,13 @@ mod tests {
         state.insert_outgoing(TestStream::new());
         {
             // and send it some data
-            let mut session = ClientSession::new(&mut state);
+            let mut session = ClientSession::new(&mut state, &mut sender);
             session.new_data_chunk(3, &[100], &mut conn).unwrap();
         }
         assert_eq!(state.get_stream_ref(3).unwrap().body, vec![100]);
         {
             // Finally, the stream 1 ends...
-            let mut session = ClientSession::new(&mut state);
+            let mut session = ClientSession::new(&mut state, &mut sender);
             session.end_of_stream(1, &mut conn).unwrap();
         }
         // ...and gets closed.

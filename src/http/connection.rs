@@ -136,9 +136,7 @@ pub enum SendStatus {
 /// Similarly, it provides an API for handling events that arise from receiving frames, without
 /// requiring the higher level to directly look at the frames themselves, rather only the semantic
 /// content within the frames.
-pub struct HttpConnection<S> where S: SendFrame {
-    /// The instance handling the writing of frames.
-    pub sender: S,
+pub struct HttpConnection {
     /// HPACK decoder used to decode incoming headers before passing them on to the session.
     decoder: hpack::Decoder<'static>,
     /// The HPACK encoder used to encode headers before sending them on this connection.
@@ -261,30 +259,20 @@ pub enum EndStream {
     No,
 }
 
-impl<S> HttpConnection<S> where S: SendFrame {
-    /// Creates a new `HttpConnection` that will use the given sender
-    /// for writing frames.
-    pub fn new(sender: S, scheme: HttpScheme) -> HttpConnection<S> {
-        HttpConnection {
-            sender: sender,
-            scheme: scheme,
-            decoder: hpack::Decoder::new(),
-            encoder: hpack::Encoder::new(),
-        }
-    }
+/// The struct represents an `HttpConnection` that has been bound to a `SendFrame` reference,
+/// allowing it to send frames. It exposes convenience methods for various send operations that can
+/// be invoked on the underlying stream. The methods prepare the appropriate frames and queue their
+/// sending on the referenced `SendFrame` instance.
+///
+/// The only way for clients to obtain an `HttpConnectionSender` is to invoke the
+/// `HttpConnection::sender` method and provide it a reference to the `SendFrame` that should be
+/// used.
+pub struct HttpConnectionSender<'a, S> where S: SendFrame + 'a {
+    sender: &'a mut S,
+    conn: &'a mut HttpConnection,
+}
 
-    /// Creates a new `HttpConnection` that will use the given stream as its
-    /// underlying transport layer.
-    ///
-    /// This constructor is provided as a convenience when the underlying IO of the
-    /// HTTP/2 connection should be based on the `TransportStream` interface.
-    ///
-    /// The scheme of the connection is also provided.
-    pub fn with_stream<TS>(stream: TS, scheme: HttpScheme) -> HttpConnection<TS>
-            where TS: TransportStream {
-        HttpConnection::new(stream, scheme)
-    }
-
+impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
     /// Sends the given frame to the peer.
     ///
     /// # Returns
@@ -329,7 +317,7 @@ impl<S> HttpConnection<S> where S: SendFrame {
                           headers: Vec<Header>,
                           stream_id: StreamId,
                           end_stream: EndStream) -> HttpResult<()> {
-        let headers_fragment = self.encoder.encode(
+        let headers_fragment = self.conn.encoder.encode(
             headers.iter().map(|h| (&h.0[..], &h.1[..])));
         // For now, sending header fragments larger than 16kB is not supported
         // (i.e. the encoded representation cannot be split into CONTINUATION
@@ -356,8 +344,8 @@ impl<S> HttpConnection<S> where S: SendFrame {
     /// - `stream_id` - the ID of the stream on which the data will be sent
     /// - `end_stream` - whether the stream should be closed from the peer's side immediately after
     ///   sending the data (i.e. the last data frame closes the stream).
-    pub fn send_data<'a>(&mut self,
-                         chunk: DataChunk<'a>) -> HttpResult<()> {
+    pub fn send_data(&mut self,
+                         chunk: DataChunk) -> HttpResult<()> {
         let DataChunk { data, stream_id, end_stream } = chunk;
         self.send_data_inner(data.into_owned(), stream_id, end_stream)
     }
@@ -394,6 +382,56 @@ impl<S> HttpConnection<S> where S: SendFrame {
             },
         }
     }
+}
+
+impl HttpConnection {
+    /// Creates a new `HttpConnection` that will use the given sender
+    /// for writing frames.
+    pub fn new(scheme: HttpScheme) -> HttpConnection {
+        HttpConnection {
+            scheme: scheme,
+            decoder: hpack::Decoder::new(),
+            encoder: hpack::Encoder::new(),
+        }
+    }
+
+    /// Creates a new `HttpConnectionSender` instance that will use the given `SendFrame` instance
+    /// to send the frames that it prepares. This is a convenience struct so that clients do not
+    /// have to pass the same `sender` reference to multiple send methods.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use solicit::http::{HttpScheme, HttpResult};
+    /// use solicit::http::frame::RawFrame;
+    /// use solicit::http::connection::{HttpConnection, SendFrame};
+    /// struct FakeSender;
+    /// impl SendFrame for FakeSender {
+    ///     fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
+    ///         // Does not actually send anything!
+    ///         Ok(())
+    ///     }
+    /// }
+    /// let mut conn = HttpConnection::new(HttpScheme::Http);
+    /// {
+    ///     let mut frame_sender = FakeSender;
+    ///     let mut sender = conn.sender(&mut frame_sender);
+    ///     // Now we can use the provided sender to queue multiple HTTP/2 write operations,
+    ///     // without passing the same FakeSender reference to every single method.
+    ///     sender.send_settings_ack().unwrap();
+    ///     // While the `sender` is active, though, the original `conn` cannot be used, as the
+    ///     // sender holds on a mutable reference to it...
+    /// }
+    /// // A sender can be obtained, immediately used, and discarded:
+    /// conn.sender(&mut FakeSender).send_settings_ack();
+    /// ```
+    pub fn sender<'a, S: SendFrame>(&'a mut self, sender: &'a mut S) -> HttpConnectionSender<S> {
+        HttpConnectionSender {
+            sender: sender,
+            conn: self,
+        }
+    }
+
     /// The method processes the next frame provided by the given `ReceiveFrame` instance, expecting
     /// it to be a SETTINGS frame.
     /// Additionally, the frame cannot be an ACK settings frame, but rather it should contain the
@@ -556,12 +594,12 @@ mod tests {
     ///
     /// If the `HttpFrame` variant is `HttpFrame::UnknownFrame`, nothing will
     /// be sent and an `Ok(())` is returned.
-    fn send_frame<S: SendFrame>(conn: &mut HttpConnection<S>, frame: HttpFrame)
+    fn send_frame<S: SendFrame>(sender: &mut S, conn: &mut HttpConnection, frame: HttpFrame)
             -> HttpResult<()> {
         match frame {
-            HttpFrame::DataFrame(frame) => conn.send_frame(frame),
-            HttpFrame::SettingsFrame(frame) => conn.send_frame(frame),
-            HttpFrame::HeadersFrame(frame) => conn.send_frame(frame),
+            HttpFrame::DataFrame(frame) => conn.sender(sender).send_frame(frame),
+            HttpFrame::SettingsFrame(frame) => conn.sender(sender).send_frame(frame),
+            HttpFrame::HeadersFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::UnknownFrame(_) => Ok(()),
         }
     }
@@ -771,12 +809,13 @@ mod tests {
         ];
         let expected = frames.clone();
         let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
 
         for frame in frames.into_iter() {
-            send_frame(&mut conn, frame).unwrap();
+            send_frame(&mut sender, &mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, conn.sender.sent);
+        assert_eq!(expected, sender.sent);
     }
 
     #[test]
@@ -789,6 +828,7 @@ mod tests {
             assert_eq!(expected, &frame.data[..]);
         }
         let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
         let chunks = vec![
             vec![1, 2, 3, 4],
             vec![5, 6],
@@ -799,11 +839,13 @@ mod tests {
 
         // Send as many chunks as we've given the prioritizer
         for chunk in chunks.iter() {
-            assert_eq!(SendStatus::Sent, conn.send_next_data(&mut prioritizer).unwrap());
-            expect_chunk(&chunk, conn.sender.sent.last().unwrap());
+            assert_eq!(SendStatus::Sent,
+                       conn.sender(&mut sender).send_next_data(&mut prioritizer).unwrap());
+            expect_chunk(&chunk, sender.sent.last().unwrap());
         }
         // Nothing to send any more
-        assert_eq!(SendStatus::Nothing, conn.send_next_data(&mut prioritizer).unwrap());
+        assert_eq!(SendStatus::Nothing,
+                   conn.sender(&mut sender).send_next_data(&mut prioritizer).unwrap());
     }
 
     /// Tests that multiple frames are correctly written to the stream.
@@ -817,12 +859,13 @@ mod tests {
         ];
         let expected = frames.clone();
         let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
 
         for frame in frames.into_iter() {
-            send_frame(&mut conn, frame).unwrap();
+            send_frame(&mut sender, &mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, conn.sender.sent);
+        assert_eq!(expected, sender.sent);
     }
 
     /// Tests that `HttpConnection::send_headers` correctly sends the given headers when they can
@@ -840,14 +883,15 @@ mod tests {
         ];
         {
             let mut conn = build_mock_http_conn();
+            let mut sender = MockSendFrame::new();
 
             // Headers when the stream should be closed
-            conn.send_headers(&headers[..], 1, EndStream::Yes).unwrap();
+            conn.sender(&mut sender).send_headers(&headers[..], 1, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
-            assert_eq!(conn.sender.sent.len(), 1);
+            assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match conn.sender.sent.remove(0) {
+            let frame = match sender.sent.remove(0) {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -859,14 +903,15 @@ mod tests {
         }
         {
             let mut conn = build_mock_http_conn();
+            let mut sender = MockSendFrame::new();
 
             // Headers when the stream should be left open
-            conn.send_headers(&headers[..], 1, EndStream::No).unwrap();
+            conn.sender(&mut sender).send_headers(&headers[..], 1, EndStream::No).unwrap();
 
             // Only 1 frame sent?
-            assert_eq!(conn.sender.sent.len(), 1);
+            assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match conn.sender.sent.remove(0) {
+            let frame = match sender.sent.remove(0) {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -877,14 +922,15 @@ mod tests {
         }
         {
             let mut conn = build_mock_http_conn();
+            let mut sender = MockSendFrame::new();
 
             // Make sure it's all peachy when we give a `Vec` instead of a slice
-            conn.send_headers(headers.clone(), 1, EndStream::Yes).unwrap();
+            conn.sender(&mut sender).send_headers(headers.clone(), 1, EndStream::Yes).unwrap();
 
             // Only 1 frame sent?
-            assert_eq!(conn.sender.sent.len(), 1);
+            assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match conn.sender.sent.remove(0) {
+            let frame = match sender.sent.remove(0) {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -903,14 +949,16 @@ mod tests {
         {
             // Data shouldn't end the stream...
             let mut conn = build_mock_http_conn();
+            let mut sender = MockSendFrame::new();
             let data: &[u8] = b"1234";
 
-            conn.send_data(DataChunk::new_borrowed(data, 1, EndStream::No)).unwrap();
+            conn.sender(&mut sender).send_data(DataChunk::new_borrowed(data, 1, EndStream::No))
+                                    .unwrap();
 
             // Only 1 frame sent?
-            assert_eq!(conn.sender.sent.len(), 1);
+            assert_eq!(sender.sent.len(), 1);
             // A data frame?
-            let frame = match conn.sender.sent.remove(0) {
+            let frame = match sender.sent.remove(0) {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),
             };
@@ -920,14 +968,16 @@ mod tests {
         {
             // Data should end the stream...
             let mut conn = build_mock_http_conn();
+            let mut sender = MockSendFrame::new();
             let data: &[u8] = b"1234";
 
-            conn.send_data(DataChunk::new_borrowed(data, 1, EndStream::Yes)).unwrap();
+            conn.sender(&mut sender).send_data(DataChunk::new_borrowed(data, 1, EndStream::Yes))
+                                    .unwrap();
 
             // Only 1 frame sent?
-            assert_eq!(conn.sender.sent.len(), 1);
+            assert_eq!(sender.sent.len(), 1);
             // A data frame?
-            let frame = match conn.sender.sent.remove(0) {
+            let frame = match sender.sent.remove(0) {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),
             };
@@ -937,6 +987,7 @@ mod tests {
         {
             // given a `Vec` we're good too?
             let mut conn = build_mock_http_conn();
+            let mut sender = MockSendFrame::new();
             let data: &[u8] = b"1234";
             let chunk = DataChunk {
                 data: Cow::Owned(data.to_vec()),
@@ -944,12 +995,12 @@ mod tests {
                 end_stream: EndStream::Yes,
             };
 
-            conn.send_data(chunk).unwrap();
+            conn.sender(&mut sender).send_data(chunk).unwrap();
 
             // Only 1 frame sent?
-            assert_eq!(conn.sender.sent.len(), 1);
+            assert_eq!(sender.sent.len(), 1);
             // A data frame?
-            let frame = match conn.sender.sent.remove(0) {
+            let frame = match sender.sent.remove(0) {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),
             };
@@ -965,8 +1016,7 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
         ];
-        let mut conn = HttpConnection::new(
-            MockSendFrame::new(), HttpScheme::Http);
+        let mut conn = HttpConnection::new(HttpScheme::Http);
         let mut session = TestSession::new();
         let mut frame_provider = MockReceiveFrame::new(frames);
 
@@ -986,8 +1036,7 @@ mod tests {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::DataFrame(DataFrame::new(1)),
         ];
-        let mut conn = HttpConnection::new(
-            MockSendFrame::new(), HttpScheme::Http);
+        let mut conn = HttpConnection::new(HttpScheme::Http);
         let mut session = TestSession::new();
         let mut frame_provider = MockReceiveFrame::new(frames);
 
@@ -1016,8 +1065,7 @@ mod tests {
                 HttpFrame::DataFrame(frame)
             },
         ];
-        let mut conn = HttpConnection::new(
-            MockSendFrame::new(), HttpScheme::Http);
+        let mut conn = HttpConnection::new(HttpScheme::Http);
         let mut session = TestSession::new_verify(
                 vec![headers],
                 vec![b"".to_vec(), b"1234".to_vec()]);
@@ -1038,24 +1086,21 @@ mod tests {
         {
             // The next frame is indeed a settings frame.
             let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new())];
-            let mut conn = HttpConnection::new(
-                MockSendFrame::new(), HttpScheme::Http);
+            let mut conn = HttpConnection::new(HttpScheme::Http);
             let mut frame_provider = MockReceiveFrame::new(frames);
             assert!(conn.expect_settings(&mut frame_provider, &mut TestSession::new()).is_ok());
         }
         {
             // The next frame is a data frame...
             let frames = vec![HttpFrame::DataFrame(DataFrame::new(1))];
-            let mut conn = HttpConnection::new(
-                MockSendFrame::new(), HttpScheme::Http);
+            let mut conn = HttpConnection::new(HttpScheme::Http);
             let mut frame_provider = MockReceiveFrame::new(frames);
             assert!(conn.expect_settings(&mut frame_provider, &mut TestSession::new()).is_err());
         }
         {
             // The next frame is an ACK settings frame
             let frames = vec![HttpFrame::SettingsFrame(SettingsFrame::new_ack())];
-            let mut conn = HttpConnection::new(
-                MockSendFrame::new(), HttpScheme::Http);
+            let mut conn = HttpConnection::new(HttpScheme::Http);
             let mut frame_provider = MockReceiveFrame::new(frames);
             assert!(conn.expect_settings(&mut frame_provider, &mut TestSession::new()).is_err());
         }

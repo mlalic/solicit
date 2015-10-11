@@ -86,8 +86,9 @@ impl StreamFactory for SimpleFactory {
 /// }
 /// ```
 pub struct SimpleServer<TS, H> where TS: TransportStream, H: FnMut(ServerRequest) -> Response {
-    conn: ServerConnection<TS, SimpleFactory>,
+    conn: ServerConnection<SimpleFactory>,
     receiver: TS,
+    sender: TS,
     handler: H,
 }
 
@@ -103,19 +104,19 @@ impl<TS, H> SimpleServer<TS, H>
             return Err(HttpError::UnableToConnect);
         }
 
-        let receiver = try!(stream.try_split());
-        let conn = HttpConnection::<TS>::with_stream(stream, HttpScheme::Http);
+        let conn = HttpConnection::new(HttpScheme::Http);
         let state = DefaultSessionState::<ServerMarker, _>::new();
         let conn = ServerConnection::with_connection(conn, state, SimpleFactory);
         let mut server = SimpleServer {
             conn: conn,
-            receiver: receiver,
+            receiver: try!(stream.try_split()),
+            sender: stream,
             handler: handler,
         };
 
         // Initialize the connection -- send own settings and process the peer's
-        try!(server.conn.send_settings());
-        try!(server.conn.expect_settings(&mut server.receiver));
+        try!(server.conn.send_settings(&mut server.sender));
+        try!(server.conn.expect_settings(&mut server.receiver, &mut server.sender));
 
         // Set up done
         Ok(server)
@@ -127,7 +128,7 @@ impl<TS, H> SimpleServer<TS, H>
     /// Handling the frame can trigger the handler callback. Any responses returned by the handler
     /// are immediately flushed out to the client (blocking the call until it's done).
     pub fn handle_next(&mut self) -> HttpResult<()> {
-        try!(self.conn.handle_next_frame(&mut self.receiver));
+        try!(self.conn.handle_next_frame(&mut self.receiver, &mut self.sender));
         let responses = try!(self.handle_requests());
         try!(self.prepare_responses(responses));
         try!(self.flush_streams());
@@ -161,7 +162,8 @@ impl<TS, H> SimpleServer<TS, H>
             try!(self.conn.start_response(
                     response.headers,
                     response.stream_id,
-                    EndStream::No));
+                    EndStream::No,
+                    &mut self.sender));
             let mut stream = self.conn.state.get_stream_mut(response.stream_id).unwrap();
             stream.set_full_data(response.body);
         }
@@ -172,7 +174,7 @@ impl<TS, H> SimpleServer<TS, H>
     /// Flushes the outgoing buffers of all streams.
     #[inline]
     fn flush_streams(&mut self) -> HttpResult<()> {
-        while let SendStatus::Sent = try!(self.conn.send_next_data()) {}
+        while let SendStatus::Sent = try!(self.conn.send_next_data(&mut self.sender)) {}
 
         Ok(())
     }

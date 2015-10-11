@@ -7,7 +7,7 @@ use http::{
     HttpResult,
     HttpScheme,
 };
-use http::frame::{SettingsFrame, HttpSetting};
+use http::frame::{HttpSetting};
 use http::connection::{
     SendFrame, ReceiveFrame,
     HttpConnection, EndStream,
@@ -35,31 +35,36 @@ pub trait StreamFactory {
 }
 
 /// An implementation of the `Session` trait for a server-side HTTP/2 connection.
-pub struct ServerSession<'a, State, F>
+pub struct ServerSession<'a, State, F, S>
         where State: SessionState + 'a,
+              S: SendFrame + 'a,
               F: StreamFactory<Stream=State::Stream> + 'a {
     state: &'a mut State,
     factory: &'a mut F,
+    sender: &'a mut S,
 }
 
-impl<'a, State, F> ServerSession<'a, State, F>
+impl<'a, State, F, S> ServerSession<'a, State, F, S>
         where State: SessionState + 'a,
+              S: SendFrame + 'a,
               F: StreamFactory<Stream=State::Stream> + 'a {
     #[inline]
-    pub fn new(state: &'a mut State, factory: &'a mut F) -> ServerSession<'a, State, F> {
+    pub fn new(state: &'a mut State, factory: &'a mut F, sender: &'a mut S)
+            -> ServerSession<'a, State, F, S> {
         ServerSession {
             state: state,
             factory: factory,
+            sender: sender,
         }
     }
 }
 
-impl<'a, State, F> Session for ServerSession<'a, State, F>
+impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
         where State: SessionState + 'a,
+              S: SendFrame + 'a,
               F: StreamFactory<Stream=State::Stream> + 'a {
-    fn new_data_chunk<S>(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -72,9 +77,9 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         stream.new_data_chunk(data);
         Ok(())
     }
-    fn new_headers<S>(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+
+    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
         match self.state.get_stream_mut(stream_id) {
             Some(stream) => {
@@ -93,9 +98,8 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         Ok(())
     }
 
-    fn end_of_stream<S>(&mut self, stream_id: StreamId, _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn end_of_stream(&mut self, stream_id: StreamId, _: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -108,23 +112,21 @@ impl<'a, State, F> Session for ServerSession<'a, State, F>
         Ok(())
     }
 
-    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn new_settings(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection)
+            -> HttpResult<()> {
         debug!("Sending a SETTINGS ack");
-        conn.send_settings_ack()
+        conn.sender(self.sender).send_settings_ack()
     }
 }
 
 /// The struct provides a more convenient API for server-related functionality of an HTTP/2
 /// connection, such as sending a response back to the client.
-pub struct ServerConnection<S, F, State=DefaultSessionState<ServerMarker, DefaultStream>>
-        where S: SendFrame,
-              State: SessionState,
+pub struct ServerConnection<F, State=DefaultSessionState<ServerMarker, DefaultStream>>
+        where State: SessionState,
               F: StreamFactory<Stream=State::Stream> {
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
-    conn: HttpConnection<S>,
+    conn: HttpConnection,
     /// The state of the session associated to this client connection. Maintains the status of the
     /// connection streams.
     pub state: State,
@@ -133,14 +135,14 @@ pub struct ServerConnection<S, F, State=DefaultSessionState<ServerMarker, Defaul
     factory: F,
 }
 
-impl<S, F, State> ServerConnection<S, F, State>
-        where S: SendFrame, State: SessionState, F: StreamFactory<Stream=State::Stream> {
+impl<F, State> ServerConnection<F, State>
+        where State: SessionState, F: StreamFactory<Stream=State::Stream> {
     /// Creates a new `ServerConnection` that will use the given `HttpConnection` for its
     /// underlying HTTP/2 communication. The `state` and `factory` represent, respectively, the
     /// initial state of the connection and an instance of the `StreamFactory` type (allowing the
     /// client to handle newly created streams).
-    pub fn with_connection(conn: HttpConnection<S>, state: State, factory: F)
-            -> ServerConnection<S, F, State> {
+    pub fn with_connection(conn: HttpConnection, state: State, factory: F)
+            -> ServerConnection<F, State> {
         ServerConnection {
             conn: conn,
             state: state,
@@ -155,23 +157,31 @@ impl<S, F, State> ServerConnection<S, F, State>
     }
 
     /// Send the current settings associated to the `ServerConnection` to the client.
-    pub fn send_settings(&mut self) -> HttpResult<()> {
+    pub fn send_settings<S: SendFrame>(&mut self, sender: &mut S) -> HttpResult<()> {
         // TODO: `HttpConnection` should provide a better API for sending settings.
-        self.conn.sender.send_frame(SettingsFrame::new())
+        self.conn.sender(sender).send_settings_ack()
     }
 
     /// Handles the next frame on the given `ReceiveFrame` instance and expects it to be a
     /// (non-ACK) SETTINGS frame. Returns an error if not.
-    pub fn expect_settings<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
-        let mut session = ServerSession::new(&mut self.state, &mut self.factory);
+    pub fn expect_settings<Recv: ReceiveFrame, Sender: SendFrame>(
+            &mut self,
+            rx: &mut Recv,
+            tx: &mut Sender)
+            -> HttpResult<()> {
+        let mut session = ServerSession::new(&mut self.state, &mut self.factory, tx);
         self.conn.expect_settings(rx, &mut session)
     }
 
     /// Fully handles the next frame provided by the given `ReceiveFrame` instance.
     /// Handling the frame can cause the session state of the `ServerConnection` to update.
     #[inline]
-    pub fn handle_next_frame<Recv: ReceiveFrame>(&mut self, rx: &mut Recv) -> HttpResult<()> {
-        let mut session = ServerSession::new(&mut self.state, &mut self.factory);
+    pub fn handle_next_frame<Recv: ReceiveFrame, Sender: SendFrame>(
+            &mut self,
+            rx: &mut Recv,
+            tx: &mut Sender)
+            -> HttpResult<()> {
+        let mut session = ServerSession::new(&mut self.state, &mut self.factory, tx);
         self.conn.handle_next_frame(rx, &mut session)
     }
 
@@ -181,18 +191,21 @@ impl<S, F, State> ServerConnection<S, F, State>
     /// the connection's state. (The body does not have to be ready when this method is called, as
     /// long as the `Stream` instance knows how to provide it to the connection later on.)
     #[inline]
-    pub fn start_response(&mut self,
-                          headers: Vec<Header>,
-                          stream_id: StreamId,
-                          end_stream: EndStream) -> HttpResult<()> {
-        self.conn.send_headers(headers, stream_id, end_stream)
+    pub fn start_response<S: SendFrame>(
+            &mut self,
+            headers: Vec<Header>,
+            stream_id: StreamId,
+            end_stream: EndStream,
+            sender: &mut S)
+            -> HttpResult<()> {
+        self.conn.sender(sender).send_headers(headers, stream_id, end_stream)
     }
 
     /// Queues a new DATA frame onto the underlying `SendFrame`.
     ///
     /// Currently, no prioritization of streams is taken into account and which stream's data is
     /// queued cannot be relied on.
-    pub fn send_next_data(&mut self) -> HttpResult<SendStatus> {
+    pub fn send_next_data<S: SendFrame>(&mut self, sender: &mut S) -> HttpResult<SendStatus> {
         debug!("Sending next data...");
         // A default "maximum" chunk size of 8 KiB is set on all data frames.
         const MAX_CHUNK_SIZE: usize = 8 * 1024;
@@ -201,7 +214,7 @@ impl<S, F, State> ServerConnection<S, F, State>
         // TODO: Additionally account for the flow control windows.
         let mut prioritizer = SimplePrioritizer::new(&mut self.state, &mut buf);
 
-        self.conn.send_next_data(&mut prioritizer)
+        self.conn.sender(sender).send_next_data(&mut prioritizer)
     }
 }
 
@@ -209,7 +222,7 @@ impl<S, F, State> ServerConnection<S, F, State>
 mod tests {
     use super::ServerSession;
 
-    use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn};
+    use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn, MockSendFrame};
 
     use http::session::{
         DefaultSessionState,
@@ -224,12 +237,13 @@ mod tests {
     fn test_server_session() {
         let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
         let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
 
         // Receiving new headers results in a new stream being created
         let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         {
             let mut factory = TestStreamFactory;
-            let mut session = ServerSession::new(&mut state, &mut factory);
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
             session.new_headers(1, headers.clone(), &mut conn).unwrap();
         }
         assert!(state.get_stream_ref(1).is_some());
@@ -238,7 +252,7 @@ mod tests {
         // Now some data arrives on the stream...
         {
             let mut factory = TestStreamFactory;
-            let mut session = ServerSession::new(&mut state, &mut factory);
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
             session.new_data_chunk(1, &[1, 2, 3], &mut conn).unwrap();
         }
         // ...works.
@@ -246,7 +260,7 @@ mod tests {
         // Some more data...
         {
             let mut factory = TestStreamFactory;
-            let mut session = ServerSession::new(&mut state, &mut factory);
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
             session.new_data_chunk(1, &[4], &mut conn).unwrap();
         }
         // ...all good.
@@ -254,7 +268,7 @@ mod tests {
         // Add another stream in the mix
         {
             let mut factory = TestStreamFactory;
-            let mut session = ServerSession::new(&mut state, &mut factory);
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
             session.new_headers(3, headers.clone(), &mut conn).unwrap();
             session.new_data_chunk(3, &[100], &mut conn).unwrap();
         }
@@ -265,7 +279,7 @@ mod tests {
         {
             // Finally, the stream 1 ends...
             let mut factory = TestStreamFactory;
-            let mut session = ServerSession::new(&mut state, &mut factory);
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
             session.end_of_stream(1, &mut conn).unwrap();
         }
         // ...and gets closed.

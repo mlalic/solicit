@@ -251,10 +251,13 @@ struct ClientService {
     /// but sent).
     limit: u32,
     /// The connection that is used for underlying HTTP/2 communication.
-    conn: ClientConnection<ChannelFrameSenderHandle>,
+    conn: ClientConnection,
     /// The handle allows the service to get the HTTP/2 frame that has been extracted from the data
     /// read from the socket on another thread.
     recv_handle: ChannelFrameReceiverHandle,
+    /// The handle allows the service to queue HTTP/2 frames for another thread to push out on a
+    /// blocking socket.
+    send_handle: ChannelFrameSenderHandle,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
     chans: HashMap<StreamId, Sender<Response>>,
@@ -319,7 +322,7 @@ impl ClientService {
         // ...and pass the non-blocking/buffering ends into the `HttpConnect` instead of the
         // blocking socket itself.
         let conn = ClientConnection::with_connection(
-                HttpConnection::new(send_handle, scheme),
+                HttpConnection::new(scheme),
                 DefaultSessionState::<ClientMarker, _>::new());
 
         let service = ClientService {
@@ -329,6 +332,7 @@ impl ClientService {
             chans: HashMap::new(),
             work_queue: rx,
             recv_handle: recv_handle,
+            send_handle: send_handle,
             request_queue: Vec::new(),
             client_count: 0,
             host: host.as_bytes().to_vec(),
@@ -391,7 +395,7 @@ impl ClientService {
             },
             WorkItem::HandleFrame => {
                 if !self.initialized {
-                    try!(self.conn.expect_settings(&mut self.recv_handle));
+                    try!(self.conn.expect_settings(&mut self.recv_handle, &mut self.send_handle));
                     self.initialized = true;
                     Ok(())
                 } else {
@@ -400,7 +404,7 @@ impl ClientService {
             },
             WorkItem::SendData => {
                 debug!("Will queue some request data");
-                try!(self.conn.send_next_data());
+                try!(self.conn.send_next_data(&mut self.send_handle));
                 Ok(())
             }
             WorkItem::NewClient => {
@@ -426,7 +430,7 @@ impl ClientService {
     fn handle_frame(&mut self) -> Result<(), ClientServiceErr> {
         // Handles the next frame...
         debug!("Handling next frame");
-        try!(self.conn.handle_next_frame(&mut self.recv_handle));
+        try!(self.conn.handle_next_frame(&mut self.recv_handle, &mut self.send_handle));
         // ...and then any connections that may have been closed in the meantime
         // are converted to responses and notifications sent to appropriate
         // channels.
@@ -446,7 +450,7 @@ impl ClientService {
 
         trace!("Sending new request...");
 
-        let stream_id = self.conn.start_request(req).ok().unwrap();
+        let stream_id = self.conn.start_request(req, &mut self.send_handle).ok().unwrap();
         // The ID has been assigned to the stream, so attach it to the stream instance too.
         // TODO(mlalic): The `Stream` trait should grow an `on_id_assigned` method which can
         //               then be called by the session (i.e. the `ClientConnection` in this case).

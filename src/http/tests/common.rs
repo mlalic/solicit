@@ -86,13 +86,12 @@ impl ReceiveFrame for MockReceiveFrame {
     }
 }
 
-pub type MockHttpConnection = HttpConnection<MockSendFrame>;
+pub type MockHttpConnection = HttpConnection;
 
 /// A helper function that creates an `HttpConnection` with the `MockSendFrame` and the
 /// `MockReceiveFrame` as its underlying frame handlers.
 pub fn build_mock_http_conn() -> MockHttpConnection {
-    HttpConnection::new(
-        MockSendFrame::new(), HttpScheme::Http)
+    HttpConnection::new(HttpScheme::Http)
 }
 
 /// A helper stub implementation of a `TransportStream`.
@@ -282,9 +281,8 @@ impl TestSession {
 }
 
 impl Session for TestSession {
-    fn new_data_chunk<S>(&mut self, _: StreamId, data: &[u8], _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn new_data_chunk(&mut self, _: StreamId, data: &[u8], _: &mut HttpConnection)
+            -> HttpResult<()> {
         if !self.silent {
             assert_eq!(&self.chunks[self.curr_chunk], &data);
         }
@@ -292,9 +290,8 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn new_headers<S>(&mut self, _: StreamId, headers: Vec<Header>, _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn new_headers(&mut self, _: StreamId, headers: Vec<Header>, _: &mut HttpConnection)
+            -> HttpResult<()> {
         if !self.silent {
             assert_eq!(self.headers[self.curr_header], headers);
         }
@@ -302,16 +299,14 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn end_of_stream<S>(&mut self, _: StreamId, _: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
+    fn end_of_stream(&mut self, _: StreamId, _: &mut HttpConnection)
+            -> HttpResult<()> {
         Ok(())
     }
 
-    fn new_settings<S>(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection<S>)
-            -> HttpResult<()>
-            where S: SendFrame {
-        conn.send_settings_ack()
+    fn new_settings(&mut self, _settings: Vec<HttpSetting>, _conn: &mut HttpConnection)
+            -> HttpResult<()> {
+        Ok(())
     }
 }
 
@@ -409,8 +404,7 @@ impl DataPrioritizer for StubDataPrioritizer {
 }
 
 /// A type alias for a `ClientConnection` with mock replacements for its dependent types.
-pub type MockClientConnection = ClientConnection<MockSendFrame,
-                                                 DefaultSessionState<ClientMarker, TestStream>>;
+pub type MockClientConnection = ClientConnection<DefaultSessionState<ClientMarker, TestStream>>;
 
 /// Returns a `ClientConnection` suitable for use in tests.
 #[inline]

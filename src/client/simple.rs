@@ -99,12 +99,14 @@ use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 /// ```
 pub struct SimpleClient<S> where S: TransportStream {
     /// The underlying `ClientConnection` that the client uses
-    conn: ClientConnection<S>,
+    conn: ClientConnection,
     /// The name of the host to which the client is connected to.
     host: Vec<u8>,
     /// The receiving end of the underlying transport stream. Allows us to extract the next frame
     /// that the HTTP connection should process.
     receiver: S,
+    /// The sending end of the underlying transport stream.
+    sender: S,
 }
 
 impl<S> SimpleClient<S> where S: TransportStream {
@@ -118,11 +120,12 @@ impl<S> SimpleClient<S> where S: TransportStream {
             -> HttpResult<SimpleClient<S>> {
         let state = DefaultSessionState::<ClientMarker, _>::new();
         let receiver = try!(stream.try_split());
-        let conn = HttpConnection::<S>::with_stream(stream, scheme);
+        let conn = HttpConnection::new(scheme);
         let mut client = SimpleClient {
             conn: ClientConnection::with_connection(conn, state),
             host: host.as_bytes().to_vec(),
             receiver: receiver,
+            sender: stream,
         };
 
         try!(client.init());
@@ -147,7 +150,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// connection.
     #[inline]
     fn init(&mut self) -> HttpResult<()> {
-        self.conn.expect_settings(&mut self.receiver)
+        self.conn.expect_settings(&mut self.receiver, &mut self.sender)
     }
 
     /// Send a request to the server. Blocks until the entire request has been
@@ -170,7 +173,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
         // Prepares the request stream
         let stream = self.new_stream(method, path, extras, body);
         // Starts the request (i.e. sends out the headers)
-        let stream_id = try!(self.conn.start_request(stream));
+        let stream_id = try!(self.conn.start_request(stream, &mut self.receiver));
         // TODO(mlalic): Remove when `Stream::on_id_assigned` is invoked by the session. 
         self.conn.state.get_stream_mut(stream_id).unwrap().stream_id = Some(stream_id);
 
@@ -179,7 +182,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
         //       progressing, but it might violate flow control windows, causing the peer to shut
         //       down the connection.
         debug!("Trying to send the body");
-        while let SendStatus::Sent = try!(self.conn.send_next_data()) {
+        while let SendStatus::Sent = try!(self.conn.send_next_data(&mut self.sender)) {
             // We iterate until the data is sent, as the contract of this call is that it blocks
             // until such a time.
         }
@@ -262,6 +265,6 @@ impl<S> SimpleClient<S> where S: TransportStream {
     #[inline]
     fn handle_next_frame(&mut self) -> HttpResult<()> {
         let receiver = &mut self.receiver;
-        self.conn.handle_next_frame(receiver)
+        self.conn.handle_next_frame(receiver, &mut self.sender)
     }
 }
