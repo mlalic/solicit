@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::io;
 
-use http::{StreamId, HttpError, Response, Header, HttpResult};
+use http::{StreamId, HttpError, Response, StaticResponse, Header, HttpResult, StaticHeader};
 use http::frame::RawFrame;
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnection};
@@ -32,12 +32,12 @@ struct AsyncRequest {
     pub path: Vec<u8>,
     /// Extra headers that should be included in the request. Does *not*
     /// include meta-headers.
-    pub headers: Vec<Header>,
+    pub headers: Vec<StaticHeader>,
     /// The body of the request, if any.
     pub body: Option<Vec<u8>>,
     /// The sender side of a channel where the response to this request should
     /// be delivered.
-    tx: Sender<Response>,
+    tx: Sender<StaticResponse>,
 }
 
 /// A struct that buffers `RawFrame`s in an internal `mpsc` channel and sends them using the
@@ -260,7 +260,7 @@ struct ClientService {
     send_handle: ChannelFrameSenderHandle,
     /// A mapping of stream IDs to the sender side of a channel that is
     /// expecting a response to the request that is to arrive on that stream.
-    chans: HashMap<StreamId, Sender<Response>>,
+    chans: HashMap<StreamId, Sender<StaticResponse>>,
     /// The receiver end of a channel to which work items for the service are
     /// queued. Work items include the variants of the `WorkItem` enum.
     work_queue: Receiver<WorkItem>,
@@ -465,14 +465,14 @@ impl ClientService {
     /// the connection for transmission to the server (i.e. `start_request`).
     /// Also returns the sender end of the channel to which the response is to be transmitted,
     /// once received.
-    fn create_request(&mut self, async_req: AsyncRequest)
-            -> (RequestStream<DefaultStream>, Sender<Response>) {
+    fn create_request(&self, async_req: AsyncRequest)
+            -> (RequestStream<'static, 'static, DefaultStream>, Sender<StaticResponse>) {
         let mut headers: Vec<Header> = Vec::new();
         headers.extend(vec![
-            (b":method".to_vec(), async_req.method),
-            (b":path".to_vec(), async_req.path),
-            (b":authority".to_vec(), self.host.clone()),
-            (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
+            Header::new(b":method", async_req.method),
+            Header::new(b":path", async_req.path),
+            Header::new(b":authority", self.host.clone()),
+            Header::new(b":scheme", self.conn.scheme().as_bytes().to_vec()),
         ].into_iter());
         headers.extend(async_req.headers.into_iter());
 
@@ -571,8 +571,8 @@ impl ClientService {
 ///         println!("The response contains the following headers:");
 ///         for header in response.headers.iter() {
 ///             println!("  {}: {}",
-///                   str::from_utf8(&header.0).unwrap(),
-///                   str::from_utf8(&header.1).unwrap());
+///                   str::from_utf8(header.name()).unwrap(),
+///                   str::from_utf8(header.value()).unwrap());
 ///         }
 ///     })
 /// }).collect();
@@ -691,9 +691,14 @@ impl Client {
     /// If the method is unable to queue the request, it must mean that the
     /// underlying HTTP/2 connection to which this client is associated has
     /// failed and it returns `None`.
-    pub fn request(&self, method: &[u8], path: &[u8], headers: &[Header], body: Option<Vec<u8>>)
-            -> Option<Receiver<Response>> {
-        let (resp_tx, resp_rx): (Sender<Response>, Receiver<Response>) =
+    pub fn request(
+            &self,
+            method: &[u8],
+            path: &[u8],
+            headers: &[StaticHeader],
+            body: Option<Vec<u8>>)
+            -> Option<Receiver<StaticResponse>> {
+        let (resp_tx, resp_rx): (Sender<StaticResponse>, Receiver<StaticResponse>) =
                 mpsc::channel();
         // A send can only fail if the receiver is disconnected. If the send
         // fails here, it means that the service hit an error on the underlying
@@ -716,15 +721,15 @@ impl Client {
     ///
     /// A convenience wrapper around the `request` method that sets the correct
     /// method.
-    pub fn get(&self, path: &[u8], headers: &[Header]) -> Option<Receiver<Response>> {
+    pub fn get(&self, path: &[u8], headers: &[StaticHeader]) -> Option<Receiver<StaticResponse>> {
         self.request(b"GET", path, headers, None)
     }
 
     /// Issues a POST request to the server.
     ///
     /// Returns the receiving end of a channel where the `Response` will eventually be pushed.
-    pub fn post(&self, path: &[u8], headers: &[Header], body: Vec<u8>)
-            -> Option<Receiver<Response>> {
+    pub fn post(&self, path: &[u8], headers: &[StaticHeader], body: Vec<u8>)
+            -> Option<Receiver<StaticResponse>> {
         self.request(b"POST", path, headers, Some(body))
     }
 }

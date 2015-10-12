@@ -12,7 +12,7 @@ use std::str;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-use solicit::http::Response;
+use solicit::http::{Response, Header};
 use solicit::server::SimpleServer;
 
 fn main() {
@@ -21,16 +21,16 @@ fn main() {
             println!("Received request:");
             for header in req.headers.iter() {
                 println!("  {}: {}",
-                str::from_utf8(&header.0).unwrap(),
-                str::from_utf8(&header.1).unwrap());
+                str::from_utf8(header.name()).unwrap(),
+                str::from_utf8(header.value()).unwrap());
             }
             println!("Body:\n{}", str::from_utf8(&req.body).unwrap());
 
             // Return a dummy response for every request
             Response {
                 headers: vec![
-                    (b":status".to_vec(), b"200".to_vec()),
-                    (b"x-solicit".to_vec(), b"Hello, World!".to_vec()),
+                    Header::new(b":status", b"200"),
+                    Header::new(b"x-solicit".to_vec(), b"Hello, World!".to_vec()),
                 ],
                 body: req.body.to_vec(),
                 stream_id: req.stream_id,

@@ -164,9 +164,9 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
 /// A struct representing a request stream. It provides the headers that are to be sent when
 /// initiating the request, as well as a `Stream` instance that handles the received response and
 /// provides the request body.
-pub struct RequestStream<S> where S: Stream {
+pub struct RequestStream<'n, 'v, S> where S: Stream {
     /// The list of headers that will be sent with the request.
-    pub headers: Vec<Header>,
+    pub headers: Vec<Header<'n, 'v>>,
     /// The underlying `Stream` instance, which will handle the response, as well as optionally
     /// provide the body of the request.
     pub stream: S,
@@ -309,7 +309,11 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
         Ok(())
     }
 
-    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection)
+    fn new_headers<'n, 'v>(
+            &mut self,
+            stream_id: StreamId,
+            headers: Vec<Header<'n, 'v>>,
+            _conn: &mut HttpConnection)
             -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
@@ -360,6 +364,7 @@ mod tests {
 
     use std::mem;
 
+    use http::{Header};
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
@@ -490,7 +495,7 @@ mod tests {
 
             let stream = RequestStream {
                 headers: vec![
-                    (b":method".to_vec(), b"GET".to_vec()),
+                    Header::new(b":method", b"GET"),
                 ],
                 stream: prepare_stream(None),
             };
@@ -516,7 +521,7 @@ mod tests {
 
             let stream = RequestStream {
                 headers: vec![
-                    (b":method".to_vec(), b"POST".to_vec()),
+                    Header::new(b":method", b"POST"),
                 ],
                 stream: prepare_stream(Some(vec![1, 2, 3])),
             };
@@ -565,7 +570,9 @@ mod tests {
         // ...works.
         assert_eq!(state.get_stream_ref(1).unwrap().body, vec![1, 2, 3, 4]);
         // Now headers?
-        let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
+        let headers = vec![
+            Header::new(b":method", b"GET"),
+        ];
         {
             let mut session = ClientSession::new(&mut state, &mut sender);
             session.new_headers(1, headers.clone(), &mut conn).unwrap();

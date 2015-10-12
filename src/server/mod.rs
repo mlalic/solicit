@@ -1,6 +1,6 @@
 //! The module contains a simple HTTP/2 server implementation.
 
-use http::{Response, HttpResult, HttpError, HttpScheme, Header, StreamId};
+use http::{Response, StaticResponse, HttpResult, HttpError, HttpScheme, StreamId, Header};
 use http::transport::TransportStream;
 use http::connection::{HttpConnection, EndStream, SendStatus};
 use http::session::{
@@ -13,9 +13,9 @@ use http::session::{
 use http::server::{ServerConnection, StreamFactory};
 
 /// The struct represents a fully received request.
-pub struct ServerRequest<'a> {
+pub struct ServerRequest<'a, 'n, 'v> where 'n: 'a, 'v: 'a {
     pub stream_id: StreamId,
-    pub headers: &'a [Header],
+    pub headers: &'a [Header<'n, 'v>],
     pub body: &'a [u8],
 }
 
@@ -49,7 +49,7 @@ impl StreamFactory for SimpleFactory {
 ///
 /// use solicit::server::SimpleServer;
 ///
-/// use solicit::http::Response;
+/// use solicit::http::{Response, Header};
 ///
 /// fn main() {
 ///     fn handle_client(stream: TcpStream) {
@@ -57,16 +57,16 @@ impl StreamFactory for SimpleFactory {
 ///             println!("Received request:");
 ///             for header in req.headers.iter() {
 ///                 println!("  {}: {}",
-///                 str::from_utf8(&header.0).unwrap(),
-///                 str::from_utf8(&header.1).unwrap());
+///                 str::from_utf8(header.name()).unwrap(),
+///                 str::from_utf8(header.value()).unwrap());
 ///             }
 ///             println!("Body:\n{}", str::from_utf8(&req.body).unwrap());
 ///
 ///             // Return a dummy response for every request
 ///             Response {
 ///                 headers: vec![
-///                     (b":status".to_vec(), b"200".to_vec()),
-///                     (b"x-solicit".to_vec(), b"Hello, World!".to_vec()),
+///                     Header::new(b":status", b"200"),
+///                     Header::new(b"x-solicit".to_vec(), b"Hello, World!".to_vec()),
 ///                 ],
 ///                 body: vec![65],
 ///                 stream_id: req.stream_id,
@@ -85,7 +85,9 @@ impl StreamFactory for SimpleFactory {
 ///     }
 /// }
 /// ```
-pub struct SimpleServer<TS, H> where TS: TransportStream, H: FnMut(ServerRequest) -> Response {
+pub struct SimpleServer<TS, H>
+        where TS: TransportStream,
+              H: FnMut(ServerRequest) -> Response<'static, 'static> {
     conn: ServerConnection<SimpleFactory>,
     receiver: TS,
     sender: TS,
@@ -93,7 +95,7 @@ pub struct SimpleServer<TS, H> where TS: TransportStream, H: FnMut(ServerRequest
 }
 
 impl<TS, H> SimpleServer<TS, H>
-        where TS: TransportStream, H: FnMut(ServerRequest) -> Response {
+        where TS: TransportStream, H: FnMut(ServerRequest) -> Response<'static, 'static> {
     /// Creates a new `SimpleServer` that will use the given `TransportStream` to communicate to
     /// the client. Assumes that the stream is fully uninitialized -- no preface sent or read yet.
     pub fn new(mut stream: TS, handler: H) -> HttpResult<SimpleServer<TS, H>> {
@@ -139,7 +141,7 @@ impl<TS, H> SimpleServer<TS, H>
 
     /// Invokes the request handler for each fully received request. Collects all the responses
     /// into the returned `Vec`.
-    fn handle_requests(&mut self) -> HttpResult<Vec<Response>> {
+    fn handle_requests(&mut self) -> HttpResult<Vec<StaticResponse>> {
         let handler = &mut self.handler;
         let closed = self.conn.state.iter()
                        .filter(|&(_, ref s)| s.is_closed_remote());

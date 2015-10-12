@@ -11,6 +11,7 @@ use http::{
     HttpScheme,
     StreamId,
     Header,
+    OwnedHeader,
 };
 use http::frame::{RawFrame, Frame, FrameHeader, pack_header, HttpSetting};
 use http::session::{
@@ -243,7 +244,7 @@ fn sanity_check_stub_stream() {
 pub struct TestSession {
     pub silent: bool,
     /// List of expected headers -- in the order that they are expected
-    pub headers: Vec<Vec<Header>>,
+    pub headers: Vec<Vec<OwnedHeader>>,
     /// List of expected data chunks -- in the order that they are expected
     pub chunks: Vec<Vec<u8>>,
     /// The current number of header calls.
@@ -268,7 +269,7 @@ impl TestSession {
     /// Returns a new `TestSession` that veriies that the headers received
     /// in the callbacks are equal to those in the given headers `Vec` and
     /// that they come in exactly the given order. Does the same for chunks.
-    pub fn new_verify(headers: Vec<Vec<Header>>, chunks: Vec<Vec<u8>>)
+    pub fn new_verify(headers: Vec<Vec<OwnedHeader>>, chunks: Vec<Vec<u8>>)
         -> TestSession {
             TestSession {
                 silent: false,
@@ -290,7 +291,11 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn new_headers(&mut self, _: StreamId, headers: Vec<Header>, _: &mut HttpConnection)
+    fn new_headers<'n, 'v>(
+            &mut self,
+            _: StreamId,
+            headers: Vec<Header<'n, 'v>>,
+            _: &mut HttpConnection)
             -> HttpResult<()> {
         if !self.silent {
             assert_eq!(self.headers[self.curr_header], headers);
@@ -313,7 +318,7 @@ impl Session for TestSession {
 /// A stream that can be used for testing purposes.
 pub struct TestStream {
     pub body: Vec<u8>,
-    pub headers: Option<Vec<Header>>,
+    pub headers: Option<Vec<OwnedHeader>>,
     pub state: StreamState,
     pub outgoing: Option<Cursor<Vec<u8>>>,
 }
@@ -336,7 +341,12 @@ impl TestStream {
 
 impl Stream for TestStream {
     fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
-    fn set_headers(&mut self, headers: Vec<Header>) { self.headers = Some(headers); }
+    fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
+        self.headers = Some(headers.into_iter().map(|h| {
+            let owned: OwnedHeader = h.into();
+            owned.into()
+        }).collect());
+    }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
 
     fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {

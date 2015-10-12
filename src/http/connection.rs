@@ -305,20 +305,14 @@ impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
     ///   performs no checks as to whether the stream is a valid identifier.
     /// - `end_stream` - whether the stream should be closed from the peer's side immediately
     ///   after sending the headers
-    pub fn send_headers<H: Into<Vec<Header>>>(&mut self,
-                                              headers: H,
-                                              stream_id: StreamId,
-                                              end_stream: EndStream) -> HttpResult<()> {
-        self.send_headers_inner(headers.into(), stream_id, end_stream)
-    }
-
-    /// A private helper method: the non-generic implementation of the `send_headers` method.
-    fn send_headers_inner(&mut self,
-                          headers: Vec<Header>,
-                          stream_id: StreamId,
-                          end_stream: EndStream) -> HttpResult<()> {
+    pub fn send_headers<'n, 'v, H: Into<Vec<Header<'n, 'v>>>>(
+            &mut self,
+            headers: H,
+            stream_id: StreamId,
+            end_stream: EndStream)
+            -> HttpResult<()> {
         let headers_fragment = self.conn.encoder.encode(
-            headers.iter().map(|h| (&h.0[..], &h.1[..])));
+            headers.into().iter().map(|h| (h.name(), h.value())));
         // For now, sending header fragments larger than 16kB is not supported
         // (i.e. the encoded representation cannot be split into CONTINUATION
         // frames).
@@ -532,6 +526,7 @@ impl HttpConnection {
             -> HttpResult<()> {
         let headers = try!(self.decoder.decode(&frame.header_fragment)
                                        .map_err(|e| HttpError::CompressionError(e)));
+        let headers = headers.into_iter().map(|h| h.into()).collect();
         try!(session.new_headers(frame.get_stream_id(), headers, self));
 
         if frame.is_end_of_stream() {
@@ -585,7 +580,7 @@ mod tests {
         RawFrame,
     };
     use http::transport::TransportStream;
-    use http::{HttpError, HttpResult, HttpScheme};
+    use http::{HttpError, HttpResult, HttpScheme, Header, OwnedHeader};
     use hpack;
 
     /// A helper function that performs a `send_frame` operation on the given
@@ -872,14 +867,15 @@ mod tests {
     /// fit into a single frame's payload.
     #[test]
     fn test_send_headers_single_frame() {
-        fn assert_correct_headers(headers: &[(Vec<u8>, Vec<u8>)], frame: &HeadersFrame) {
+        fn assert_correct_headers(headers: &[Header], frame: &HeadersFrame) {
             let buf = &frame.header_fragment;
             let frame_headers = hpack::Decoder::new().decode(buf).unwrap();
-            assert_eq!(headers, &frame_headers[..]);
+            let headers: Vec<OwnedHeader> = headers.iter().map(|h| h.clone().into()).collect();
+            assert_eq!(headers, frame_headers);
         }
-        let headers: Vec<(Vec<u8>, Vec<u8>)> = vec![
-            (b":method".to_vec(), b"GET".to_vec()),
-            (b":scheme".to_vec(), b"http".to_vec()),
+        let headers: Vec<Header> = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"http"),
         ];
         {
             let mut conn = build_mock_http_conn();
@@ -1053,11 +1049,11 @@ mod tests {
     /// from the `HttpConnection` when multiple frames are handled.
     #[test]
     fn test_http_conn_session_gets_headers_data_values() {
-        let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
+        let expected_headers = vec![(b":method".to_vec(), b"GET".to_vec())];
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(
                     hpack::Encoder::new().encode(
-                        headers.iter().map(|h| (&h.0[..], &h.1[..]))),
+                        expected_headers.iter().map(|h| (&h.0[..], &h.1[..]))),
                     1)),
             HttpFrame::DataFrame(DataFrame::new(1)), {
                 let mut frame = DataFrame::new(1);
@@ -1067,7 +1063,7 @@ mod tests {
         ];
         let mut conn = HttpConnection::new(HttpScheme::Http);
         let mut session = TestSession::new_verify(
-                vec![headers],
+                vec![expected_headers],
                 vec![b"".to_vec(), b"1234".to_vec()]);
         let mut frame_provider = MockReceiveFrame::new(frames);
 

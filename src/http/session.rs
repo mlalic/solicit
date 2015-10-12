@@ -9,7 +9,7 @@ use std::error::Error;
 use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
-use http::{StreamId, Header, HttpResult};
+use http::{StreamId, OwnedHeader, Header, HttpResult};
 use http::frame::HttpSetting;
 use http::connection::{HttpConnection};
 
@@ -27,7 +27,12 @@ pub trait Session {
             -> HttpResult<()>;
     /// Notifies the `Session` that headers have arrived for a particular
     /// stream. The given list of headers is already decoded by the connection.
-    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>, conn: &mut HttpConnection)
+    /// TODO: The Session should be notified separately for every header that is decoded.
+    fn new_headers<'n, 'v>(
+            &mut self,
+            stream_id: StreamId,
+            headers: Vec<Header<'n, 'v>>,
+            conn: &mut HttpConnection)
             -> HttpResult<()>;
     /// Notifies the `Session` that a particular stream got closed by the peer.
     fn end_of_stream(&mut self, stream_id: StreamId, conn: &mut HttpConnection)
@@ -284,7 +289,7 @@ pub trait Stream {
     fn new_data_chunk(&mut self, data: &[u8]);
     /// Set headers for a stream. A stream is only allowed to have one set of
     /// headers.
-    fn set_headers(&mut self, headers: Vec<Header>);
+    fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>);
     /// Sets the stream state to the newly provided state.
     fn set_state(&mut self, state: StreamState);
 
@@ -358,7 +363,7 @@ pub struct DefaultStream {
     /// The ID of the stream, if already assigned by the connection.
     pub stream_id: Option<StreamId>,
     /// The headers associated with the stream (i.e. the response headers)
-    pub headers: Option<Vec<Header>>,
+    pub headers: Option<Vec<Header<'static, 'static>>>,
     /// The body of the stream (i.e. the response body)
     pub body: Vec<u8>,
     /// The current stream state.
@@ -405,8 +410,11 @@ impl Stream for DefaultStream {
         self.body.extend(data.to_vec().into_iter());
     }
 
-    fn set_headers(&mut self, headers: Vec<Header>) {
-        self.headers = Some(headers);
+    fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
+        self.headers = Some(headers.into_iter().map(|h| {
+            let owned: OwnedHeader = h.into();
+            owned.into()
+        }).collect());
     }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
 

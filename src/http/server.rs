@@ -78,7 +78,11 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
         Ok(())
     }
 
-    fn new_headers(&mut self, stream_id: StreamId, headers: Vec<Header>, _: &mut HttpConnection)
+    fn new_headers<'n, 'v>(
+            &mut self,
+            stream_id: StreamId,
+            headers: Vec<Header<'n, 'v>>,
+            _conn: &mut HttpConnection)
             -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
         match self.state.get_stream_mut(stream_id) {
@@ -191,14 +195,17 @@ impl<F, State> ServerConnection<F, State>
     /// the connection's state. (The body does not have to be ready when this method is called, as
     /// long as the `Stream` instance knows how to provide it to the connection later on.)
     #[inline]
-    pub fn start_response<S: SendFrame>(
+    pub fn start_response<'n, 'v, S: SendFrame>(
             &mut self,
-            headers: Vec<Header>,
+            headers: Vec<Header<'n, 'v>>,
             stream_id: StreamId,
             end_stream: EndStream,
             sender: &mut S)
             -> HttpResult<()> {
-        self.conn.sender(sender).send_headers(headers, stream_id, end_stream)
+        self.conn.sender(sender).send_headers(
+            headers,
+            stream_id,
+            end_stream)
     }
 
     /// Queues a new DATA frame onto the underlying `SendFrame`.
@@ -224,6 +231,7 @@ mod tests {
 
     use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn, MockSendFrame};
 
+    use http::Header;
     use http::session::{
         DefaultSessionState,
         SessionState,
@@ -240,7 +248,9 @@ mod tests {
         let mut sender = MockSendFrame::new();
 
         // Receiving new headers results in a new stream being created
-        let headers = vec![(b":method".to_vec(), b"GET".to_vec())];
+        let headers = vec![
+            Header::new(b":method".to_vec(), b"GET".to_vec())
+        ];
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);

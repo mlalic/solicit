@@ -9,7 +9,7 @@ mod simple {
 
     /// The function establishes a (prior knowledge clear-text TCP) HTTP/2 connection to the given
     /// host and GETs the resource at the given paths. Returns a list of responses
-    fn get(host: &str, paths: &[String]) -> Vec<Response> {
+    fn get(host: &str, paths: &[String]) -> Vec<Response<'static, 'static>> {
         let mut client = SimpleClient::with_connector(CleartextConnector::new(host)).unwrap();
         paths.iter().map(|path| client.get(path.as_bytes(), &[]).unwrap()).collect()
     }
@@ -66,7 +66,7 @@ mod async {
     /// host and GETs the resource at the given paths. Returns a list of responses.
     ///
     /// The requests are all issued concurrently (spawning as many threads as there are requests).
-    fn get(host: &str, paths: &[String]) -> Vec<Response> {
+    fn get(host: &str, paths: &[String]) -> Vec<Response<'static, 'static>> {
         let client = Client::with_connector(CleartextConnector::new(host)).unwrap();
         let threads: Vec<_> = paths.iter().map(|path| {
             let this = client.clone();

@@ -60,3 +60,66 @@ mod root_tests {
         _is_sync_send::<HttpError>();
     }
 }
+
+#[cfg(test)]
+mod test_header {
+    use http::{Header, OwnedHeader};
+    use std::borrow::Cow;
+
+    fn _assert_is_static(_: Header<'static, 'static>) {}
+
+    #[test]
+    fn test_owned_to_header_is_static_lifetime() {
+        let owned = (vec![1u8], vec![2u8]);
+        _assert_is_static(owned.into());
+    }
+
+    #[test]
+    fn test_header_from_static_slices_lifetime() {
+        let header = Header::new(b":method", b"GET");
+        _assert_is_static(header);
+    }
+
+    #[test]
+    fn test_header_to_owned_header() {
+        let header = Header::new(b":method", b"GET");
+        let (name, value): OwnedHeader = header.into();
+
+        assert_eq!(name, b":method".to_vec());
+        assert_eq!(value, b"GET".to_vec());
+    }
+
+    #[test]
+    fn test_partial_eq_of_headers() {
+        let fully_static = Header::new(b":method", b"GET");
+        let static_name = Header::new(b":method", b"GET".to_vec());
+        let other = Header::new(b":path", b"/");
+
+        assert!(fully_static == static_name);
+        assert!(fully_static != other);
+        assert!(static_name != other);
+    }
+
+    #[test]
+    fn test_partial_eq_to_owned_header() {
+        let fully_static = Header::new(b":method", b"GET");
+        let owned: OwnedHeader = fully_static.clone().into();
+
+        assert!(fully_static == owned);
+    }
+
+    #[test]
+    fn test_clone_keeps_borrows() {
+        let header = Header::new(b":method", b"GET");
+        let clone = header.clone();
+
+        match clone.name {
+            Cow::Owned(_) => panic!("Expected a borrowed name"),
+            _ => {},
+        };
+        match clone.value {
+            Cow::Owned(_) => panic!("Expected a borrowed value"),
+            _ => {},
+        };
+    }
+}

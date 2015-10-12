@@ -1,6 +1,7 @@
 //! The module implements the framing layer of HTTP/2 and exposes an API for using it.
 use std::io;
 use std::fmt;
+use std::borrow::Cow;
 use std::convert::From;
 use std::error::Error;
 
@@ -17,9 +18,150 @@ pub mod server;
 
 /// An alias for the type that represents the ID of an HTTP/2 stream
 pub type StreamId = u32;
-/// An alias for the type that represents HTTP/2 headers. For now we only alias
-/// the tuple of byte vectors instead of going with a full struct representation.
-pub type Header = (Vec<u8>, Vec<u8>);
+/// An alias for the type that represents an HTTP/2 header where both the name and the value is
+/// owned.
+pub type OwnedHeader = (Vec<u8>, Vec<u8>);
+
+/// A convenience struct representing a part of a header (either the name or the value) that can be
+/// either an owned or a borrowed byte sequence.
+pub struct HeaderPart<'a>(Cow<'a, [u8]>);
+impl<'a> From<Vec<u8>> for HeaderPart<'a> {
+    fn from(vec: Vec<u8>) -> HeaderPart<'a> {
+        HeaderPart(Cow::Owned(vec))
+    }
+}
+
+impl<'a> From<&'a [u8]> for HeaderPart<'a> {
+    fn from(buf: &'a [u8]) -> HeaderPart<'a> {
+        HeaderPart(Cow::Borrowed(buf))
+    }
+}
+
+impl<'a> From<Cow<'a, [u8]>> for HeaderPart<'a> {
+    fn from(cow: Cow<'a, [u8]>) -> HeaderPart<'a> {
+        HeaderPart(cow)
+    }
+}
+
+macro_rules! from_static_size_array {
+    ($N:expr) => (
+        impl<'a> From<&'a [u8; $N]> for HeaderPart<'a> {
+            fn from(buf: &'a [u8; $N]) -> HeaderPart<'a> {
+                buf[..].into()
+            }
+        }
+    );
+}
+
+macro_rules! impl_from_static_size_array {
+    ($($N:expr,)+) => {
+        $(
+            from_static_size_array!($N);
+        )+
+    }
+}
+
+impl_from_static_size_array!(
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+);
+
+impl<'n, 'v> PartialEq<Header<'n, 'v>> for OwnedHeader {
+    fn eq(&self, other: &Header<'n, 'v>) -> bool {
+        &self.0[..] == other.name() && &self.1[..] == other.value()
+    }
+}
+
+impl<'n, 'v> PartialEq<OwnedHeader> for Header<'n, 'v> {
+    fn eq(&self, other: &OwnedHeader) -> bool {
+        &other.0[..] == self.name() && &other.1[..] == self.value()
+    }
+}
+
+/// Represents an HTTP/2 header. Allows both the name and the value to be either an owned or a
+/// borrowed byte sequence.
+///
+/// # Examples
+///
+/// A new `Header` can be created by providing an owned or borrowed name, as well as value:
+///
+/// ```rust
+/// use solicit::http::Header;
+/// // Name and value both borrowed (static) slices.
+/// let h1 = Header::new(b":method", b"GET");
+/// assert_eq!(h1.name(), &b":method"[..]);
+/// assert_eq!(h1.value(), &b"GET"[..]);
+/// // A borrowed slice with a scope-bound lifetime as the value; static name
+/// {
+///     let value = vec![1];
+///     let header = Header::new(&b"x-test-head"[..], &value[..]);
+///     assert_eq!(header.name(), &b"x-test-head"[..]);
+///     assert_eq!(header.value(), &[1][..]);
+/// }
+/// // An owned value, static name
+/// {
+///     let value = vec![1];
+///     let header = Header::new(&b"x-test-head"[..], value);
+///     assert_eq!(header.name(), &b"x-test-head"[..]);
+///     assert_eq!(header.value(), &[1][..]);
+/// }
+/// // An owned name, as well as value
+/// {
+///     let value = vec![1];
+///     let name = b"x-test-head".to_vec();
+///     let header = Header::new(name, value);
+///     assert_eq!(header.name(), &b"x-test-head"[..]);
+///     assert_eq!(header.value(), &[1][..]);
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Header<'n, 'v> {
+    name: Cow<'n, [u8]>,
+    value: Cow<'v, [u8]>,
+}
+
+/// A type alias for a `Header` where both the name, as well as the value must have a `'static`
+/// lifetime if it is borrowed. Owned parts are allowed.
+pub type StaticHeader = Header<'static, 'static>;
+
+impl<'n, 'v> Header<'n, 'v> {
+    /// Creates a new `Header` with the given name and value.
+    ///
+    /// The name and value need to be convertible into a `HeaderPart`.
+    pub fn new<N: Into<HeaderPart<'n>>, V: Into<HeaderPart<'v>>>(name: N, value: V)
+            -> Header<'n, 'v> {
+        Header {
+            name: name.into().0,
+            value: value.into().0,
+        }
+    }
+
+    /// Return a borrowed representation of the `Header` name.
+    pub fn name(&self) -> &[u8] { &self.name }
+    /// Return a borrowed representation of the `Header` value.
+    pub fn value(&self) -> &[u8] { &self.value }
+}
+
+impl<'n, 'v> Into<OwnedHeader> for Header<'n, 'v> {
+    fn into(self) -> OwnedHeader {
+        (self.name.into_owned(), self.value.into_owned())
+    }
+}
+
+impl<'n, 'v> Into<Header<'n, 'v>> for OwnedHeader {
+    fn into(self) -> Header<'n, 'v> {
+        Header::new(self.0, self.1)
+    }
+}
 
 /// A set of protocol names that the library should use to indicate that HTTP/2
 /// is supported during protocol negotiation (NPN or ALPN).
@@ -136,25 +278,29 @@ impl HttpScheme {
 /// The full body of the response is included, regardless how large it may be.
 /// The headers contain both the meta-headers, as well as the actual headers.
 #[derive(Clone)]
-pub struct Response {
+pub struct Response<'n, 'v> {
     /// The ID of the stream to which the response is associated. HTTP/1.1 does
     /// not really have an equivalent to this.
     pub stream_id: StreamId,
     /// Exposes *all* the raw response headers, including the meta-headers.
     /// (For now the only meta header allowed in HTTP/2 responses is the
     /// `:status`.)
-    pub headers: Vec<Header>,
+    pub headers: Vec<Header<'n, 'v>>,
     /// The full body of the response as an uninterpreted sequence of bytes.
     pub body: Vec<u8>,
 }
 
-impl Response {
+/// A type alias for a `Response` where all headers' names and values must have a `'static`
+/// lifetime if they are borrowed. This means that the parts can also be owned.
+pub type StaticResponse = Response<'static, 'static>;
+
+impl<'n, 'v> Response<'n, 'v> {
     /// Creates a new `Response` with all the components already provided.
-    pub fn new(stream_id: StreamId, headers: Vec<Header>, body: Vec<u8>)
-            -> Response {
+    pub fn new(stream_id: StreamId, headers: Vec<OwnedHeader>, body: Vec<u8>)
+            -> Response<'n, 'v> {
         Response {
             stream_id: stream_id,
-            headers: headers,
+            headers: headers.into_iter().map(|h| Header::new(h.0, h.1)).collect(),
             body: body,
         }
     }
@@ -170,10 +316,10 @@ impl Response {
         if self.headers.len() < 1 {
             return Err(HttpError::MalformedResponse)
         }
-        if &self.headers[0].0 != &b":status" {
+        if &self.headers[0].name[..] != &b":status"[..] {
             Err(HttpError::MalformedResponse)
         } else {
-            Ok(try!(Response::parse_status_code(&self.headers[0].1)))
+            Ok(try!(Response::parse_status_code(&self.headers[0].value)))
         }
     }
 
@@ -205,9 +351,9 @@ impl Response {
 /// A struct representing a full HTTP/2 request, along with the full body, as a
 /// sequence of bytes.
 #[derive(Clone)]
-pub struct Request {
+pub struct Request<'n, 'v> {
     pub stream_id: u32,
-    pub headers: Vec<Header>,
+    pub headers: Vec<Header<'n, 'v>>,
     pub body: Vec<u8>,
 }
 

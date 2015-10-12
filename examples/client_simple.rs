@@ -12,7 +12,7 @@ use solicit::http::Response;
 use solicit::http::client::CleartextConnector;
 use solicit::client::SimpleClient;
 
-fn fetch(host: &str, port: u16, paths: &[String]) -> Vec<Response> {
+fn fetch(host: &str, port: u16, paths: &[String]) -> Vec<Response<'static, 'static>> {
     let mut client = SimpleClient::with_connector(CleartextConnector::with_port(host, port)).unwrap();
     paths.iter().map(|path| client.get(path.as_bytes(), &[]).unwrap()).collect()
 }
@@ -66,8 +66,8 @@ fn main() {
         // response is well formed.)
         for header in response.headers.iter() {
             println!("  {}: {}",
-                     str::from_utf8(&header.0).unwrap(),
-                     str::from_utf8(&header.1).unwrap());
+                     str::from_utf8(header.name()).unwrap(),
+                     str::from_utf8(header.value()).unwrap());
         }
         println!("");
         println!("{}", str::from_utf8(&response.body).unwrap());

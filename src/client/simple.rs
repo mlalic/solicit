@@ -65,8 +65,8 @@ use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 /// // response is well formed.)
 /// for header in response.headers.iter() {
 ///     println!("{}: {}",
-///         str::from_utf8(&header.0).unwrap(),
-///         str::from_utf8(&header.1).unwrap());
+///         str::from_utf8(header.name()).unwrap(),
+///         str::from_utf8(header.value()).unwrap());
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
@@ -92,8 +92,8 @@ use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 /// // response is well formed.)
 /// for header in response.headers.iter() {
 ///     println!("{}: {}",
-///         str::from_utf8(&header.0).unwrap(),
-///         str::from_utf8(&header.1).unwrap());
+///         str::from_utf8(header.name()).unwrap(),
+///         str::from_utf8(header.value()).unwrap());
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
@@ -199,7 +199,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     ///
     /// Any underlying IO errors are propagated. Errors in the HTTP/2 protocol
     /// also stop processing and are returned to the client.
-    pub fn get_response(&mut self, stream_id: StreamId) -> HttpResult<Response> {
+    pub fn get_response(&mut self, stream_id: StreamId) -> HttpResult<Response<'static, 'static>> {
         match self.conn.state.get_stream_ref(stream_id) {
             None => return Err(HttpError::UnknownStreamId),
             Some(_) => {},
@@ -221,14 +221,14 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// Performs a GET request on the given path. This is a shortcut method for
     /// calling `request` followed by `get_response` for the returned stream ID.
     pub fn get(&mut self, path: &[u8], extra_headers: &[Header])
-            -> HttpResult<Response> {
+            -> HttpResult<Response<'static, 'static>> {
         let stream_id = try!(self.request(b"GET", path, extra_headers, None));
         self.get_response(stream_id)
     }
 
     /// Performs a POST request on the given path.
     pub fn post(&mut self, path: &[u8], extra_headers: &[Header], body: Vec<u8>)
-            -> HttpResult<Response> {
+            -> HttpResult<Response<'static, 'static>> {
         let stream_id = try!(self.request(b"POST", path, extra_headers, Some(body)));
         self.get_response(stream_id)
     }
@@ -238,8 +238,13 @@ impl<S> SimpleClient<S> where S: TransportStream {
     ///
     /// The `RequestStream` is then ready to be passed on to the connection instance in order to
     /// start the request.
-    fn new_stream(&mut self, method: &[u8], path: &[u8], extras: &[Header], body: Option<Vec<u8>>)
-            -> RequestStream<DefaultStream> {
+    fn new_stream<'n ,'v>(
+            &self,
+            method: &'v [u8],
+            path: &'v [u8],
+            extras: &[Header<'n, 'v>],
+            body: Option<Vec<u8>>)
+            -> RequestStream<'n, 'v, DefaultStream> {
         let mut stream = DefaultStream::new();
         match body {
             Some(body) => stream.set_full_data(body),
@@ -247,12 +252,15 @@ impl<S> SimpleClient<S> where S: TransportStream {
         };
 
         let mut headers: Vec<Header> = vec![
-            (b":method".to_vec(), method.to_vec()),
-            (b":path".to_vec(), path.to_vec()),
-            (b":authority".to_vec(), self.host.clone()),
-            (b":scheme".to_vec(), self.conn.scheme().as_bytes().to_vec()),
+            Header::new(b":method", method),
+            Header::new(b":path", path),
+            Header::new(b":authority", self.host.clone()),
+            Header::new(b":scheme", self.conn.scheme().as_bytes().to_vec()),
         ];
-        headers.extend(extras.to_vec().into_iter());
+        // The clone is lightweight if the original Header was just borrowing something; it's a
+        // deep copy if it was already owned. Consider requiring that this method gets an iterator
+        // of Headers...
+        headers.extend(extras.iter().map(|h| h.clone()));
 
         RequestStream {
             headers: headers,
