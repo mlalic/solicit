@@ -27,6 +27,8 @@ macro_rules! unpack_octets_4 {
     );
 }
 
+pub const FRAME_HEADER_LEN: usize = 9;
+
 pub mod builder;
 pub mod data;
 pub mod headers;
