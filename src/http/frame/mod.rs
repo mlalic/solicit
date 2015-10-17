@@ -1,5 +1,6 @@
 //! The module contains the implementation of HTTP/2 frames.
 
+use std::io;
 use std::mem;
 use std::borrow::Cow;
 
@@ -108,6 +109,56 @@ fn parse_padded_payload<'a>(payload: &'a [u8]) -> Option<(&'a [u8], u8)> {
 
     Some((&payload[1..payload.len() - pad_len], pad_len as u8))
 }
+
+/// A trait that provides additional methods for serializing HTTP/2 frames.
+///
+/// All methods have a default implementation in terms of the `io::Write` API, but types can
+/// provide specialized more efficient implementations if possible. This is effectively a
+/// workaround for specialization not existing yet in Rust.
+pub trait FrameBuilder: io::Write + io::Seek {
+    /// Write the given frame header as the next octets (i.e. without moving the cursor to the
+    /// beginning of the buffer).
+    fn write_header(&mut self, header: FrameHeader) -> io::Result<()> {
+        self.write_all(&pack_header(&header))
+    }
+
+    /// Overwrite the previously written header, assuming it's the first byte sequence of the
+    /// buffer.
+    ///
+    /// The default implementation seeks to the beginning of the buffer, writes the header, and
+    /// then moves the cursor back to its previos position (i.e. offset from the beginning).
+    fn overwrite_header(&mut self, header: FrameHeader) -> io::Result<()> {
+        let current = try!(self.seek(io::SeekFrom::Current(0)));
+        try!(self.seek(io::SeekFrom::Start(0)));
+        try!(self.write_header(header));
+        try!(self.seek(io::SeekFrom::Start(current)));
+        Ok(())
+    }
+
+    /// Copy all available bytes from the given `io::Read` instance.
+    ///
+    /// This method allows poor man's specialization for types that can implement the copy more
+    /// efficiently than the `io::copy` function does (i.e. without the intermediate read into a
+    /// stack-allocated buffer).
+    fn copy_bytes_from(&mut self, provider: &mut io::Read) -> io::Result<u64> {
+        io::copy(provider, self)
+    }
+
+    /// Write the given number of padding octets.
+    ///
+    /// The default implementation invokes the underlying Writer's `write` method `padding_length`
+    /// times.
+    ///
+    /// Other `FrameBuilder` implementations could implement it more efficiently (e.g. if it is
+    /// known that the `FrameBuilder` is backed by a zeroed buffer, there's no need to write
+    /// anything, only increment a cursor/offset).
+    fn write_padding(&mut self, padding_length: u8) -> io::Result<()> {
+        for _ in 0..padding_length { try!(self.write_all(&[0])); }
+        Ok(())
+    }
+}
+
+impl FrameBuilder for io::Cursor<Vec<u8>> {}
 
 /// A trait that all HTTP/2 frame header flags need to implement.
 pub trait Flag {
