@@ -129,19 +129,20 @@ impl SendFrame for ChannelFrameSenderHandle {
 /// from within `HttpConnection`s, while handling the actual reads using a `ReceiveFrame`
 /// implementation that can block. (Predicated on triggering a single frame handle operation on
 /// the connection for each successfully executed `read_next`.)
-struct ChannelFrameReceiver<R> where R: ReceiveFrame {
+struct ChannelFrameReceiver<TS> where TS: TransportStream {
     /// The sender side of the channel. Buffers the frames read by the wrapped `ReceiveFrame`
     /// instance for future consumation by the associated `ChannelFrameReceiverHandle`.
-    tx: Sender<HttpFrame>,
+    tx: Sender<RawFrame<'static>>,
     /// The `ReceiveFrame` instance that performs the actual reading of the frame, used from within
     /// the `read_next` method.
-    inner: R,
+    inner: TS,
 }
 
-impl<R> ChannelFrameReceiver<R> where R: ReceiveFrame {
+use http::frame::unpack_header;
+impl<TS> ChannelFrameReceiver<TS> where TS: TransportStream {
     /// Creates a new `ChannelFrameReceiver`, as well as the associated
     /// `ChannelFrameReceiverHandle`.
-    fn new(inner: R) -> (ChannelFrameReceiver<R>, ChannelFrameReceiverHandle) {
+    fn new(inner: TS) -> (ChannelFrameReceiver<TS>, ChannelFrameReceiverHandle) {
         let (send, recv) = mpsc::channel();
 
         let handle = ChannelFrameReceiverHandle { rx: recv };
@@ -156,8 +157,14 @@ impl<R> ChannelFrameReceiver<R> where R: ReceiveFrame {
     /// the thread in the process, depending on the implementation of the trait. Once a frame is
     /// returned, it will buffer it within the internal channel.
     fn read_next(&mut self) -> HttpResult<()> {
-        let frame = try!(self.inner.recv_frame());
-        try!(self.tx.send(frame)
+        let mut header = [0; 9];
+        try!(TransportStream::read_exact(&mut self.inner, &mut header));
+        let total_len = unpack_header(&header).0 as usize;
+        let mut buf = Vec::with_capacity(9 + total_len);
+        unsafe { buf.set_len(9 + total_len); }
+        try!(io::copy(&mut &header[..], &mut &mut buf[..9]));
+        try!(TransportStream::read_exact(&mut self.inner, &mut buf[9..]));
+        try!(self.tx.send(buf.into())
                     .map_err(|_| {
                         io::Error::new(io::ErrorKind::Other, "Unable to read frame")
                     }));
@@ -174,7 +181,7 @@ impl<R> ChannelFrameReceiver<R> where R: ReceiveFrame {
 /// handles are to be avoided.
 struct ChannelFrameReceiverHandle {
     /// The receiver end of the channel that buffers the received frames.
-    rx: Receiver<HttpFrame>,
+    rx: Receiver<RawFrame<'static>>,
 }
 
 impl ReceiveFrame for ChannelFrameReceiverHandle {
@@ -182,6 +189,9 @@ impl ReceiveFrame for ChannelFrameReceiverHandle {
         self.rx.recv()
             .map_err(|_| {
                 HttpError::from(io::Error::new(io::ErrorKind::Other, "Unable to read frame"))
+            })
+            .and_then(|raw| {
+                HttpFrame::from_raw(raw)
             })
     }
 }
