@@ -48,7 +48,7 @@ pub fn raw_frame_from_parts<'a>(header: FrameHeader, payload: Vec<u8>) -> RawFra
 
 /// A mock `SendFrame` implementation that simply saves all frames that it is to send to a `Vec`.
 pub struct MockSendFrame {
-    pub sent: Vec<HttpFrame>,
+    pub sent: Vec<HttpFrame<'static>>,
 }
 
 impl MockSendFrame {
@@ -68,19 +68,19 @@ impl SendFrame for MockSendFrame {
 }
 
 /// A mock `ReceiveFrame` implementation that simply serves the frames from a `Vec`.
-pub struct MockReceiveFrame {
-    pub recv_list: Vec<HttpFrame>,
+pub struct MockReceiveFrame<'a> {
+    pub recv_list: Vec<HttpFrame<'a>>,
 }
 
-impl MockReceiveFrame {
-    pub fn new(recv_list: Vec<HttpFrame>) -> MockReceiveFrame {
+impl<'a> MockReceiveFrame<'a> {
+    pub fn new(recv_list: Vec<HttpFrame<'a>>) -> MockReceiveFrame<'a> {
         MockReceiveFrame {
             recv_list: recv_list,
         }
     }
 }
 
-impl ReceiveFrame for MockReceiveFrame {
+impl<'a> ReceiveFrame for MockReceiveFrame<'a> {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
         if self.recv_list.len() != 0 {
             Ok(self.recv_list.remove(0))

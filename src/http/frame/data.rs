@@ -1,6 +1,7 @@
 //! The module contains the implementation of the `DATA` frame and associated flags.
 
 use std::io;
+use std::borrow::Cow;
 use http::StreamId;
 use http::frame::{
     FrameBuilder,
@@ -33,15 +34,31 @@ impl Flag for DataFlag {
     }
 }
 
+/// A helper struct that allows the chunk to be either borrowed or owned. Used to provide the
+/// `From` implementations that allow us to implement generic methods that accept any type that can
+/// be converted into a `DataChunk` (given that the native `Cow` type does not have these
+/// implementations and we cannot add them).
+pub struct DataChunk<'a>(Cow<'a, [u8]>);
+impl<'a> From<Vec<u8>> for DataChunk<'a> {
+    fn from(vec: Vec<u8>) -> DataChunk<'a> {
+        DataChunk(Cow::Owned(vec))
+    }
+}
+impl<'a> From<&'a [u8]> for DataChunk<'a> {
+    fn from(buf: &'a [u8]) -> DataChunk<'a> {
+        DataChunk(Cow::Borrowed(buf))
+    }
+}
+
 /// A struct representing the DATA frames of HTTP/2, as defined in the HTTP/2
 /// spec, section 6.1.
 #[derive(PartialEq)]
 #[derive(Debug)]
 #[derive(Clone)]
-pub struct DataFrame {
+pub struct DataFrame<'a> {
     /// The data found in the frame as an opaque byte sequence. It never
     /// includes padding bytes.
-    pub data: Vec<u8>,
+    pub data: Cow<'a, [u8]>,
     /// Represents the flags currently set on the `DataFrame`, packed into a
     /// single byte.
     flags: u8,
@@ -53,17 +70,30 @@ pub struct DataFrame {
     padding_len: Option<u8>,
 }
 
-impl DataFrame {
+impl<'a> DataFrame<'a> {
     /// Creates a new empty `DataFrame`, associated to the stream with the
     /// given ID.
-    pub fn new(stream_id: StreamId) -> DataFrame {
+    pub fn new(stream_id: StreamId) -> DataFrame<'a> {
         DataFrame {
             stream_id: stream_id,
             // All flags unset by default
             flags: 0,
             // No data stored in the frame yet
-            data: Vec::new(),
+            data: Cow::Borrowed(&[]),
             // No padding
+            padding_len: None,
+        }
+    }
+
+    /// Creates a new `DataFrame` with the given `DataChunk`.
+    ///
+    /// The chunk can be any type that can be converted into a `DataChunk` instance and, as such,
+    /// can either pass ownership of the buffer to the DataFrame or provide a temporary borrow.
+    pub fn with_data<D: Into<DataChunk<'a>>>(stream_id: StreamId, data: D) -> DataFrame<'a> {
+        DataFrame {
+            stream_id: stream_id,
+            flags: 0,
+            data: data.into().0,
             padding_len: None,
         }
     }
@@ -123,13 +153,13 @@ impl DataFrame {
     }
 }
 
-impl Frame for DataFrame {
+impl<'a> Frame for DataFrame<'a> {
     type FlagType = DataFlag;
 
     /// Creates a new `DataFrame` from the given `RawFrame` (i.e. header and
     /// payload), if possible.  Returns `None` if a valid `DataFrame` cannot be
     /// constructed from the given `RawFrame`.
-    fn from_raw(raw_frame: RawFrame) -> Option<DataFrame> {
+    fn from_raw(raw_frame: RawFrame) -> Option<DataFrame<'a>> {
         // Unpack the header
         let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
@@ -157,7 +187,7 @@ impl Frame for DataFrame {
                 Some(DataFrame {
                     stream_id: stream_id,
                     flags: flags,
-                    data: data,
+                    data: Cow::Owned(data),
                     padding_len: Some(padding_len),
                 })
             },
@@ -166,7 +196,7 @@ impl Frame for DataFrame {
                 Some(DataFrame {
                     stream_id: stream_id,
                     flags: flags,
-                    data: data,
+                    data: Cow::Owned(data),
                     padding_len: None,
                 })
             },
@@ -202,7 +232,7 @@ impl Frame for DataFrame {
     }
 }
 
-impl FrameIR for DataFrame {
+impl<'a> FrameIR for DataFrame<'a> {
     fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
         try!(b.write_header(self.get_header()));
         if self.is_padded() {
@@ -236,7 +266,7 @@ mod tests {
         let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data, &data);
+        assert_eq!(&frame.data[..], &data[..]);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -263,7 +293,7 @@ mod tests {
         let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data, &data);
+        assert_eq!(&frame.data[..], &data[..]);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -286,7 +316,7 @@ mod tests {
         let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data, &data);
+        assert_eq!(&frame.data[..], &data[..]);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -333,7 +363,7 @@ mod tests {
         let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data -- i.e. an empty array?
-        assert_eq!(&frame.data, &[]);
+        assert_eq!(&frame.data[..], &[][..]);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -365,7 +395,7 @@ mod tests {
         let frame = build_test_frame::<DataFrame>(&header, &payload);
 
         // The frame correctly returns the data?
-        assert_eq!(&frame.data, &data);
+        assert_eq!(&frame.data[..], &data[..]);
         // ...and the headers?
         assert_eq!(frame.get_header(), header);
     }
@@ -394,7 +424,7 @@ mod tests {
         let expected = {
             let headers = pack_header(&(0, 0, 0, 1));
             let mut res: Vec<u8> = Vec::new();
-            res.extend(headers.to_vec().into_iter());
+            res.extend(headers.to_vec());
 
             res
         };
@@ -408,14 +438,13 @@ mod tests {
     /// padding and with some amount of data.
     #[test]
     fn test_data_frame_serialize_no_padding() {
-        let mut frame = DataFrame::new(1);
         let data = vec![1, 2, 3, 4, 5, 100];
-        frame.data = data.clone();
+        let frame = DataFrame::with_data(1, &data[..]);
         let expected = {
             let headers = pack_header(&(6, 0, 0, 1));
             let mut res: Vec<u8> = Vec::new();
-            res.extend(headers.to_vec().into_iter());
-            res.extend(data.into_iter());
+            res.extend(headers.to_vec());
+            res.extend(data.clone());
 
             res
         };
@@ -429,19 +458,18 @@ mod tests {
     /// some amount of padding and some data.
     #[test]
     fn test_data_frame_serialize_padding() {
-        let mut frame = DataFrame::new(1);
         let data = vec![1, 2, 3, 4, 5, 100];
-        frame.data = data.clone();
+        let mut frame = DataFrame::with_data(1, &data[..]);
         frame.set_padding(5);
         let expected = {
             let headers = pack_header(&(6 + 1 + 5, 0, 8, 1));
             let mut res: Vec<u8> = Vec::new();
             // Headers
-            res.extend(headers.to_vec().into_iter());
+            res.extend(headers.to_vec());
             // Padding len
             res.push(5);
             // Data
-            res.extend(data.into_iter());
+            res.extend(data.clone());
             // Actual padding
             for _ in 0..5 { res.push(0); }
 
@@ -457,19 +485,19 @@ mod tests {
     /// 0 padding. This is a distinct case from having *no padding*.
     #[test]
     fn test_data_frame_serialize_null_padding() {
-        let mut frame = DataFrame::new(1);
         let data = vec![1, 2, 3, 4, 5, 100];
-        frame.data = data.clone();
+        let cloned = data.clone();
+        let mut frame = DataFrame::with_data(1, data);
         frame.set_flag(DataFlag::Padded);
         let expected = {
             let headers = pack_header(&(6 + 1, 0, 8, 1));
             let mut res: Vec<u8> = Vec::new();
             // Headers
-            res.extend(headers.to_vec().into_iter());
+            res.extend(headers.to_vec());
             // Padding len
             res.push(0);
             // Data
-            res.extend(data.into_iter());
+            res.extend(cloned);
 
             res
         };

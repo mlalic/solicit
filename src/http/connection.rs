@@ -79,15 +79,15 @@ impl AsRef<[u8]> for UnknownFrame {
 #[derive(PartialEq)]
 #[derive(Debug)]
 #[derive(Clone)]
-pub enum HttpFrame {
-    DataFrame(DataFrame),
+pub enum HttpFrame<'a> {
+    DataFrame(DataFrame<'a>),
     HeadersFrame(HeadersFrame),
     SettingsFrame(SettingsFrame),
     UnknownFrame(UnknownFrame),
 }
 
-impl HttpFrame {
-    pub fn from_raw(raw_frame: RawFrame) -> HttpResult<HttpFrame> {
+impl<'a> HttpFrame<'a> {
+    pub fn from_raw(raw_frame: RawFrame) -> HttpResult<HttpFrame<'a>> {
         let frame = match raw_frame.header().1 {
             0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(raw_frame))),
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(raw_frame))),
@@ -329,8 +329,7 @@ impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
             -> HttpResult<()>{
         // TODO Validate that the given data can fit into the maximum frame size allowed by the
         //      current settings.
-        let mut frame = DataFrame::new(stream_id);
-        frame.data.extend(data);
+        let mut frame = DataFrame::with_data(stream_id, data);
         if end_stream == EndStream::Yes {
             frame.set_flag(DataFlag::EndStream);
         }
@@ -694,8 +693,13 @@ mod tests {
         ];
         let mut stream = StubTransportStream::with_stub_content(&build_stub_from_frames(&frames));
 
+        // Necessary to coax the borrow-checker to accept a new mutable borrow of stream in every
+        // iteration of the loop below...
+        fn assert_equal<'a>(orig: HttpFrame<'a>, next: HttpFrame<'a>) {
+            assert_eq!(orig, next);
+        }
         for frame in frames.into_iter() {
-            assert_eq!(frame, stream.recv_frame().unwrap());
+            assert_equal(frame, stream.recv_frame().unwrap());
         }
         // Attempting to read after EOF yields an error
         assert!(stream.recv_frame().is_err());
@@ -705,11 +709,7 @@ mod tests {
     /// works correctly when faced with an incomplete frame.
     #[test]
     fn test_recv_frame_for_transport_stream_incomplete_frame() {
-        let frame = {
-            let mut frame = DataFrame::new(1);
-            frame.data = vec![1, 2, 3];
-            frame
-        };
+        let frame = DataFrame::with_data(1, vec![1, 2, 3]);
         let serialized: Vec<u8> = frame.serialize();
 
         {
@@ -1038,8 +1038,7 @@ mod tests {
                         expected_headers.iter().map(|h| (&h.0[..], &h.1[..]))),
                     1)),
             HttpFrame::DataFrame(DataFrame::new(1)), {
-                let mut frame = DataFrame::new(1);
-                frame.data = b"1234".to_vec();
+                let frame = DataFrame::with_data(1, &b"1234"[..]);
                 HttpFrame::DataFrame(frame)
             },
         ];
