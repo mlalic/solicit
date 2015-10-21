@@ -2,7 +2,7 @@
 
 use http::{Response, StaticResponse, HttpResult, HttpError, HttpScheme, StreamId, Header};
 use http::transport::TransportStream;
-use http::connection::{HttpConnection, EndStream, SendStatus};
+use http::connection::{HttpConnection, EndStream, SendStatus, TransportReceiveFrame};
 use http::session::{
     DefaultSessionState,
     SessionState,
@@ -118,7 +118,9 @@ impl<TS, H> SimpleServer<TS, H>
 
         // Initialize the connection -- send own settings and process the peer's
         try!(server.conn.send_settings(&mut server.sender));
-        try!(server.conn.expect_settings(&mut server.receiver, &mut server.sender));
+        try!(server.conn.expect_settings(
+            &mut TransportReceiveFrame::new(&mut server.receiver),
+            &mut server.sender));
 
         // Set up done
         Ok(server)
@@ -130,7 +132,9 @@ impl<TS, H> SimpleServer<TS, H>
     /// Handling the frame can trigger the handler callback. Any responses returned by the handler
     /// are immediately flushed out to the client (blocking the call until it's done).
     pub fn handle_next(&mut self) -> HttpResult<()> {
-        try!(self.conn.handle_next_frame(&mut self.receiver, &mut self.sender));
+        try!(self.conn.handle_next_frame(
+            &mut TransportReceiveFrame::new(&mut self.receiver),
+            &mut self.sender));
         let responses = try!(self.handle_requests());
         try!(self.prepare_responses(responses));
         try!(self.flush_streams());

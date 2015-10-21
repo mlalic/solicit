@@ -164,12 +164,29 @@ pub trait ReceiveFrame {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame>;
 }
 
-/// A blanket implementation of the trait for `TransportStream`s.
-impl<TS> ReceiveFrame for TS where TS: TransportStream {
+/// The struct is a an implementation of the `ReceiveFrame` trait that wraps an existing
+/// `TransportStream` and uses it to provide HTTP/2 frames, when asked for one, by reading from the
+/// stream.
+/// The implementation always allocates a new buffer on the heap for every incoming frame.
+pub struct TransportReceiveFrame<'a, TS> where TS: TransportStream + 'a {
+    ts: &'a mut TS,
+}
+
+impl<'a, TS> TransportReceiveFrame<'a, TS> where TS: TransportStream {
+    /// Create a new `TransportReceiveFrame` that will use the given `TransportStream` for reading
+    /// the frame.
+    pub fn new(ts: &'a mut TS) -> TransportReceiveFrame<'a, TS> {
+        TransportReceiveFrame {
+            ts: ts,
+        }
+    }
+}
+
+impl<'a, TS> ReceiveFrame for TransportReceiveFrame<'a, TS> where TS: TransportStream {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
         let raw_header = {
             let mut buf = [0; 9];
-            try!(TransportStream::read_exact(self, &mut buf));
+            try!(TransportStream::read_exact(self.ts, &mut buf));
             buf
         };
         let header = unpack_header(&raw_header);
@@ -184,14 +201,13 @@ impl<TS> ReceiveFrame for TS where TS: TransportStream {
         unsafe { full_frame.set_len(total_len); }
         // ...and have the stream read into the payload section the exact number of bytes that the
         // header indicated.
-        try!(TransportStream::read_exact(self, &mut full_frame[9..]));
+        try!(TransportStream::read_exact(self.ts, &mut full_frame[9..]));
 
         let raw_frame = RawFrame::from(full_frame);
         // TODO: The reason behind being unable to decode the frame should be
         //       extracted to allow an appropriate connection-level action to be
         //       taken (e.g. responding with a PROTOCOL_ERROR).
-        let frame = try!(HttpFrame::from_raw(raw_frame));
-        Ok(frame)
+        HttpFrame::from_raw(raw_frame)
     }
 }
 
@@ -541,6 +557,7 @@ mod tests {
         EndStream,
         DataChunk,
         SendStatus,
+        TransportReceiveFrame,
     };
 
     use http::tests::common::{
@@ -672,7 +689,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    /// Tests that the implementation of `ReceiveFrame` for `TransportStream` types
+    /// Tests that the implementation of `ReceiveFrame` for `TransportReceiveFrame` types
     /// works correctly.
     #[test]
     fn test_recv_frame_for_transport_stream() {
@@ -698,14 +715,15 @@ mod tests {
         fn assert_equal<'a>(orig: HttpFrame<'a>, next: HttpFrame<'a>) {
             assert_eq!(orig, next);
         }
+        let mut receiver = TransportReceiveFrame::new(&mut stream);
         for frame in frames.into_iter() {
-            assert_equal(frame, stream.recv_frame().unwrap());
+            assert_equal(frame, receiver.recv_frame().unwrap());
         }
         // Attempting to read after EOF yields an error
-        assert!(stream.recv_frame().is_err());
+        assert!(receiver.recv_frame().is_err());
     }
 
-    /// Tests that the implementation of `ReceiveFrame` for `TransportStream` types
+    /// Tests that the implementation of `ReceiveFrame` for `TransportReceiveFrame` types
     /// works correctly when faced with an incomplete frame.
     #[test]
     fn test_recv_frame_for_transport_stream_incomplete_frame() {
@@ -715,14 +733,16 @@ mod tests {
         {
             // Incomplete header
             let mut stream = StubTransportStream::with_stub_content(&serialized[..5]);
+            let mut receiver = TransportReceiveFrame::new(&mut stream);
 
-            assert!(stream.recv_frame().is_err());
+            assert!(receiver.recv_frame().is_err());
         }
         {
             // Incomplete data
             let mut stream = StubTransportStream::with_stub_content(&serialized[..10]);
+            let mut receiver = TransportReceiveFrame::new(&mut stream);
 
-            assert!(stream.recv_frame().is_err());
+            assert!(receiver.recv_frame().is_err());
         }
     }
 
@@ -733,8 +753,9 @@ mod tests {
         // A DATA header which is attached to stream 0
         let serialized = HeadersFrame::new(vec![], 0).serialize();
         let mut stream = StubTransportStream::with_stub_content(&serialized);
+        let mut receiver = TransportReceiveFrame::new(&mut stream);
 
-        assert_eq!(stream.recv_frame().err().unwrap(), HttpError::InvalidFrame);
+        assert_eq!(receiver.recv_frame().err().unwrap(), HttpError::InvalidFrame);
     }
 
     /// Tests that the `HttpFrame::from_raw` method correctly recognizes the frame

@@ -2,7 +2,7 @@
 
 use http::{StreamId, HttpResult, HttpError, Response, Header, HttpScheme};
 use http::transport::TransportStream;
-use http::connection::{HttpConnection, SendStatus};
+use http::connection::{HttpConnection, SendStatus, TransportReceiveFrame};
 use http::session::{
     SessionState,
     DefaultSessionState,
@@ -150,7 +150,9 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// connection.
     #[inline]
     fn init(&mut self) -> HttpResult<()> {
-        self.conn.expect_settings(&mut self.receiver, &mut self.sender)
+        self.conn.expect_settings(
+            &mut TransportReceiveFrame::new(&mut self.receiver),
+            &mut self.sender)
     }
 
     /// Send a request to the server. Blocks until the entire request has been
@@ -272,7 +274,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// frame off the HTTP/2 connection.
     #[inline]
     fn handle_next_frame(&mut self) -> HttpResult<()> {
-        let receiver = &mut self.receiver;
-        self.conn.handle_next_frame(receiver, &mut self.sender)
+        self.conn.handle_next_frame(
+            &mut TransportReceiveFrame::new(&mut self.receiver),
+            &mut self.sender)
     }
 }
