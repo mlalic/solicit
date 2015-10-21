@@ -87,12 +87,12 @@ pub enum HttpFrame<'a> {
 }
 
 impl<'a> HttpFrame<'a> {
-    pub fn from_raw(raw_frame: RawFrame) -> HttpResult<HttpFrame<'a>> {
+    pub fn from_raw(raw_frame: &'a RawFrame) -> HttpResult<HttpFrame<'a>> {
         let frame = match raw_frame.header().1 {
-            0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(raw_frame))),
-            0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(raw_frame))),
-            0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(raw_frame))),
-            _ => HttpFrame::UnknownFrame(From::from(raw_frame)),
+            0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(&raw_frame))),
+            0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(&raw_frame))),
+            0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(&raw_frame))),
+            _ => HttpFrame::UnknownFrame(raw_frame.clone().into()),
         };
 
         Ok(frame)
@@ -106,11 +106,11 @@ impl<'a> HttpFrame<'a> {
     /// Failing to decode the given `Frame` from the `raw_frame`, an
     /// `HttpError::InvalidFrame` error is returned.
     #[inline]
-    fn parse_frame<F: Frame>(raw_frame: RawFrame) -> HttpResult<F> {
+    fn parse_frame<F: Frame<'a>>(raw_frame: &'a RawFrame) -> HttpResult<F> {
         // TODO: The reason behind being unable to decode the frame should be
         //       extracted to allow an appropriate connection-level action to be
         //       taken (e.g. responding with a PROTOCOL_ERROR).
-        Frame::from_raw(raw_frame).ok_or(HttpError::InvalidFrame)
+        Frame::from_raw(&raw_frame).ok_or(HttpError::InvalidFrame)
     }
 }
 
@@ -170,6 +170,7 @@ pub trait ReceiveFrame {
 /// The implementation always allocates a new buffer on the heap for every incoming frame.
 pub struct TransportReceiveFrame<'a, TS> where TS: TransportStream + 'a {
     ts: &'a mut TS,
+    raw_frame: Option<RawFrame<'a>>,
 }
 
 impl<'a, TS> TransportReceiveFrame<'a, TS> where TS: TransportStream {
@@ -178,6 +179,7 @@ impl<'a, TS> TransportReceiveFrame<'a, TS> where TS: TransportStream {
     pub fn new(ts: &'a mut TS) -> TransportReceiveFrame<'a, TS> {
         TransportReceiveFrame {
             ts: ts,
+            raw_frame: None,
         }
     }
 }
@@ -203,11 +205,11 @@ impl<'a, TS> ReceiveFrame for TransportReceiveFrame<'a, TS> where TS: TransportS
         // header indicated.
         try!(TransportStream::read_exact(self.ts, &mut full_frame[9..]));
 
-        let raw_frame = RawFrame::from(full_frame);
+        self.raw_frame = Some(RawFrame::from(full_frame));
         // TODO: The reason behind being unable to decode the frame should be
         //       extracted to allow an appropriate connection-level action to be
         //       taken (e.g. responding with a PROTOCOL_ERROR).
-        HttpFrame::from_raw(raw_frame)
+        HttpFrame::from_raw(self.raw_frame.as_ref().unwrap())
     }
 }
 
@@ -762,21 +764,21 @@ mod tests {
     /// type from the header and returns the corresponding variant.
     #[test]
     fn test_http_frame_from_raw() {
-        fn to_raw<'a, F: Frame>(frame: F) -> RawFrame<'a> {
+        fn to_raw<'a, F: Frame<'a>>(frame: F) -> RawFrame<'static> {
             RawFrame::from(frame.serialize())
         }
 
-        assert!(match HttpFrame::from_raw(to_raw(DataFrame::new(1))) {
+        assert!(match HttpFrame::from_raw(&to_raw(DataFrame::new(1))) {
             Ok(HttpFrame::DataFrame(_)) => true,
             _ => false,
         });
 
-        assert!(match HttpFrame::from_raw(to_raw(HeadersFrame::new(vec![], 1))) {
+        assert!(match HttpFrame::from_raw(&to_raw(HeadersFrame::new(vec![], 1))) {
             Ok(HttpFrame::HeadersFrame(_)) => true,
             _ => false,
         });
 
-        assert!(match HttpFrame::from_raw(to_raw(SettingsFrame::new())) {
+        assert!(match HttpFrame::from_raw(&to_raw(SettingsFrame::new())) {
             Ok(HttpFrame::SettingsFrame(_)) => true,
             _ => false,
         });
@@ -789,19 +791,19 @@ mod tests {
             buf.push(1);
             buf
         });
-        assert!(match HttpFrame::from_raw(unknown_frame) {
+        assert!(match HttpFrame::from_raw(&unknown_frame) {
             Ok(HttpFrame::UnknownFrame(_)) => true,
             _ => false,
         });
 
         // Invalid since it's headers on stream 0
         let invalid_frame = HeadersFrame::new(vec![], 0);
-        assert!(HttpFrame::from_raw(to_raw(invalid_frame)).is_err());
+        assert!(HttpFrame::from_raw(&to_raw(invalid_frame)).is_err());
     }
 
     fn expect_frame_list(expected: Vec<HttpFrame>, sent: Vec<RawFrame>) {
         for (expect, actual) in expected.into_iter().zip(sent.into_iter()) {
-            let actual = HttpFrame::from_raw(actual).unwrap();
+            let actual = HttpFrame::from_raw(&actual).unwrap();
             assert_eq!(expect, actual);
         }
     }
@@ -847,7 +849,7 @@ mod tests {
             assert_eq!(SendStatus::Sent,
                        conn.sender(&mut sender).send_next_data(&mut prioritizer).unwrap());
             let last = sender.sent.pop().unwrap();
-            expect_chunk(&chunk, &HttpFrame::from_raw(last).unwrap());
+            expect_chunk(&chunk, &HttpFrame::from_raw(&last).unwrap());
         }
         // Nothing to send any more
         assert_eq!(SendStatus::Nothing,
@@ -898,7 +900,7 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
+            let frame = match HttpFrame::from_raw(&sender.sent[0]).unwrap() {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -918,7 +920,7 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
+            let frame = match HttpFrame::from_raw(&sender.sent[0]).unwrap() {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -937,7 +939,7 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
+            let frame = match HttpFrame::from_raw(&sender.sent[0]).unwrap() {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -966,7 +968,7 @@ mod tests {
             assert_eq!(sender.sent.len(), 1);
             // A data frame?
             let raw = sender.sent.remove(0);
-            let parsed_frame = HttpFrame::from_raw(raw);
+            let parsed_frame = HttpFrame::from_raw(&raw);
             let frame = match parsed_frame {
                 Ok(HttpFrame::DataFrame(frame)) => frame,
                 _ => panic!("Data frame not sent"),
@@ -987,7 +989,7 @@ mod tests {
             assert_eq!(sender.sent.len(), 1);
             // A data frame?
             let raw = sender.sent.remove(0);
-            let parsed_frame = HttpFrame::from_raw(raw).unwrap();
+            let parsed_frame = HttpFrame::from_raw(&raw).unwrap();
             let frame = match parsed_frame {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),
@@ -1012,7 +1014,7 @@ mod tests {
             assert_eq!(sender.sent.len(), 1);
             // A data frame?
             let raw = sender.sent.remove(0);
-            let parsed_frame = HttpFrame::from_raw(raw).unwrap();
+            let parsed_frame = HttpFrame::from_raw(&raw).unwrap();
             let frame = match parsed_frame {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),

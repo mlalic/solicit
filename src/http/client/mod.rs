@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(receiver.recv_list.len(), 0);
         // We also sent an ACK already.
         assert_eq!(sender.sent.len(), 1);
-        let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
+        let frame = match HttpFrame::from_raw(&sender.sent[0]).unwrap() {
             HttpFrame::SettingsFrame(frame) => frame,
             _ => panic!("ACK not sent!"),
         };
@@ -509,7 +509,7 @@ mod tests {
             // The headers got sent?
             // (It'd be so much nicer to assert that the `send_headers` method got called)
             assert_eq!(sender.sent.len(), 1);
-            match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
+            match HttpFrame::from_raw(&sender.sent[0]).unwrap() {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The frame closed the stream?
                     assert!(frame.is_end_of_stream());
@@ -535,7 +535,7 @@ mod tests {
             // The headers got sent?
             // (It'd be so much nicer to assert that the `send_headers` method got called)
             assert_eq!(sender.sent.len(), 1);
-            match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
+            match HttpFrame::from_raw(&sender.sent.remove(0)).unwrap() {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The stream is still open
                     assert!(!frame.is_end_of_stream());
@@ -625,7 +625,7 @@ mod tests {
         // Immediately after that we sent a settings frame...
         assert_eq!(preface, &written[..preface.len()]);
         let raw = RawFrame::parse(frames_buf).unwrap();
-        let frame: SettingsFrame = Frame::from_raw(raw).unwrap();
+        let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
         // ...which was not an ack, but our own settings.
         assert!(!frame.is_ack());
     }

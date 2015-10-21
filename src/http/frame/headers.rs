@@ -203,7 +203,7 @@ impl HeadersFrame {
     }
 }
 
-impl Frame for HeadersFrame {
+impl<'a> Frame<'a> for HeadersFrame {
     /// The type that represents the flags that the particular `Frame` can take.
     /// This makes sure that only valid `Flag`s are used with each `Frame`.
     type FlagType = HeadersFlag;
@@ -217,7 +217,7 @@ impl Frame for HeadersFrame {
     /// `RawFrame`. The stream ID *must not* be 0.
     ///
     /// Otherwise, returns a newly constructed `HeadersFrame`.
-    fn from_raw(raw_frame: RawFrame) -> Option<HeadersFrame> {
+    fn from_raw(raw_frame: &RawFrame) -> Option<HeadersFrame> {
         // Unpack the header
         let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
@@ -329,7 +329,7 @@ impl FrameIR for HeadersFrame {
 #[cfg(test)]
 mod tests {
     use super::{HeadersFrame, HeadersFlag, StreamDependency};
-    use http::frame::tests::{build_test_frame, build_padded_frame_payload};
+    use http::frame::tests::{build_padded_frame_payload};
     use http::tests::common::raw_frame_from_parts;
     use http::frame::{pack_header, Frame};
 
@@ -421,7 +421,8 @@ mod tests {
         let payload = data.to_vec();
         let header = (payload.len() as u32, 0x1, 0, 1);
 
-        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
         assert_eq!(frame.header_fragment, data);
         assert_eq!(frame.flags, 0);
@@ -437,7 +438,8 @@ mod tests {
         let payload = build_padded_frame_payload(data, 6);
         let header = (payload.len() as u32, 0x1, 0x08, 1);
 
-        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
         assert_eq!(frame.header_fragment, data);
         assert_eq!(frame.flags, 8);
@@ -461,7 +463,8 @@ mod tests {
         };
         let header = (payload.len() as u32, 0x1, 0x20, 1);
 
-        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
         assert_eq!(frame.header_fragment, data);
         assert_eq!(frame.flags, 0x20);
@@ -486,7 +489,8 @@ mod tests {
         let payload = build_padded_frame_payload(&full, 4);
         let header = (payload.len() as u32, 0x1, 0x20 | 0x8, 1);
 
-        let frame = build_test_frame::<HeadersFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
         assert_eq!(frame.header_fragment, data);
         assert_eq!(frame.flags, 0x20 | 0x8);
@@ -502,8 +506,8 @@ mod tests {
         let payload = data.to_vec();
         let header = (payload.len() as u32, 0x1, 0, 0);
 
-        let frame: Option<HeadersFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<HeadersFrame> = Frame::from_raw(&raw);
         
         assert!(frame.is_none());
     }
@@ -516,8 +520,8 @@ mod tests {
         let payload = data.to_vec();
         let header = (payload.len() as u32, 0x2, 0, 1);
 
-        let frame: Option<HeadersFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<HeadersFrame> = Frame::from_raw(&raw);
         
         assert!(frame.is_none());
     }

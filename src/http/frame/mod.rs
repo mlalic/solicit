@@ -128,7 +128,7 @@ pub trait Flag {
 }
 
 /// A trait that all HTTP/2 frame structs need to implement.
-pub trait Frame: Sized {
+pub trait Frame<'a>: Sized {
     /// The type that represents the flags that the particular `Frame` can take.
     /// This makes sure that only valid `Flag`s are used with each `Frame`.
     type FlagType: Flag;
@@ -144,7 +144,7 @@ pub trait Frame: Sized {
     /// frame's rules, etc.
     ///
     /// Otherwise, returns a newly constructed `Frame`.
-    fn from_raw(raw_frame: RawFrame) -> Option<Self>;
+    fn from_raw(raw_frame: &'a RawFrame<'a>) -> Option<Self>;
 
     /// Tests if the given flag is set for the frame.
     fn is_set(&self, flag: Self::FlagType) -> bool;
@@ -297,12 +297,10 @@ mod tests {
         unpack_header,
         pack_header,
         RawFrame,
-        FrameHeader,
         Frame,
         FrameIR,
     };
     use std::io;
-    use http::tests::common::raw_frame_from_parts;
 
     /// Tests that the `unpack_header` function correctly returns the
     /// components of HTTP/2 frame headers.
@@ -391,13 +389,6 @@ mod tests {
             );
             assert_eq!(pack_header(&header_components), header);
         }
-    }
-
-    /// Builds a test frame of the given type with the given header and
-    /// payload, by using the `Frame::from_raw` method.
-    pub fn build_test_frame<F: Frame>(header: &FrameHeader, payload: &[u8]) -> F {
-        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
-        Frame::from_raw(raw).unwrap()
     }
 
     /// Builds a `Vec` containing the given data as a padded HTTP/2 frame.

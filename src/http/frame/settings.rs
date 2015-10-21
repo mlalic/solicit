@@ -216,7 +216,7 @@ impl SettingsFrame {
     }
 }
 
-impl Frame for SettingsFrame {
+impl<'a> Frame<'a> for SettingsFrame {
     /// The type that represents the flags that the particular `Frame` can take.
     /// This makes sure that only valid `Flag`s are used with each `Frame`.
     type FlagType = SettingsFlag;
@@ -232,7 +232,7 @@ impl Frame for SettingsFrame {
     /// total payload length must be multiple of 6.
     ///
     /// Otherwise, returns a newly constructed `SettingsFrame`.
-    fn from_raw(raw_frame: RawFrame) -> Option<SettingsFrame> {
+    fn from_raw(raw_frame: &RawFrame) -> Option<SettingsFrame> {
         // Unpack the header
         let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
@@ -317,7 +317,6 @@ impl FrameIR for SettingsFrame {
 #[cfg(test)]
 mod tests {
     use super::{HttpSetting, SettingsFrame};
-    use http::frame::tests::{build_test_frame};
     use http::tests::common::raw_frame_from_parts;
     use http::frame::{pack_header, Frame};
 
@@ -329,7 +328,8 @@ mod tests {
         // A header with the flag indicating no padding
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly interprets the settings?
         assert_eq!(frame.settings, vec![HttpSetting::HeaderTableSize(1)]);
@@ -354,7 +354,8 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly interprets the settings?
         assert_eq!(frame.settings, settings);
@@ -381,7 +382,8 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
 
         // All the settings are returned, even the duplicates
         assert_eq!(frame.settings, settings);
@@ -409,7 +411,8 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
 
         // All the settings are returned twice, but the unkown isn't found in
         // the returned Vec. For now, we ignore the unknown setting fully, not
@@ -427,7 +430,8 @@ mod tests {
         let payload = [];
         let header = (payload.len() as u32, 4, 1, 0);
 
-        let frame = build_test_frame::<SettingsFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
 
         // No settings there?
         assert_eq!(frame.settings, vec![]);
@@ -453,8 +457,8 @@ mod tests {
         };
         let header = (payload.len() as u32, 4, 1, 0);
 
-        let frame: Option<SettingsFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<SettingsFrame> = Frame::from_raw(&raw);
 
         assert!(frame.is_none());
     }
@@ -467,8 +471,8 @@ mod tests {
         // Header indicates that it is associated to stream 1
         let header = (payload.len() as u32, 4, 1, 1);
 
-        let frame: Option<SettingsFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<SettingsFrame> = Frame::from_raw(&raw);
 
         assert!(frame.is_none());
     }
@@ -481,8 +485,8 @@ mod tests {
 
         let header = (payload.len() as u32, 4, 0, 0);
 
-        let frame: Option<SettingsFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<SettingsFrame> = Frame::from_raw(&raw);
 
         assert!(frame.is_none());
     }

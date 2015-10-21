@@ -145,7 +145,7 @@ impl<TS> ChannelFrameReceiver<TS> where TS: TransportStream {
     fn new(inner: TS) -> (ChannelFrameReceiver<TS>, ChannelFrameReceiverHandle) {
         let (send, recv) = mpsc::channel();
 
-        let handle = ChannelFrameReceiverHandle { rx: recv };
+        let handle = ChannelFrameReceiverHandle { rx: recv, raw: None };
         let receiver = ChannelFrameReceiver {
             tx: send,
             inner: inner,
@@ -182,17 +182,19 @@ impl<TS> ChannelFrameReceiver<TS> where TS: TransportStream {
 struct ChannelFrameReceiverHandle {
     /// The receiver end of the channel that buffers the received frames.
     rx: Receiver<RawFrame<'static>>,
+    raw: Option<RawFrame<'static>>,
 }
 
 impl ReceiveFrame for ChannelFrameReceiverHandle {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
-        self.rx.recv()
+        let raw = try!(self.rx.recv()
             .map_err(|_| {
                 HttpError::from(io::Error::new(io::ErrorKind::Other, "Unable to read frame"))
-            })
-            .and_then(|raw| {
-                HttpFrame::from_raw(raw)
-            })
+            }));
+        // Tethers the lifetime of the returned parsed HttpFrame to the lifetime of `self` (i.e.
+        // the provider of the frame).
+        self.raw = Some(raw);
+        HttpFrame::from_raw(self.raw.as_ref().unwrap())
     }
 }
 

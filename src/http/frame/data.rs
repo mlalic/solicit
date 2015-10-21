@@ -153,13 +153,13 @@ impl<'a> DataFrame<'a> {
     }
 }
 
-impl<'a> Frame for DataFrame<'a> {
+impl<'a> Frame<'a> for DataFrame<'a> {
     type FlagType = DataFlag;
 
     /// Creates a new `DataFrame` from the given `RawFrame` (i.e. header and
     /// payload), if possible.  Returns `None` if a valid `DataFrame` cannot be
     /// constructed from the given `RawFrame`.
-    fn from_raw(raw_frame: RawFrame) -> Option<DataFrame<'a>> {
+    fn from_raw(raw_frame: &'a RawFrame<'a>) -> Option<DataFrame<'a>> {
         // Unpack the header
         let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
@@ -181,7 +181,7 @@ impl<'a> Frame for DataFrame<'a> {
         // Everything has been validated so far: try to extract the data from
         // the payload.
         let padded = (flags & DataFlag::Padded.bitmask()) != 0;
-        match DataFrame::parse_payload(&raw_frame.payload(), padded) {
+        match DataFrame::parse_payload(raw_frame.payload(), padded) {
             Some((data, Some(padding_len))) => {
                 // The data got extracted (from a padded frame)
                 Some(DataFrame {
@@ -250,7 +250,7 @@ impl<'a> FrameIR for DataFrame<'a> {
 #[cfg(test)]
 mod tests {
     use super::{DataFlag, DataFrame};
-    use http::frame::tests::{build_test_frame, build_padded_frame_payload};
+    use http::frame::tests::{build_padded_frame_payload};
     use http::tests::common::raw_frame_from_parts;
     use http::frame::{pack_header, Frame};
 
@@ -263,7 +263,8 @@ mod tests {
         // A header with the flag indicating no padding
         let header = (payload.len() as u32, 0u8, 0u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: DataFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly returns the data?
         assert_eq!(&frame.data[..], &data[..]);
@@ -290,7 +291,8 @@ mod tests {
         // A header with the flag indicating padding
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: DataFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly returns the data?
         assert_eq!(&frame.data[..], &data[..]);
@@ -313,7 +315,8 @@ mod tests {
         // A header with the flag indicating no padding
         let header = (payload.len() as u32, 0u8, 0u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: DataFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly returns the data?
         assert_eq!(&frame.data[..], &data[..]);
@@ -330,8 +333,8 @@ mod tests {
         // A header with the flag indicating padding
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
-        let frame: Option<DataFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<DataFrame> = Frame::from_raw(&raw);
 
         // The frame was not even created since the raw bytes are invalid
         assert!(frame.is_none())
@@ -346,8 +349,8 @@ mod tests {
         // Stream 0
         let header = (payload.len() as u32, 0u8, 0u8, 0u32);
 
-        let frame: Option<DataFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload.to_vec()));
+        let raw = raw_frame_from_parts(header, payload.to_vec());
+        let frame: Option<DataFrame> = Frame::from_raw(&raw);
 
         // The frame is not valid.
         assert!(frame.is_none());
@@ -360,7 +363,8 @@ mod tests {
         let payload = [];
         let header = (payload.len() as u32, 0u8, 0u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: DataFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly returns the data -- i.e. an empty array?
         assert_eq!(&frame.data[..], &[][..]);
@@ -375,8 +379,8 @@ mod tests {
         let payload = vec![];
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
-        let frame: Option<DataFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<DataFrame> = Frame::from_raw(&raw);
 
         // In this case, we cannot receive a frame, since the payload did not
         // contain even the first byte, necessary to find the padding length.
@@ -392,7 +396,8 @@ mod tests {
         // A header with the flag indicating padding
         let header = (payload.len() as u32, 0u8, 8u8, 1u32);
 
-        let frame = build_test_frame::<DataFrame>(&header, &payload);
+        let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
+        let frame: DataFrame = Frame::from_raw(&raw).unwrap();
 
         // The frame correctly returns the data?
         assert_eq!(&frame.data[..], &data[..]);
@@ -410,8 +415,8 @@ mod tests {
         // The header has an invalid type (0x1 instead of 0x0).
         let header = (payload.len() as u32, 1u8, 8u8, 1u32);
 
-        let frame: Option<DataFrame> = Frame::from_raw(
-            raw_frame_from_parts(header, payload));
+        let raw = raw_frame_from_parts(header, payload);
+        let frame: Option<DataFrame> = Frame::from_raw(&raw);
 
         assert!(frame.is_none());
     }
