@@ -367,8 +367,6 @@ mod tests {
         RequestStream,
     };
 
-    use std::mem;
-
     use http::{Header};
     use http::tests::common::{
         TestStream,
@@ -381,7 +379,7 @@ mod tests {
         SettingsFrame,
         DataFrame,
         Frame,
-        unpack_header,
+        RawFrame,
     };
     use http::connection::{
         HttpFrame,
@@ -411,7 +409,7 @@ mod tests {
         assert_eq!(receiver.recv_list.len(), 0);
         // We also sent an ACK already.
         assert_eq!(sender.sent.len(), 1);
-        let frame = match sender.sent.remove(0) {
+        let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
             HttpFrame::SettingsFrame(frame) => frame,
             _ => panic!("ACK not sent!"),
         };
@@ -511,7 +509,7 @@ mod tests {
             // The headers got sent?
             // (It'd be so much nicer to assert that the `send_headers` method got called)
             assert_eq!(sender.sent.len(), 1);
-            match sender.sent[0] {
+            match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The frame closed the stream?
                     assert!(frame.is_end_of_stream());
@@ -537,7 +535,7 @@ mod tests {
             // The headers got sent?
             // (It'd be so much nicer to assert that the `send_headers` method got called)
             assert_eq!(sender.sent.len(), 1);
-            match sender.sent[0] {
+            match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The stream is still open
                     assert!(!frame.is_end_of_stream());
@@ -614,24 +612,6 @@ mod tests {
     /// a given `io::Write`.
     #[test]
     fn test_write_preface() {
-        /// A helper function that parses out the first frame contained in the
-        /// given buffer, expecting it to be the frame type of the generic parameter
-        /// `F`. Returns the size of the raw frame read and the frame itself.
-        ///
-        /// Panics if unable to obtain such a frame.
-        fn get_frame_from_buf<F: Frame>(buf: &[u8]) -> (F, usize) {
-            let headers = unpack_header(unsafe {
-                assert!(buf.len() >= 9);
-                mem::transmute(buf.as_ptr())
-            });
-            let len = headers.0 as usize;
-
-            let raw = (&buf[..9 + len]).into();
-            let frame = Frame::from_raw(raw).unwrap();
-
-            (frame, len + 9)
-        }
-
         // The buffer (`io::Write`) into which we will write the preface.
         let mut written: Vec<u8> = Vec::new();
 
@@ -644,7 +624,8 @@ mod tests {
         let frames_buf = &written[preface.len()..];
         // Immediately after that we sent a settings frame...
         assert_eq!(preface, &written[..preface.len()]);
-        let (frame, _): (SettingsFrame, _) = get_frame_from_buf(frames_buf);
+        let raw = RawFrame::parse(frames_buf).unwrap();
+        let frame: SettingsFrame = Frame::from_raw(raw).unwrap();
         // ...which was not an ack, but our own settings.
         assert!(!frame.is_ack());
     }

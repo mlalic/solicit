@@ -799,6 +799,13 @@ mod tests {
         assert!(HttpFrame::from_raw(to_raw(invalid_frame)).is_err());
     }
 
+    fn expect_frame_list(expected: Vec<HttpFrame>, sent: Vec<RawFrame>) {
+        for (expect, actual) in expected.into_iter().zip(sent.into_iter()) {
+            let actual = HttpFrame::from_raw(actual).unwrap();
+            assert_eq!(expect, actual);
+        }
+    }
+
     /// Tests that it is possible to write a single frame to the connection.
     #[test]
     fn test_write_single_frame() {
@@ -813,7 +820,7 @@ mod tests {
             send_frame(&mut sender, &mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, sender.sent);
+        expect_frame_list(expected, sender.sent);
     }
 
     #[test]
@@ -839,7 +846,8 @@ mod tests {
         for chunk in chunks.iter() {
             assert_eq!(SendStatus::Sent,
                        conn.sender(&mut sender).send_next_data(&mut prioritizer).unwrap());
-            expect_chunk(&chunk, sender.sent.last().unwrap());
+            let last = sender.sent.pop().unwrap();
+            expect_chunk(&chunk, &HttpFrame::from_raw(last).unwrap());
         }
         // Nothing to send any more
         assert_eq!(SendStatus::Nothing,
@@ -863,7 +871,7 @@ mod tests {
             send_frame(&mut sender, &mut conn, frame).unwrap();
         }
 
-        assert_eq!(expected, sender.sent);
+        expect_frame_list(expected, sender.sent);
     }
 
     /// Tests that `HttpConnection::send_headers` correctly sends the given headers when they can
@@ -890,7 +898,7 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match sender.sent.remove(0) {
+            let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -910,7 +918,7 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match sender.sent.remove(0) {
+            let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -929,7 +937,7 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // The headers frame?
-            let frame = match sender.sent.remove(0) {
+            let frame = match HttpFrame::from_raw(sender.sent.remove(0)).unwrap() {
                 HttpFrame::HeadersFrame(frame) => frame,
                 _ => panic!("Headers frame not sent"),
             };
@@ -957,8 +965,10 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // A data frame?
-            let frame = match sender.sent.remove(0) {
-                HttpFrame::DataFrame(frame) => frame,
+            let raw = sender.sent.remove(0);
+            let parsed_frame = HttpFrame::from_raw(raw);
+            let frame = match parsed_frame {
+                Ok(HttpFrame::DataFrame(frame)) => frame,
                 _ => panic!("Data frame not sent"),
             };
             assert_eq!(&frame.data[..], data);
@@ -976,7 +986,9 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // A data frame?
-            let frame = match sender.sent.remove(0) {
+            let raw = sender.sent.remove(0);
+            let parsed_frame = HttpFrame::from_raw(raw).unwrap();
+            let frame = match parsed_frame {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),
             };
@@ -999,7 +1011,9 @@ mod tests {
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
             // A data frame?
-            let frame = match sender.sent.remove(0) {
+            let raw = sender.sent.remove(0);
+            let parsed_frame = HttpFrame::from_raw(raw).unwrap();
+            let frame = match parsed_frame {
                 HttpFrame::DataFrame(frame) => frame,
                 _ => panic!("Data frame not sent"),
             };

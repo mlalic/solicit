@@ -48,7 +48,7 @@ pub fn raw_frame_from_parts<'a>(header: FrameHeader, payload: Vec<u8>) -> RawFra
 
 /// A mock `SendFrame` implementation that simply saves all frames that it is to send to a `Vec`.
 pub struct MockSendFrame {
-    pub sent: Vec<HttpFrame<'static>>,
+    pub sent: Vec<RawFrame<'static>>,
 }
 
 impl MockSendFrame {
@@ -62,7 +62,7 @@ impl SendFrame for MockSendFrame {
         let mut buf = io::Cursor::new(Vec::new());
         frame.serialize_into(&mut buf).unwrap();
         let raw = buf.into_inner().into();
-        self.sent.push(HttpFrame::from_raw(raw).unwrap());
+        self.sent.push(raw);
         Ok(())
     }
 }
