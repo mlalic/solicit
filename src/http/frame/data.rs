@@ -139,7 +139,7 @@ impl<'a> DataFrame<'a> {
     ///
     /// If the payload was invalid for a DATA frame, returns `None`
     fn parse_payload(payload: &[u8], padded: bool)
-            -> Option<(Vec<u8>, Option<u8>)> {
+            -> Option<(&[u8], Option<u8>)> {
         let (data, pad_len) = if padded {
             match parse_padded_payload(payload) {
                 Some((data, pad_len)) => (data, Some(pad_len)),
@@ -149,7 +149,7 @@ impl<'a> DataFrame<'a> {
             (payload, None)
         };
 
-        Some((data.to_vec(), pad_len))
+        Some((data, pad_len))
     }
 }
 
@@ -187,7 +187,7 @@ impl<'a> Frame<'a> for DataFrame<'a> {
                 Some(DataFrame {
                     stream_id: stream_id,
                     flags: flags,
-                    data: Cow::Owned(data),
+                    data: Cow::Borrowed(data),
                     padding_len: Some(padding_len),
                 })
             },
@@ -196,7 +196,7 @@ impl<'a> Frame<'a> for DataFrame<'a> {
                 Some(DataFrame {
                     stream_id: stream_id,
                     flags: flags,
-                    data: Cow::Owned(data),
+                    data: Cow::Borrowed(data),
                     padding_len: None,
                 })
             },
