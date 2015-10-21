@@ -1,6 +1,8 @@
 //! The module contains the implementation of the `HEADERS` frame and associated flags.
 
 use std::io;
+use std::borrow::Cow;
+
 use http::StreamId;
 use http::frame::{
     FrameBuilder,
@@ -125,9 +127,9 @@ impl StreamDependency {
 #[derive(PartialEq)]
 #[derive(Debug)]
 #[derive(Clone)]
-pub struct HeadersFrame {
+pub struct HeadersFrame<'a> {
     /// The header fragment bytes stored within the frame.
-    pub header_fragment: Vec<u8>,
+    header_fragment: Cow<'a, [u8]>,
     /// The ID of the stream with which this frame is associated
     pub stream_id: StreamId,
     /// The stream dependency information, if any.
@@ -138,12 +140,12 @@ pub struct HeadersFrame {
     flags: u8,
 }
 
-impl HeadersFrame {
+impl<'a> HeadersFrame<'a> {
     /// Creates a new `HeadersFrame` with the given header fragment and stream
     /// ID. No padding, no stream dependency, and no flags are set.
-    pub fn new(fragment: Vec<u8>, stream_id: StreamId) -> HeadersFrame {
+    pub fn new(fragment: Vec<u8>, stream_id: StreamId) -> HeadersFrame<'a> {
         HeadersFrame {
-            header_fragment: fragment,
+            header_fragment: Cow::Owned(fragment),
             stream_id: stream_id,
             stream_dep: None,
             padding_len: None,
@@ -156,9 +158,9 @@ impl HeadersFrame {
     pub fn with_dependency(
             fragment: Vec<u8>,
             stream_id: StreamId,
-            stream_dep: StreamDependency) -> HeadersFrame {
+            stream_dep: StreamDependency) -> HeadersFrame<'a> {
         HeadersFrame {
-            header_fragment: fragment,
+            header_fragment: Cow::Owned(fragment),
             stream_id: stream_id,
             stream_dep: Some(stream_dep),
             padding_len: None,
@@ -201,9 +203,11 @@ impl HeadersFrame {
 
         self.header_fragment.len() as u32 + priority + padding
     }
+
+    pub fn header_fragment(&self) -> &[u8] { &self.header_fragment }
 }
 
-impl<'a> Frame<'a> for HeadersFrame {
+impl<'a> Frame<'a> for HeadersFrame<'a> {
     /// The type that represents the flags that the particular `Frame` can take.
     /// This makes sure that only valid `Flag`s are used with each `Frame`.
     type FlagType = HeadersFlag;
@@ -217,7 +221,7 @@ impl<'a> Frame<'a> for HeadersFrame {
     /// `RawFrame`. The stream ID *must not* be 0.
     ///
     /// Otherwise, returns a newly constructed `HeadersFrame`.
-    fn from_raw(raw_frame: &RawFrame) -> Option<HeadersFrame> {
+    fn from_raw(raw_frame: &'a RawFrame) -> Option<HeadersFrame<'a>> {
         // Unpack the header
         let (len, frame_type, flags, stream_id) = raw_frame.header();
         // Check that the frame type is correct for this frame implementation
@@ -257,7 +261,7 @@ impl<'a> Frame<'a> for HeadersFrame {
         };
 
         Some(HeadersFrame {
-            header_fragment: data.to_vec(),
+            header_fragment: Cow::Borrowed(data),
             stream_id: stream_id,
             stream_dep: stream_dep,
             padding_len: pad_len,
@@ -300,7 +304,7 @@ impl<'a> Frame<'a> for HeadersFrame {
     }
 }
 
-impl FrameIR for HeadersFrame {
+impl<'a> FrameIR for HeadersFrame<'a> {
     fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
         try!(b.write_header(self.get_header()));
         let padded = self.is_set(HeadersFlag::Padded);
@@ -424,7 +428,7 @@ mod tests {
         let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
         let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
-        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.header_fragment(), &data[..]);
         assert_eq!(frame.flags, 0);
         assert_eq!(frame.get_stream_id(), 1);
         assert!(frame.stream_dep.is_none());
@@ -441,7 +445,7 @@ mod tests {
         let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
         let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
-        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.header_fragment(), &data[..]);
         assert_eq!(frame.flags, 8);
         assert_eq!(frame.get_stream_id(), 1);
         assert!(frame.stream_dep.is_none());
@@ -466,7 +470,7 @@ mod tests {
         let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
         let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
-        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.header_fragment(), &data[..]);
         assert_eq!(frame.flags, 0x20);
         assert_eq!(frame.get_stream_id(), 1);
         assert_eq!(frame.stream_dep.unwrap(), dep);
@@ -492,7 +496,7 @@ mod tests {
         let raw = raw_frame_from_parts(header.clone(), payload.to_vec());
         let frame: HeadersFrame = Frame::from_raw(&raw).unwrap();
 
-        assert_eq!(frame.header_fragment, data);
+        assert_eq!(frame.header_fragment(), &data[..]);
         assert_eq!(frame.flags, 0x20 | 0x8);
         assert_eq!(frame.get_stream_id(), 1);
         assert_eq!(frame.stream_dep.unwrap(), dep);

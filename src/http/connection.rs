@@ -81,7 +81,7 @@ impl AsRef<[u8]> for UnknownFrame {
 #[derive(Clone)]
 pub enum HttpFrame<'a> {
     DataFrame(DataFrame<'a>),
-    HeadersFrame(HeadersFrame),
+    HeadersFrame(HeadersFrame<'a>),
     SettingsFrame(SettingsFrame),
     UnknownFrame(UnknownFrame),
 }
@@ -521,7 +521,7 @@ impl HttpConnection {
     /// Private helper method that handles a received `HeadersFrame`.
     fn handle_headers_frame<Sess: Session>(&mut self, frame: HeadersFrame, session: &mut Sess)
             -> HttpResult<()> {
-        let headers = try!(self.decoder.decode(&frame.header_fragment)
+        let headers = try!(self.decoder.decode(&frame.header_fragment())
                                        .map_err(|e| HttpError::CompressionError(e)));
         let headers = headers.into_iter().map(|h| h.into()).collect();
         try!(session.new_headers(frame.get_stream_id(), headers, self));
@@ -881,7 +881,7 @@ mod tests {
     #[test]
     fn test_send_headers_single_frame() {
         fn assert_correct_headers(headers: &[Header], frame: &HeadersFrame) {
-            let buf = &frame.header_fragment;
+            let buf = frame.header_fragment();
             let frame_headers = hpack::Decoder::new().decode(buf).unwrap();
             let headers: Vec<OwnedHeader> = headers.iter().map(|h| h.clone().into()).collect();
             assert_eq!(headers, frame_headers);
