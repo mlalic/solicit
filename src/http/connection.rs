@@ -42,36 +42,6 @@ use http::frame::{
 };
 use hpack;
 
-/// A thin wrapper around an unknown frame that guarantees that the frame's content is owned.
-/// This makes it suitable for inclusion in the `HttpFrame` enum which needs to be `Send`
-/// (for now).
-#[derive(Debug, Clone, PartialEq)]
-pub struct UnknownFrame {
-    buf: Vec<u8>,
-}
-impl UnknownFrame {
-    pub fn serialize(&self) -> Vec<u8> {
-        self.buf.clone()
-    }
-}
-// Conversion traits: from and into a `RawFrame`, as well as an owned and borrowed byte buffer.
-impl<'a> From<RawFrame<'a>> for UnknownFrame {
-    fn from(raw: RawFrame<'a>) -> UnknownFrame {
-        UnknownFrame { buf: raw.into() }
-    }
-}
-impl<'a> Into<RawFrame<'a>> for UnknownFrame {
-    fn into(self) -> RawFrame<'a> {
-        self.buf.into()
-    }
-}
-impl Into<Vec<u8>> for UnknownFrame {
-    fn into(self) -> Vec<u8> { self.buf }
-}
-impl AsRef<[u8]> for UnknownFrame {
-    fn as_ref(&self) -> &[u8] { &self.buf }
-}
-
 /// An enum representing all frame variants that can be returned by an `HttpConnection` can handle.
 ///
 /// The variants wrap the appropriate `Frame` implementation, except for the `UnknownFrame`
@@ -83,7 +53,7 @@ pub enum HttpFrame<'a> {
     DataFrame(DataFrame<'a>),
     HeadersFrame(HeadersFrame<'a>),
     SettingsFrame(SettingsFrame),
-    UnknownFrame(UnknownFrame),
+    UnknownFrame(RawFrame<'a>),
 }
 
 impl<'a> HttpFrame<'a> {
@@ -92,7 +62,7 @@ impl<'a> HttpFrame<'a> {
             0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(&raw_frame))),
-            _ => HttpFrame::UnknownFrame(raw_frame.clone().into()),
+            _ => HttpFrame::UnknownFrame(raw_frame.as_ref().into()),
         };
 
         Ok(frame)
