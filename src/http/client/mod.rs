@@ -8,7 +8,7 @@ use std::error;
 
 use http::{HttpScheme, HttpResult, StreamId, Header, HttpError};
 use http::transport::TransportStream;
-use http::frame::{SettingsFrame, HttpSetting, Frame};
+use http::frame::{SettingsFrame, HttpSetting, FrameIR};
 use http::connection::{
     SendFrame, ReceiveFrame,
     SendStatus,
@@ -32,6 +32,7 @@ pub mod tls;
 /// sequence of octets, followed by a settings frame.
 ///
 /// # Returns
+///
 /// Any error raised by the underlying connection is propagated.
 pub fn write_preface<W: io::Write>(stream: &mut W) -> Result<(), io::Error> {
     // The first part of the client preface is always this sequence of 24
@@ -40,12 +41,16 @@ pub fn write_preface<W: io::Write>(stream: &mut W) -> Result<(), io::Error> {
     try!(stream.write_all(preface));
 
     // It is followed by the client's settings.
+    // TODO: It doesn't really make sense to have the initial settings be sent here, outside of the
+    //       HttpConnection/Session. This should be moved to the initialization of the session!
     let settings = {
         let mut frame = SettingsFrame::new();
         frame.add_setting(HttpSetting::EnablePush(0));
         frame
     };
-    try!(stream.write_all(&settings.serialize()));
+    let mut buf = io::Cursor::new(Vec::with_capacity(16));
+    try!(settings.serialize_into(&mut buf));
+    try!(stream.write_all(buf.get_ref()));
     debug!("Sent client preface");
 
     Ok(())

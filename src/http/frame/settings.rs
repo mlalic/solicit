@@ -1,12 +1,14 @@
 //! The module contains the implementation of the `SETTINGS` frame and associated flags.
 
+use std::io;
 use http::StreamId;
 use http::frame::{
+    FrameBuilder,
+    FrameIR,
     Flag,
     Frame,
     FrameHeader,
     RawFrame,
-    pack_header,
 };
 
 /// An enum that lists all valid settings that can be sent in a SETTINGS
@@ -295,15 +297,20 @@ impl Frame for SettingsFrame {
 
     /// Returns a `Vec` with the serialized representation of the frame.
     fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.payload_len() as usize);
-        // First the header...
-        buf.extend(pack_header(&self.get_header()).to_vec().into_iter());
-        // ...now the settings
+        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
+        self.clone().serialize_into(&mut buf).unwrap();
+        buf.into_inner()
+    }
+}
+
+impl FrameIR for SettingsFrame {
+    fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
+        try!(b.write_header(self.get_header()));
         for setting in self.settings.iter() {
-            buf.extend(setting.serialize().to_vec().into_iter());
+            try!(b.write_all(&setting.serialize()));
         }
 
-        buf
+        Ok(())
     }
 }
 
