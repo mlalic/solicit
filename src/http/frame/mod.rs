@@ -283,6 +283,14 @@ impl<'a> From<&'a [u8]> for RawFrame<'a> {
     fn from(raw: &'a [u8]) -> RawFrame<'a> { RawFrame { raw_content: Cow::Borrowed(raw) } }
 }
 
+/// `RawFrame`s can be serialized to an on-the-wire format.
+impl<'a> FrameIR for RawFrame<'a> {
+    fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
+        try!(b.write_header(self.header()));
+        b.write_all(self.payload())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -291,7 +299,9 @@ mod tests {
         RawFrame,
         FrameHeader,
         Frame,
+        FrameIR,
     };
+    use std::io;
     use http::tests::common::raw_frame_from_parts;
 
     /// Tests that the `unpack_header` function correctly returns the
@@ -528,6 +538,26 @@ mod tests {
         assert_eq!(vec, buf);
         // The vector and the serialized representation are also equivalent
         assert_eq!(vec, serialized);
+    }
+
+    /// Tests that `RawFrame`s are correctly serialized to an on-the-wire format, when considered a
+    /// `FrameIR` implementation.
+    #[test]
+    fn test_raw_frame_as_frame_ir() {
+        let data = b"123";
+        let header = (data.len() as u32, 0x1, 0, 1);
+        let buf = {
+            let mut buf = Vec::new();
+            buf.extend(pack_header(&header).to_vec().into_iter());
+            buf.extend(data.to_vec().into_iter());
+            buf
+        };
+        let raw: RawFrame = buf.clone().into();
+
+        let mut serialized = io::Cursor::new(Vec::new());
+        raw.serialize_into(&mut serialized).unwrap();
+
+        assert_eq!(serialized.into_inner(), buf);
     }
 
     /// Tests the `len` method of the `RawFrame`.
