@@ -13,7 +13,7 @@ use http::{
     Header,
     OwnedHeader,
 };
-use http::frame::{RawFrame, Frame, FrameHeader, pack_header, HttpSetting};
+use http::frame::{RawFrame, Frame, FrameIR, FrameHeader, pack_header, HttpSetting};
 use http::session::{
     Session,
     DefaultSessionState,
@@ -58,8 +58,11 @@ impl MockSendFrame {
 }
 
 impl SendFrame for MockSendFrame {
-    fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
-        self.sent.push(HttpFrame::from_raw(frame).unwrap());
+    fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
+        let mut buf = io::Cursor::new(Vec::new());
+        frame.serialize_into(&mut buf).unwrap();
+        let raw = buf.into_inner().into();
+        self.sent.push(HttpFrame::from_raw(raw).unwrap());
         Ok(())
     }
 }

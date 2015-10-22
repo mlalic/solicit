@@ -11,7 +11,7 @@ use std::thread;
 use std::io;
 
 use http::{StreamId, HttpError, Response, StaticResponse, Header, HttpResult, StaticHeader};
-use http::frame::RawFrame;
+use http::frame::{RawFrame, FrameIR};
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnection};
 use http::session::{
@@ -81,14 +81,16 @@ impl<S> ChannelFrameSender<S> where S: SendFrame {
     /// If the channel becomes disconnected from all senders, indicating that all handles to the
     /// sender have been dropped, the mehod will return an error.
     fn send_next(&mut self) -> HttpResult<()> {
-        let frame = try!(
+        let frame_buffer = try!(
             self.rx.recv()
                    .map_err(|_| {
                        io::Error::new(io::ErrorKind::Other, "Unable to send frame")
                    })
         );
         debug!("Performing the actual send frame IO");
-        self.inner.send_raw_frame(From::from(frame))
+        let raw_frame: RawFrame = frame_buffer.into();
+        try!(self.inner.send_frame(raw_frame));
+        Ok(())
     }
 }
 
@@ -102,8 +104,10 @@ struct ChannelFrameSenderHandle {
 }
 
 impl SendFrame for ChannelFrameSenderHandle {
-    fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
-        try!(self.tx.send(frame.into())
+    fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
+        let mut buf = io::Cursor::new(Vec::with_capacity(1024));
+        try!(frame.serialize_into(&mut buf));
+        try!(self.tx.send(buf.into_inner())
                     .map_err(|_| {
                         io::Error::new(io::ErrorKind::Other, "Unable to send frame")
                     }));

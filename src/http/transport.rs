@@ -13,6 +13,10 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::net::Shutdown;
 
+use http::HttpResult;
+use http::frame::{FrameIR};
+use http::connection::SendFrame;
+
 /// A trait that any struct that wants to provide the transport layer for
 /// HTTP/2 needs to implement.
 ///
@@ -73,6 +77,15 @@ impl TransportStream for TcpStream {
 
     fn close(&mut self) -> Result<(), io::Error> {
         self.shutdown(Shutdown::Both)
+    }
+}
+
+impl<T> SendFrame for T where T: TransportStream {
+    fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
+        let mut buf = io::Cursor::new(Vec::with_capacity(1024));
+        try!(frame.serialize_into(&mut buf));
+        try!(self.write_all(buf.get_ref()));
+        Ok(())
     }
 }
 

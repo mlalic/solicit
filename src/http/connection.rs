@@ -31,6 +31,7 @@ use http::session::Session;
 use http::transport::TransportStream;
 use http::frame::{
     Frame,
+    FrameIR,
     RawFrame,
     DataFrame,
     DataFlag,
@@ -148,31 +149,11 @@ pub struct HttpConnection {
 /// A trait that should be implemented by types that can provide the functionality
 /// of sending HTTP/2 frames.
 pub trait SendFrame {
-    /// Sends the given raw frame.
-    fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()>;
-    /// Sends the given concrete frame.
-    ///
-    /// A default implementation based on the `send_raw_frame` method is provided.
-    fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
-        self.send_raw_frame(RawFrame::from(frame.serialize()))
-    }
-}
-
-/// A blanket implementation of `SendFrame` is possible for any type that is also an
-/// `io::Write`.
-impl<W> SendFrame for W where W: io::Write {
-    #[inline]
-    fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
-        try!(self.write_all(&frame.serialize()));
-        Ok(())
-    }
-
-    #[inline]
-    fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
-        let serialized: Vec<u8> = frame.into();
-        try!(self.write_all(&serialized));
-        Ok(())
-    }
+    /// Queue the given frame for immediate sending to the peer. It is the responsibility of each
+    /// individual `SendFrame` implementation to correctly serialize the given `FrameIR` into an
+    /// appropriate buffer and make sure that the frame is subsequently eventually pushed to the
+    /// peer.
+    fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()>;
 }
 
 /// A trait that should be implemented by types that can provide the functionality
@@ -282,8 +263,7 @@ impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
     ///
     /// If the frame is successfully written, returns a unit Ok (`Ok(())`).
     #[inline]
-    fn send_frame<F: Frame>(&mut self, frame: F) -> HttpResult<()> {
-        debug!("Sending frame ... {:?}", frame.get_header());
+    fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
         self.sender.send_frame(frame)
     }
 
@@ -397,11 +377,11 @@ impl HttpConnection {
     ///
     /// ```rust
     /// use solicit::http::{HttpScheme, HttpResult};
-    /// use solicit::http::frame::RawFrame;
+    /// use solicit::http::frame::FrameIR;
     /// use solicit::http::connection::{HttpConnection, SendFrame};
     /// struct FakeSender;
     /// impl SendFrame for FakeSender {
-    ///     fn send_raw_frame(&mut self, frame: RawFrame) -> HttpResult<()> {
+    ///     fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
     ///         // Does not actually send anything!
     ///         Ok(())
     ///     }
@@ -599,83 +579,85 @@ mod tests {
         }
     }
 
-    /// Tests the implementation of the `SendFrame` for `io::Write` types when
+    /// Tests the implementation of the `SendFrame` for `TransportStream`s when
     /// writing individual frames.
     #[test]
-    fn test_send_frame_for_io_write_individual() {
+    fn test_send_frame_for_transport_stream_individual() {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
             HttpFrame::DataFrame(DataFrame::new(1)),
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![1, 2, 3, 4]))),
+            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![0; 9]))),
         ];
         for frame in frames.into_iter() {
-            let mut writeable = Vec::new();
+            let mut stream = StubTransportStream::with_stub_content(&[]);
             let frame_serialized = match frame {
                 HttpFrame::DataFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_frame(frame).unwrap();
+                    stream.send_frame(frame).unwrap();
                     ret
                 },
                 HttpFrame::HeadersFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_frame(frame).unwrap();
+                    stream.send_frame(frame).unwrap();
                     ret
                 },
                 HttpFrame::SettingsFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_frame(frame).unwrap();
+                    stream.send_frame(frame).unwrap();
                     ret
                 },
                 HttpFrame::UnknownFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_raw_frame(frame.into()).unwrap();
+                    let raw: RawFrame = frame.into();
+                    stream.send_frame(raw).unwrap();
                     ret
                 },
             };
-            assert_eq!(writeable, frame_serialized);
+            assert_eq!(stream.get_written(), frame_serialized);
         }
     }
 
-    /// Tests the implementation of the `SendFrame` for `io::Write` types when multiple
-    /// frames are written to the same stream.
+    /// Tests the implementation of the `SendFrame` for `TransportStream`s.
     #[test]
-    fn test_send_frame_for_io_write_multiple() {
+    fn test_send_frame_for_transport_stream() {
         let frames: Vec<HttpFrame> = vec![
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
             HttpFrame::DataFrame(DataFrame::new(1)),
             HttpFrame::DataFrame(DataFrame::new(3)),
             HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![1, 2, 3, 4]))),
+            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![0; 9]))),
         ];
-        let mut writeable = Vec::new();
+        let mut stream = StubTransportStream::with_stub_content(&[]);
         let mut previous = 0;
         for frame in frames.into_iter() {
             let frame_serialized = match frame {
                 HttpFrame::DataFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_frame(frame).unwrap();
+                    stream.send_frame(frame).unwrap();
                     ret
                 },
                 HttpFrame::HeadersFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_frame(frame).unwrap();
+                    stream.send_frame(frame).unwrap();
                     ret
                 },
                 HttpFrame::SettingsFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_frame(frame).unwrap();
+                    stream.send_frame(frame).unwrap();
                     ret
                 },
                 HttpFrame::UnknownFrame(frame) => {
                     let ret = frame.serialize();
-                    writeable.send_raw_frame(frame.into()).unwrap();
+                    let raw: RawFrame = frame.into();
+                    stream.send_frame(raw).unwrap();
                     ret
                 },
             };
-            assert_eq!(&writeable[previous..], &frame_serialized[..]);
-            previous = writeable.len();
+            let written = stream.get_written();
+            assert_eq!(&written[previous..], &frame_serialized[..]);
+            previous = written.len();
         }
     }
 
