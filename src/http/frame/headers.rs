@@ -1,12 +1,14 @@
 //! The module contains the implementation of the `HEADERS` frame and associated flags.
 
+use std::io;
 use http::StreamId;
 use http::frame::{
+    FrameBuilder,
+    FrameIR,
     Flag,
     Frame,
     FrameHeader,
     RawFrame,
-    pack_header,
     parse_padded_payload,
 };
 
@@ -292,13 +294,18 @@ impl Frame for HeadersFrame {
     /// If the `HeadersFlag::Priority` flag was set, but no stream dependency
     /// information is given (i.e. `stream_dep` is `None`).
     fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.payload_len() as usize);
-        // First the header...
-        buf.extend(pack_header(&self.get_header()).to_vec().into_iter());
-        // Now the length of the padding, if any.
+        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
+        self.clone().serialize_into(&mut buf).unwrap();
+        buf.into_inner()
+    }
+}
+
+impl FrameIR for HeadersFrame {
+    fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
+        try!(b.write_header(self.get_header()));
         let padded = self.is_set(HeadersFlag::Padded);
         if padded {
-            buf.push(self.padding_len.unwrap_or(0));
+            try!(b.write_all(&[self.padding_len.unwrap_or(0)]));
         }
         // The stream dependency fields follow, if the priority flag is set
         if self.is_set(HeadersFlag::Priority) {
@@ -306,16 +313,16 @@ impl Frame for HeadersFrame {
                 Some(ref dep) => dep.serialize(),
                 None => panic!("Priority flag set, but no dependency information given"),
             };
-            buf.extend(dep_buf.to_vec().into_iter());
+            try!(b.write_all(&dep_buf));
         }
         // Now the actual headers fragment
-        buf.extend(self.header_fragment.clone().into_iter());
+        try!(b.write_all(&self.header_fragment));
         // Finally, add the trailing padding, if required
         if padded {
-            for _ in 0..self.padding_len.unwrap_or(0) { buf.push(0); }
+            try!(b.write_padding(self.padding_len.unwrap_or(0)));
         }
 
-        buf
+        Ok(())
     }
 }
 
