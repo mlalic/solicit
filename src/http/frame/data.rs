@@ -1,12 +1,14 @@
 //! The module contains the implementation of the `DATA` frame and associated flags.
 
+use std::io;
 use http::StreamId;
 use http::frame::{
+    FrameBuilder,
+    FrameIR,
     Flag,
     Frame,
     FrameHeader,
     RawFrame,
-    pack_header,
     parse_padded_payload,
 };
 
@@ -194,21 +196,24 @@ impl Frame for DataFrame {
 
     /// Returns a `Vec` with the serialized representation of the frame.
     fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(9 + self.payload_len() as usize);
-        // First the header...
-        buf.extend(pack_header(&self.get_header()).to_vec().into_iter());
-        // ...now the data, depending on whether it's wrapped or not
+        let mut buf = io::Cursor::new(Vec::with_capacity(9 + self.payload_len() as usize));
+        self.clone().serialize_into(&mut buf).unwrap();
+        buf.into_inner()
+    }
+}
+
+impl FrameIR for DataFrame {
+    fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
+        try!(b.write_header(self.get_header()));
         if self.is_padded() {
             let pad_len = self.padding_len.unwrap_or(0);
-            buf.push(pad_len);
-            buf.extend(self.data.clone().into_iter());
-            // The padding bytes MUST be 0
-            for _ in 0..pad_len { buf.push(0); }
+            try!(b.write_all(&[pad_len]));
+            try!(b.write_all(&self.data));
+            try!(b.write_padding(pad_len));
         } else {
-            buf.extend(self.data.clone().into_iter());
+            try!(b.write_all(&self.data));
         }
-
-        buf
+        Ok(())
     }
 }
 
