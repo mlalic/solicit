@@ -152,6 +152,11 @@ impl<'a> DataFrame<'a> {
         Some((data, pad_len))
     }
 
+    /// Sets the given flag for the frame.
+    pub fn set_flag(&mut self, flag: DataFlag) {
+        self.flags |= flag.bitmask();
+    }
+
     /// Returns a `Vec` with the serialized representation of the frame.
     #[cfg(test)]
     pub fn serialize(&self) -> Vec<u8> {
@@ -215,11 +220,6 @@ impl<'a> Frame<'a> for DataFrame<'a> {
     /// Tests if the given flag is set for the frame.
     fn is_set(&self, flag: DataFlag) -> bool {
         (self.flags & flag.bitmask()) != 0
-    }
-
-    /// Sets the given flag for the frame.
-    fn set_flag(&mut self, flag: DataFlag) {
-        self.flags |= flag.bitmask();
     }
 
     /// Returns the `StreamId` of the stream to which the frame is associated.

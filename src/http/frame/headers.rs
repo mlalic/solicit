@@ -206,6 +206,11 @@ impl<'a> HeadersFrame<'a> {
 
     pub fn header_fragment(&self) -> &[u8] { &self.header_fragment }
 
+    /// Sets the given flag for the frame.
+    pub fn set_flag(&mut self, flag: HeadersFlag) {
+        self.flags |= flag.bitmask();
+    }
+
     /// Returns a `Vec` with the serialized representation of the frame.
     ///
     /// # Panics
@@ -297,11 +302,6 @@ impl<'a> Frame<'a> for HeadersFrame<'a> {
     /// Returns a `FrameHeader` based on the current state of the `Frame`.
     fn get_header(&self) -> FrameHeader {
         (self.payload_len(), 0x1, self.flags, self.stream_id)
-    }
-
-    /// Sets the given flag for the frame.
-    fn set_flag(&mut self, flag: HeadersFlag) {
-        self.flags |= flag.bitmask();
     }
 }
 

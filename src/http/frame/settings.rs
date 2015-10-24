@@ -215,6 +215,11 @@ impl SettingsFrame {
         }).collect())
     }
 
+    /// Sets the given flag for the frame.
+    pub fn set_flag(&mut self, flag: SettingsFlag) {
+        self.flags |= flag.bitmask();
+    }
+
     /// Returns a `Vec` with the serialized representation of the frame.
     #[cfg(test)]
     pub fn serialize(&self) -> Vec<u8> {
@@ -296,11 +301,6 @@ impl<'a> Frame<'a> for SettingsFrame {
     /// Returns a `FrameHeader` based on the current state of the `Frame`.
     fn get_header(&self) -> FrameHeader {
         (self.payload_len(), 0x4, self.flags, 0)
-    }
-
-    /// Sets the given flag for the frame.
-    fn set_flag(&mut self, flag: SettingsFlag) {
-        self.flags |= flag.bitmask();
     }
 }
 

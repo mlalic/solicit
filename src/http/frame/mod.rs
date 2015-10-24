@@ -154,9 +154,6 @@ pub trait Frame<'a>: Sized {
     fn get_stream_id(&self) -> StreamId;
     /// Returns a `FrameHeader` based on the current state of the `Frame`.
     fn get_header(&self) -> FrameHeader;
-
-    /// Sets the given flag for the frame.
-    fn set_flag(&mut self, flag: Self::FlagType);
 }
 
 /// A struct that defines the format of the raw HTTP/2 frame, i.e. the frame
