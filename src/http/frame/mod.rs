@@ -157,9 +157,6 @@ pub trait Frame<'a>: Sized {
 
     /// Sets the given flag for the frame.
     fn set_flag(&mut self, flag: Self::FlagType);
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    fn serialize(&self) -> Vec<u8>;
 }
 
 /// A struct that defines the format of the raw HTTP/2 frame, i.e. the frame
@@ -299,7 +296,6 @@ mod tests {
         unpack_header,
         pack_header,
         RawFrame,
-        Frame,
         FrameIR,
     };
     use std::io;

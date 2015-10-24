@@ -205,6 +205,19 @@ impl<'a> HeadersFrame<'a> {
     }
 
     pub fn header_fragment(&self) -> &[u8] { &self.header_fragment }
+
+    /// Returns a `Vec` with the serialized representation of the frame.
+    ///
+    /// # Panics
+    ///
+    /// If the `HeadersFlag::Priority` flag was set, but no stream dependency
+    /// information is given (i.e. `stream_dep` is `None`).
+    #[cfg(test)]
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
+        self.clone().serialize_into(&mut buf).unwrap();
+        buf.into_inner()
+    }
 }
 
 impl<'a> Frame<'a> for HeadersFrame<'a> {
@@ -289,18 +302,6 @@ impl<'a> Frame<'a> for HeadersFrame<'a> {
     /// Sets the given flag for the frame.
     fn set_flag(&mut self, flag: HeadersFlag) {
         self.flags |= flag.bitmask();
-    }
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    ///
-    /// # Panics
-    ///
-    /// If the `HeadersFlag::Priority` flag was set, but no stream dependency
-    /// information is given (i.e. `stream_dep` is `None`).
-    fn serialize(&self) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
-        self.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
     }
 }
 

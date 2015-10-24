@@ -151,6 +151,14 @@ impl<'a> DataFrame<'a> {
 
         Some((data, pad_len))
     }
+
+    /// Returns a `Vec` with the serialized representation of the frame.
+    #[cfg(test)]
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = io::Cursor::new(Vec::with_capacity(9 + self.payload_len() as usize));
+        self.clone().serialize_into(&mut buf).unwrap();
+        buf.into_inner()
+    }
 }
 
 impl<'a> Frame<'a> for DataFrame<'a> {
@@ -222,13 +230,6 @@ impl<'a> Frame<'a> for DataFrame<'a> {
     /// Returns a `FrameHeader` based on the current state of the frame.
     fn get_header(&self) -> FrameHeader {
         (self.payload_len(), 0x0, self.flags, self.stream_id)
-    }
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    fn serialize(&self) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::with_capacity(9 + self.payload_len() as usize));
-        self.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
     }
 }
 

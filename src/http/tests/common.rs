@@ -13,7 +13,7 @@ use http::{
     Header,
     OwnedHeader,
 };
-use http::frame::{RawFrame, Frame, FrameIR, FrameHeader, pack_header, HttpSetting};
+use http::frame::{RawFrame, FrameIR, FrameHeader, pack_header, HttpSetting};
 use http::session::{
     Session,
     DefaultSessionState,

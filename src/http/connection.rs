@@ -521,6 +521,7 @@ impl HttpConnection {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::io;
 
     use super::{
         HttpConnection,
@@ -546,6 +547,7 @@ mod tests {
         SettingsFrame,
         pack_header,
         RawFrame,
+        FrameIR,
     };
     use http::transport::TransportStream;
     use http::{HttpError, HttpResult, HttpScheme, Header, OwnedHeader};
@@ -734,8 +736,10 @@ mod tests {
     /// type from the header and returns the corresponding variant.
     #[test]
     fn test_http_frame_from_raw() {
-        fn to_raw<'a, F: Frame<'a>>(frame: F) -> RawFrame<'static> {
-            RawFrame::from(frame.serialize())
+        fn to_raw<'a, F: FrameIR>(frame: F) -> RawFrame<'static> {
+            let mut buf = io::Cursor::new(Vec::new());
+            frame.serialize_into(&mut buf).unwrap();
+            RawFrame::from(buf.into_inner())
         }
 
         assert!(match HttpFrame::from_raw(&to_raw(DataFrame::new(1))) {

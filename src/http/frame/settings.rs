@@ -214,6 +214,14 @@ impl SettingsFrame {
             HttpSetting::parse_setting(chunk)
         }).collect())
     }
+
+    /// Returns a `Vec` with the serialized representation of the frame.
+    #[cfg(test)]
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
+        self.clone().serialize_into(&mut buf).unwrap();
+        buf.into_inner()
+    }
 }
 
 impl<'a> Frame<'a> for SettingsFrame {
@@ -293,13 +301,6 @@ impl<'a> Frame<'a> for SettingsFrame {
     /// Sets the given flag for the frame.
     fn set_flag(&mut self, flag: SettingsFlag) {
         self.flags |= flag.bitmask();
-    }
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    fn serialize(&self) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
-        self.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
     }
 }
 
