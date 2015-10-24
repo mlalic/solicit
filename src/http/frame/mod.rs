@@ -129,6 +129,12 @@ pub trait Flag {
     fn bitmask(&self) -> u8;
 }
 
+/// A helper struct that can be used by all frames that do not define any flags.
+pub struct NoFlag;
+impl Flag for NoFlag {
+    fn bitmask(&self) -> u8 { 0 }
+}
+
 /// A trait that all HTTP/2 frame structs need to implement.
 pub trait Frame<'a>: Sized {
     /// The type that represents the flags that the particular `Frame` can take.
