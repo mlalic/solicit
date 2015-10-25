@@ -32,6 +32,7 @@ pub const FRAME_HEADER_LEN: usize = 9;
 pub mod builder;
 pub mod data;
 pub mod headers;
+pub mod rst_stream;
 pub mod settings;
 
 pub use self::builder::FrameBuilder;
@@ -40,6 +41,7 @@ pub use self::builder::FrameBuilder;
 pub use self::data::{DataFlag, DataFrame};
 /// Rexports related to the `HEADERS` frame.
 pub use self::headers::{HeadersFlag, HeadersFrame};
+pub use self::rst_stream::RstStreamFrame;
 /// Rexports related to the `SETTINGS` frame.
 pub use self::settings::{SettingsFlag, SettingsFrame, HttpSetting};
 
