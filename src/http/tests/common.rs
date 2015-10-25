@@ -189,6 +189,7 @@ pub fn build_stub_from_frames(frames: &Vec<HttpFrame>) -> Vec<u8> {
             HttpFrame::HeadersFrame(ref frame) => serialize_frame(frame),
             HttpFrame::RstStreamFrame(ref frame) => serialize_frame(frame),
             HttpFrame::SettingsFrame(ref frame) => serialize_frame(frame),
+            HttpFrame::GoawayFrame(ref frame) => serialize_frame(frame),
             HttpFrame::UnknownFrame(ref frame) => serialize_frame(frame),
         };
         buf.extend(serialized.into_iter());
