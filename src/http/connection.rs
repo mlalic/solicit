@@ -40,6 +40,7 @@ use http::frame::{
     SettingsFrame,
     RstStreamFrame,
     GoawayFrame,
+    WindowUpdateFrame,
     unpack_header,
 };
 use hpack;
@@ -57,6 +58,7 @@ pub enum HttpFrame<'a> {
     RstStreamFrame(RstStreamFrame),
     SettingsFrame(SettingsFrame),
     GoawayFrame(GoawayFrame<'a>),
+    WindowUpdateFrame(WindowUpdateFrame),
     UnknownFrame(RawFrame<'a>),
 }
 
@@ -68,6 +70,7 @@ impl<'a> HttpFrame<'a> {
             0x3 => HttpFrame::RstStreamFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x7 => HttpFrame::GoawayFrame(try!(HttpFrame::parse_frame(&raw_frame))),
+            0x8 => HttpFrame::WindowUpdateFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             _ => HttpFrame::UnknownFrame(raw_frame.as_ref().into()),
         };
 
@@ -483,6 +486,10 @@ impl HttpConnection {
                     frame.debug_data(),
                     self)
             },
+            HttpFrame::WindowUpdateFrame(_) => {
+                debug!("WINDOW_UPDATE frame received");
+                Ok(())
+            },
             HttpFrame::UnknownFrame(frame) => {
                 debug!("Unknown frame received; raw = {:?}", frame);
                 // We simply drop any unknown frames...
@@ -597,6 +604,7 @@ mod tests {
             HttpFrame::RstStreamFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::HeadersFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::GoawayFrame(frame) => conn.sender(sender).send_frame(frame),
+            HttpFrame::WindowUpdateFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::UnknownFrame(_) => Ok(()),
         }
     }

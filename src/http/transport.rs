@@ -146,6 +146,11 @@ mod tests {
                 sender.send_frame(frame).unwrap();
                 ret
             },
+            HttpFrame::WindowUpdateFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                sender.send_frame(frame).unwrap();
+                ret
+            },
             HttpFrame::UnknownFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 let raw: RawFrame = frame.into();
