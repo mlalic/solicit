@@ -9,7 +9,7 @@ use std::error::Error;
 use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
-use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode};
+use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode, HttpError, ConnectionError};
 use http::frame::HttpSetting;
 use http::connection::{HttpConnection};
 
@@ -45,6 +45,27 @@ pub trait Session {
     /// responsible for acknowledging the receipt of the settings.
     fn new_settings(&mut self, settings: Vec<HttpSetting>, conn: &mut HttpConnection)
             -> HttpResult<()>;
+
+    /// Notifies the `Session` that the peer has sent a GOAWAY frame, indicating that the
+    /// connection is terminated.
+    ///
+    /// The default implementation simply maps the error into an appropriate
+    /// HttpError::PeerConnectionError struct.
+    ///
+    /// Concrete `Session` implementations can override this in order to, for example, figure out
+    /// which streams can be safely retried (based on the last processed stream id).
+    fn on_goaway(
+            &mut self,
+            _last_stream_id: StreamId,
+            error_code: ErrorCode,
+            debug_data: Option<&[u8]>,
+            _conn: &mut HttpConnection)
+            -> HttpResult<()> {
+        Err(HttpError::PeerConnectionError(ConnectionError {
+            error_code: error_code,
+            debug_data: debug_data.map(|data| data.to_vec()),
+        }))
+    }
 }
 
 /// A newtype for an iterator over `Stream`s saved in a `SessionState`.

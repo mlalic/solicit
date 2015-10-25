@@ -374,7 +374,7 @@ mod tests {
         RequestStream,
     };
 
-    use http::{Header, ErrorCode};
+    use http::{Header, ErrorCode, HttpError};
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
@@ -631,6 +631,25 @@ mod tests {
             stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
         }).unwrap());
         assert!(state.get_stream_ref(1).map(|stream| stream.errors.len() == 0).unwrap());
+    }
+
+    /// Tests that the `ClientSession` signals the correct error to client code when told to go
+    /// away by the peer.
+    #[test]
+    fn test_client_session_on_goaway() {
+        let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        let res = {
+            let mut session = ClientSession::new(&mut state, &mut sender);
+            session.on_goaway(0, ErrorCode::ProtocolError, None, &mut conn)
+        };
+        if let Err(HttpError::PeerConnectionError(err)) = res {
+            assert_eq!(err.error_code(), ErrorCode::ProtocolError);
+            assert_eq!(err.debug_data(), None);
+        } else {
+            panic!("Expected a PeerConnectionError");
+        }
     }
 
     /// Tests that the `write_preface` function correctly writes a client preface to

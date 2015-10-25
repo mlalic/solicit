@@ -239,7 +239,7 @@ mod tests {
 
     use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn, MockSendFrame};
 
-    use http::{Header, ErrorCode};
+    use http::{Header, ErrorCode, HttpError};
     use http::session::{
         DefaultSessionState,
         SessionState,
@@ -324,5 +324,25 @@ mod tests {
             stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
         }).unwrap());
         assert!(state.get_stream_ref(5).map(|stream| stream.errors.len() == 0).unwrap());
+    }
+
+    /// When the server session is told to goaway by the client, we signal an error to the client
+    /// code, surfacing the underlying reason.
+    #[test]
+    fn test_server_session_on_goaway() {
+        let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        let res = {
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
+            session.on_goaway(0, ErrorCode::ProtocolError, None, &mut conn)
+        };
+        if let Err(HttpError::PeerConnectionError(err)) = res {
+            assert_eq!(err.error_code(), ErrorCode::ProtocolError);
+            assert_eq!(err.debug_data(), None);
+        } else {
+            panic!("Expected a PeerConnectionError");
+        }
     }
 }
