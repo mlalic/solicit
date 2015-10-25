@@ -456,7 +456,13 @@ impl HttpConnection {
     /// Private helper method that handles a received `DataFrame`.
     fn handle_data_frame<Sess: Session>(&mut self, frame: DataFrame, session: &mut Sess)
             -> HttpResult<()> {
+        try!(self.decrease_in_window(frame.payload_len()));
+        trace!("New IN WINDOW size = {}", self.in_window_size());
         try!(session.new_data_chunk(frame.get_stream_id(), &frame.data, self));
+        // TODO(mlalic): Should the connection separately signal the decrease in the flow control
+        //               window? For now, it is expected that the data callback is enough, as the
+        //               session would be able to inspect the new window size there (and know that
+        //               it was affected by the data already).
 
         if frame.is_set(DataFlag::EndStream) {
             debug!("End of stream {}", frame.get_stream_id());
@@ -498,14 +504,14 @@ impl HttpConnection {
         if !frame.is_ack() {
             // TODO: Actually handle the settings change before sending out the ACK
             //       sending out the ACK.
-            trace!("New settings frame");
+            trace!("New settings frame {:#?}", frame);
             try!(session.new_settings(frame.settings, self));
         }
 
         Ok(())
     }
 
-    /// Internal helper method that decreases the out-bound flow control window size.
+    /// Internal helper method that decreases the outbound flow control window size.
     fn decrease_out_window(&mut self, size: u32) -> HttpResult<()> {
         // The size by which we decrease the window must be at most 2^31 - 1. We should be able to
         // reach here only after sending a DATA frame, whose payload also cannot be larger than
@@ -513,6 +519,17 @@ impl HttpConnection {
         debug_assert!(size < 0x80000000);
         self.out_window_size.try_decrease(size as i32)
                             .map_err(|_| HttpError::WindowSizeOverflow)
+    }
+
+    /// Internal helper method that decreases the inbound flow control window size.
+    fn decrease_in_window(&mut self, size: u32) -> HttpResult<()> {
+        // The size by which we decrease the window must be at most 2^31 - 1. We should be able to
+        // reach here only after receiving a DATA frame, which would have been validated when
+        // parsed from the raw frame to have the correct payload size, but we assert it just in
+        // case.
+        debug_assert!(size < 0x80000000);
+        self.in_window_size.try_decrease(size as i32)
+                           .map_err(|_| HttpError::WindowSizeOverflow)
     }
 }
 
@@ -869,7 +886,7 @@ mod tests {
     #[test]
     fn test_http_conn_notifies_session_data() {
         let frames: Vec<HttpFrame> = vec![
-            HttpFrame::DataFrame(DataFrame::new(1)),
+            HttpFrame::DataFrame(DataFrame::with_data(1, vec![1, 2, 3, 4, 5, 6])),
         ];
         let mut conn = HttpConnection::new(HttpScheme::Http);
         let mut session = TestSession::new();
@@ -883,6 +900,7 @@ mod tests {
         // and exactly one chunk seen.
         assert_eq!(session.curr_chunk, 1);
         assert_eq!(session.rst_streams.len(), 0);
+        assert_eq!(conn.in_window_size(), 65_535 - 6);
     }
 
     /// Tests that the session gets the correct values for the headers and data
@@ -909,6 +927,7 @@ mod tests {
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+        assert_eq!(conn.in_window_size(), 65_535 - 4);
 
         // Two chunks and one header processed?
         assert_eq!(session.curr_chunk, 2);
