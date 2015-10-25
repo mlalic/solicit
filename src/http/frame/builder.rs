@@ -52,6 +52,17 @@ pub trait FrameBuilder: io::Write + io::Seek {
         for _ in 0..padding_length { try!(self.write_all(&[0])); }
         Ok(())
     }
+
+    /// Write the given unsigned 32 bit integer to the underlying stream. The integer is written as
+    /// four bytes in network endian style.
+    fn write_u32(&mut self, num: u32) -> io::Result<()> {
+        self.write_all(&[
+            (((num >> 24) & 0x000000FF) as u8),
+            (((num >> 16) & 0x000000FF) as u8),
+            (((num >>  8) & 0x000000FF) as u8),
+            (((num >>  0) & 0x000000FF) as u8),
+        ])
+    }
 }
 
 impl FrameBuilder for io::Cursor<Vec<u8>> {}
@@ -125,5 +136,23 @@ mod tests {
         buf.write_padding(5).unwrap();
 
         assert_eq!(buf.into_inner(), vec![0; 5]);
+    }
+
+    #[test]
+    fn test_write_u32() {
+        fn get_written(num: u32) -> Vec<u8> {
+            let mut buf = io::Cursor::new(Vec::new());
+            buf.write_u32(num).unwrap();
+            buf.into_inner()
+        }
+
+        assert_eq!(get_written(0x0), vec![0, 0, 0, 0]);
+        assert_eq!(get_written(0x1), vec![0, 0, 0, 1]);
+        assert_eq!(get_written(0x10), vec![0, 0, 0, 0x10]);
+        assert_eq!(get_written(0x10AB00CC), vec![0x10, 0xAB, 0, 0xCC]);
+        assert_eq!(get_written(0xFFFFFFFF), vec![0xFF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(get_written(0xEFFFFFFF), vec![0xEF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(get_written(0x7FFFFFFF), vec![0x7F, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(get_written(0xFFFFFF7F), vec![0xFF, 0xFF, 0xFF, 0x7F]);
     }
 }
