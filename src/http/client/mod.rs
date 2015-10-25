@@ -19,8 +19,8 @@ use http::session::{
     Session,
     Stream, DefaultStream,
     DefaultSessionState, SessionState,
-    Client as ClientMarker,
 };
+use http::session::Client as ClientMarker;
 use http::priority::SimplePrioritizer;
 
 #[cfg(feature="tls")]
@@ -397,8 +397,8 @@ mod tests {
         SessionState,
         Stream,
         DefaultSessionState,
-        Client as ClientMarker,
     };
+    use http::session::Client as ClientMarker;
 
     /// Tests that a client connection is correctly initialized, by reading the
     /// server preface (i.e. a settings frame) as the first frame of the connection.

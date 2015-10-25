@@ -22,8 +22,8 @@ use http::session::{
     Stream,
     StreamState,
     StreamDataChunk, StreamDataError,
-    Client as ClientMarker,
 };
+use http::session::Client as ClientMarker;
 use http::priority::DataPrioritizer;
 use http::transport::TransportStream;
 use http::connection::{
@@ -50,7 +50,7 @@ pub fn raw_frame_from_parts<'a>(header: FrameHeader, payload: Vec<u8>) -> RawFra
 /// Serializes the given frame into a newly allocated vector (without consuming the frame).
 pub fn serialize_frame<F: FrameIR + Clone>(frame: &F) -> Vec<u8> {
     let mut buf = io::Cursor::new(Vec::new());
-    frame.clone().serialize_into(&mut buf).expect("Expected the serialization to succeed");
+    frame.clone().serialize_into(&mut buf).ok().expect("Expected the serialization to succeed");
     buf.into_inner()
 }
 

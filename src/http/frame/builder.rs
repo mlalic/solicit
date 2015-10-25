@@ -36,7 +36,8 @@ pub trait FrameBuilder: io::Write + io::Seek {
     /// This method allows poor man's specialization for types that can implement the copy more
     /// efficiently than the `io::copy` function does (i.e. without the intermediate read into a
     /// stack-allocated buffer).
-    fn copy_bytes_from(&mut self, provider: &mut io::Read) -> io::Result<u64> {
+    fn copy_bytes_from<R: io::Read>(&mut self, provider: &mut R) -> io::Result<u64>
+            where Self: Sized {
         io::copy(provider, self)
     }
 

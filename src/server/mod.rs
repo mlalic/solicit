@@ -8,8 +8,8 @@ use http::session::{
     SessionState,
     Stream,
     DefaultStream,
-    Server as ServerMarker,
 };
+use http::session::Server as ServerMarker;
 use http::server::{ServerConnection, StreamFactory};
 
 /// The struct represents a fully received request.

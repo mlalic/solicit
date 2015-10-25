@@ -8,8 +8,8 @@ use http::session::{
     DefaultSessionState,
     DefaultStream,
     Stream,
-    Client as ClientMarker,
 };
+use http::session::Client as ClientMarker;
 use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 
 /// A struct implementing a simple HTTP/2 client.

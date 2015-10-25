@@ -19,8 +19,8 @@ use http::session::{
     DefaultSessionState,
     DefaultStream,
     Stream,
-    Client as ClientMarker,
 };
+use http::session::Client as ClientMarker;
 use http::client::{ClientConnection, HttpConnect, ClientStream, RequestStream};
 
 /// A struct representing an asynchronously dispatched request. It is used

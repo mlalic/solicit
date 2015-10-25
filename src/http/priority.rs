@@ -85,7 +85,8 @@ impl<'a, 'b, State> DataPrioritizer for SimplePrioritizer<'a, 'b, State>
 #[cfg(test)]
 mod tests {
     use super::{DataPrioritizer, SimplePrioritizer};
-    use http::session::{DefaultSessionState, SessionState, Client as ClientMarker};
+    use http::session::{DefaultSessionState, SessionState};
+    use http::session::Client as ClientMarker;
 
     use http::tests::common::TestStream;
 

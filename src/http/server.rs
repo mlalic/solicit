@@ -20,8 +20,8 @@ use http::session::{
     Stream,
     DefaultStream,
     DefaultSessionState,
-    Server as ServerMarker,
 };
+use http::session::Server as ServerMarker;
 use http::priority::SimplePrioritizer;
 
 /// The `ServerSession` requires an instance of a type that implements this trait in order to
@@ -245,8 +245,8 @@ mod tests {
         SessionState,
         Stream,
         Session,
-        Server as ServerMarker,
     };
+    use http::session::Server as ServerMarker;
 
     /// Tests that the `ServerSession` correctly manages the stream state.
     #[test]

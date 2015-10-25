@@ -491,9 +491,9 @@ mod tests {
         StreamDataChunk, StreamDataError,
         SessionState,
         Parity,
-        Client as ClientMarker,
-        Server as ServerMarker,
     };
+    use super::Client as ClientMarker;
+    use super::Server as ServerMarker;
     use http::ErrorCode;
     use http::tests::common::TestStream;
 
