@@ -119,6 +119,8 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
 
     fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
             -> HttpResult<()> {
+        debug!("RST_STREAM id={:?}, error={:?}", stream_id, error_code);
+        self.state.get_stream_mut(stream_id).map(|stream| stream.on_rst_stream(error_code));
         Ok(())
     }
 
@@ -237,7 +239,7 @@ mod tests {
 
     use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn, MockSendFrame};
 
-    use http::Header;
+    use http::{Header, ErrorCode};
     use http::session::{
         DefaultSessionState,
         SessionState,
@@ -302,5 +304,25 @@ mod tests {
         assert!(state.get_stream_ref(1).unwrap().is_closed_remote());
         // but not the other one.
         assert!(!state.get_stream_ref(3).unwrap().is_closed_remote());
+    }
+
+    #[test]
+    fn test_server_session_rst_stream() {
+        let mut state = DefaultSessionState::<ServerMarker, TestStream>::new();
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        state.insert_incoming(1, TestStream::new()).unwrap();
+        state.insert_incoming(3, TestStream::new()).unwrap();
+        state.insert_incoming(5, TestStream::new()).unwrap();
+        {
+            let mut factory = TestStreamFactory;
+            let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
+            session.rst_stream(3, ErrorCode::Cancel, &mut conn).unwrap();
+        }
+        assert!(state.get_stream_ref(1).map(|stream| stream.errors.len() == 0).unwrap());
+        assert!(state.get_stream_ref(3).map(|stream| {
+            stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
+        }).unwrap());
+        assert!(state.get_stream_ref(5).map(|stream| stream.errors.len() == 0).unwrap());
     }
 }

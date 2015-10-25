@@ -343,6 +343,7 @@ pub struct TestStream {
     pub headers: Option<Vec<OwnedHeader>>,
     pub state: StreamState,
     pub outgoing: Option<Cursor<Vec<u8>>>,
+    pub errors: Vec<ErrorCode>,
 }
 
 impl TestStream {
@@ -352,6 +353,7 @@ impl TestStream {
             headers: None,
             state: StreamState::Open,
             outgoing: None,
+            errors: Vec::new(),
         }
     }
 
@@ -371,6 +373,10 @@ impl Stream for TestStream {
     }
     fn set_state(&mut self, state: StreamState) { self.state = state; }
 
+    fn on_rst_stream(&mut self, error: ErrorCode) {
+        self.errors.push(error);
+        self.close();
+    }
     fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
         if self.is_closed_local() {
             return Err(StreamDataError::Closed);

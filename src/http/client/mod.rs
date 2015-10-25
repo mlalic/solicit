@@ -355,6 +355,7 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
     fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
             -> HttpResult<()> {
         debug!("RST_STREAM id={:?}, error={:?}", stream_id, error_code);
+        self.state.get_stream_mut(stream_id).map(|stream| stream.on_rst_stream(error_code));
         Ok(())
     }
 
@@ -373,7 +374,7 @@ mod tests {
         RequestStream,
     };
 
-    use http::{Header};
+    use http::{Header, ErrorCode};
     use http::tests::common::{
         TestStream,
         build_mock_client_conn,
@@ -612,6 +613,24 @@ mod tests {
         assert_eq!(closed.len(), 1);
         // ...and is also removed from the session!
         assert_eq!(state.iter().collect::<Vec<_>>().len(), 1);
+    }
+
+    /// Tests that the `ClientSession` notifies the correct stream when it is reset by the peer.
+    #[test]
+    fn test_client_session_on_rst_stream() {
+        let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+        state.insert_outgoing(TestStream::new());
+        state.insert_outgoing(TestStream::new());
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        {
+            let mut session = ClientSession::new(&mut state, &mut sender);
+            session.rst_stream(3, ErrorCode::Cancel, &mut conn).unwrap();
+        }
+        assert!(state.get_stream_ref(3).map(|stream| {
+            stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
+        }).unwrap());
+        assert!(state.get_stream_ref(1).map(|stream| stream.errors.len() == 0).unwrap());
     }
 
     /// Tests that the `write_preface` function correctly writes a client preface to
