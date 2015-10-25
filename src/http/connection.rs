@@ -38,6 +38,7 @@ use http::frame::{
     HeadersFrame,
     HeadersFlag,
     SettingsFrame,
+    RstStreamFrame,
     unpack_header,
 };
 use hpack;
@@ -52,6 +53,7 @@ use hpack;
 pub enum HttpFrame<'a> {
     DataFrame(DataFrame<'a>),
     HeadersFrame(HeadersFrame<'a>),
+    RstStreamFrame(RstStreamFrame),
     SettingsFrame(SettingsFrame),
     UnknownFrame(RawFrame<'a>),
 }
@@ -61,6 +63,7 @@ impl<'a> HttpFrame<'a> {
         let frame = match raw_frame.header().1 {
             0x0 => HttpFrame::DataFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(&raw_frame))),
+            0x3 => HttpFrame::RstStreamFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             _ => HttpFrame::UnknownFrame(raw_frame.as_ref().into()),
         };
@@ -461,6 +464,10 @@ impl HttpConnection {
                 debug!("Headers frame received");
                 self.handle_headers_frame(frame, session)
             },
+            HttpFrame::RstStreamFrame(_) => {
+                debug!("RST_STREAM frame received");
+                Ok(())
+            },
             HttpFrame::SettingsFrame(frame) => {
                 debug!("Settings frame received");
                 self.handle_settings_frame::<Sess>(frame, session)
@@ -564,6 +571,7 @@ mod tests {
         match frame {
             HttpFrame::DataFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::SettingsFrame(frame) => conn.sender(sender).send_frame(frame),
+            HttpFrame::RstStreamFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::HeadersFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::UnknownFrame(_) => Ok(()),
         }

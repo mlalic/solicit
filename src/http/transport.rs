@@ -131,6 +131,11 @@ mod tests {
                 sender.send_frame(frame).unwrap();
                 ret
             },
+            HttpFrame::RstStreamFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                sender.send_frame(frame).unwrap();
+                ret
+            },
             HttpFrame::SettingsFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();

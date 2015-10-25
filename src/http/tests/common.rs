@@ -186,6 +186,7 @@ pub fn build_stub_from_frames(frames: &Vec<HttpFrame>) -> Vec<u8> {
         let serialized = match *frame {
             HttpFrame::DataFrame(ref frame) => serialize_frame(frame),
             HttpFrame::HeadersFrame(ref frame) => serialize_frame(frame),
+            HttpFrame::RstStreamFrame(ref frame) => serialize_frame(frame),
             HttpFrame::SettingsFrame(ref frame) => serialize_frame(frame),
             HttpFrame::UnknownFrame(ref frame) => serialize_frame(frame),
         };
