@@ -1,8 +1,8 @@
 //! The module contains an implementation of a simple HTTP/2 client.
 
 use http::{StreamId, HttpResult, HttpError, Response, Header, HttpScheme};
-use http::transport::TransportStream;
-use http::connection::{HttpConnection, SendStatus, TransportReceiveFrame};
+use http::transport::{TransportStream, TransportReceiveFrame};
+use http::connection::{HttpConnection, SendStatus};
 use http::session::{
     SessionState,
     DefaultSessionState,

@@ -1,8 +1,8 @@
 //! The module contains a simple HTTP/2 server implementation.
 
 use http::{Response, StaticResponse, HttpResult, HttpError, HttpScheme, StreamId, Header};
-use http::transport::TransportStream;
-use http::connection::{HttpConnection, EndStream, SendStatus, TransportReceiveFrame};
+use http::transport::{TransportStream, TransportReceiveFrame};
+use http::connection::{HttpConnection, EndStream, SendStatus};
 use http::session::{
     DefaultSessionState,
     SessionState,
