@@ -16,6 +16,9 @@ pub mod priority;
 pub mod client;
 pub mod server;
 
+/// The initial size of the connections' flow control window.
+pub const INITIAL_CONNECTION_WINDOW_SIZE: i32 = 65_535;
+
 /// An alias for the type that represents the ID of an HTTP/2 stream
 pub type StreamId = u32;
 /// An alias for the type that represents an HTTP/2 header where both the name and the value is

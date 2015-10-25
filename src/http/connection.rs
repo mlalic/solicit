@@ -24,6 +24,8 @@ use http::{
     HttpError,
     HttpResult,
     HttpScheme,
+    WindowSize,
+    INITIAL_CONNECTION_WINDOW_SIZE,
 };
 use http::priority::DataPrioritizer;
 use http::session::Session;
@@ -118,6 +120,10 @@ pub struct HttpConnection {
     decoder: hpack::Decoder<'static>,
     /// The HPACK encoder used to encode headers before sending them on this connection.
     encoder: hpack::Encoder<'static>,
+    /// Tracks the size of the outbound flow control window
+    out_window_size: WindowSize,
+    /// Tracks the size of the inbound flow control window
+    in_window_size: WindowSize,
     /// The scheme of the connection
     pub scheme: HttpScheme,
 }
@@ -310,6 +316,8 @@ impl HttpConnection {
             scheme: scheme,
             decoder: hpack::Decoder::new(),
             encoder: hpack::Encoder::new(),
+            in_window_size: WindowSize::new(INITIAL_CONNECTION_WINDOW_SIZE),
+            out_window_size: WindowSize::new(INITIAL_CONNECTION_WINDOW_SIZE),
         }
     }
 
@@ -348,6 +356,17 @@ impl HttpConnection {
             sender: sender,
             conn: self,
         }
+    }
+
+    /// Returns the current size of the inbound flow control window (i.e. the number of octets that
+    /// the connection will accept and the peer will send at most, unless the window is updated).
+    pub fn in_window_size(&self) -> i32 {
+        self.in_window_size.size()
+    }
+    /// Returns the current size of the outbound flow control window (i.e. the number of octets
+    /// that can be sent on the connection to the peer without violating flow control).
+    pub fn out_window_size(&self) -> i32 {
+        self.out_window_size.size()
     }
 
     /// The method processes the next frame provided by the given `ReceiveFrame` instance, expecting
@@ -926,6 +945,15 @@ mod tests {
         assert_eq!(session.curr_header, 0);
         assert_eq!(session.curr_chunk, 0);
         assert_eq!(session.rst_streams.len(), 0);
+    }
+
+    /// Tests that the connection flow control windows have the correct size when the
+    /// HttpConnection is just created.
+    #[test]
+    fn test_conn_initial_windows() {
+        let conn = HttpConnection::new(HttpScheme::Http);
+        assert_eq!(conn.in_window_size(), 65_535);
+        assert_eq!(conn.out_window_size(), 65_535);
     }
 
     /// Tests that the `HttpConnection::expect_settings` method works correctly.
