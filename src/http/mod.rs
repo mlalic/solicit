@@ -271,8 +271,57 @@ impl Into<u32> for ErrorCode {
     }
 }
 
-/// An enum representing errors that can arise when performing operations
-/// involving an HTTP/2 connection.
+/// The struct represents a connection error arising on an HTTP/2 connection.
+#[derive(Debug, PartialEq, Clone)]
+pub struct ConnectionError {
+    error_code: ErrorCode,
+    debug_data: Option<Vec<u8>>,
+}
+
+impl ConnectionError {
+    /// Creates a new `ConnectionError` with no associated debug data.
+    pub fn new(error_code: ErrorCode) -> ConnectionError {
+        ConnectionError {
+            error_code: error_code,
+            debug_data: None,
+        }
+    }
+    /// Creates a new `ConnectionError` with the given associated debug data.
+    pub fn with_debug_data(error_code: ErrorCode, debug_data: Vec<u8>) -> ConnectionError {
+        ConnectionError {
+            error_code: error_code,
+            debug_data: Some(debug_data),
+        }
+    }
+
+    /// The error code of the underlying error.
+    pub fn error_code(&self) -> ErrorCode {
+        self.error_code
+    }
+    /// The debug data attached to the connection error, if any.
+    pub fn debug_data(&self) -> Option<&[u8]> {
+        self.debug_data.as_ref().map(|d| d.as_ref())
+    }
+    /// The debug data interpreted as a string, if possible.
+    pub fn debug_str(&self) -> Option<&str> {
+        self.debug_data().and_then(|data| ::std::str::from_utf8(data).ok())
+    }
+}
+
+impl fmt::Display for ConnectionError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "ConnectionError: {}", self.description())
+    }
+}
+
+impl Error for ConnectionError {
+    fn description(&self) -> &str {
+        // If any debug data is present (and is a valid utf8 string), we consider this the
+        // description of the error... if not, then just use the error code.
+        self.debug_str().unwrap_or(self.error_code.as_ref())
+    }
+}
+
 #[derive(Debug)]
 pub enum HttpError {
     IoError(io::Error),

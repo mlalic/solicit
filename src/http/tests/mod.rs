@@ -4,7 +4,8 @@ pub mod common;
 /// Tests for the structs defined in the root of the `solicit::http` module.
 #[cfg(test)]
 mod root_tests {
-    use http::{Response, HttpError, HttpScheme};
+    use http::{Response, HttpError, HttpScheme, ErrorCode, ConnectionError};
+    use std::error::Error;
 
     /// Tests that the `Response` struct correctly parses a status code from
     /// its headers list.
@@ -43,6 +44,33 @@ mod root_tests {
             assert_eq!(resp.status_code().err().unwrap(),
             HttpError::MalformedResponse);
         }
+    }
+
+    #[test]
+    fn test_connection_error_no_debug_data() {
+        let err = ConnectionError::new(ErrorCode::ProtocolError);
+        assert_eq!(err.error_code(), ErrorCode::ProtocolError);
+        assert!(err.debug_data().is_none());
+        assert!(err.debug_str().is_none());
+        assert_eq!(err.description(), "ProtocolError");
+    }
+
+    #[test]
+    fn test_connection_error_raw_debug_data() {
+        let err = ConnectionError::with_debug_data(ErrorCode::ProtocolError, vec![0x80]);
+        assert_eq!(err.error_code(), ErrorCode::ProtocolError);
+        assert_eq!(err.debug_data().unwrap(), &[0x80][..]);
+        assert!(err.debug_str().is_none());
+        assert_eq!(err.description(), "ProtocolError");
+    }
+
+    #[test]
+    fn test_connection_error_str_debug_data() {
+        let err = ConnectionError::with_debug_data(ErrorCode::ProtocolError, b"Test".to_vec());
+        assert_eq!(err.error_code(), ErrorCode::ProtocolError);
+        assert_eq!(err.debug_data().unwrap(), b"Test");
+        assert_eq!(err.debug_str().unwrap(), "Test");
+        assert_eq!(err.description(), "Test");
     }
 
     /// Tests that the `HttpScheme` enum returns the correct scheme strings for
