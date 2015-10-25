@@ -46,6 +46,7 @@ pub mod data;
 pub mod headers;
 pub mod rst_stream;
 pub mod settings;
+pub mod goaway;
 
 pub use self::builder::FrameBuilder;
 
@@ -56,6 +57,7 @@ pub use self::headers::{HeadersFlag, HeadersFrame};
 pub use self::rst_stream::RstStreamFrame;
 /// Rexports related to the `SETTINGS` frame.
 pub use self::settings::{SettingsFlag, SettingsFrame, HttpSetting};
+pub use self::goaway::GoawayFrame;
 
 /// An alias for the 9-byte buffer that each HTTP/2 frame header must be stored
 /// in.
