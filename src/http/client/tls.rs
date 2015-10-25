@@ -28,8 +28,8 @@
 //! // response is well formed.)
 //! for header in response.headers.iter() {
 //!     println!("{}: {}",
-//!         str::from_utf8(&header.0).unwrap(),
-//!         str::from_utf8(&header.1).unwrap());
+//!         str::from_utf8(header.name()).unwrap(),
+//!         str::from_utf8(header.value()).unwrap());
 //! }
 //! println!("{}", str::from_utf8(&response.body).unwrap());
 //! ```
@@ -78,8 +78,8 @@ use openssl::ssl::SslMethod;
 /// // response is well formed.)
 /// for header in response.headers.iter() {
 ///     println!("{}: {}",
-///         str::from_utf8(&header.0).unwrap(),
-///         str::from_utf8(&header.1).unwrap());
+///         str::from_utf8(header.name()).unwrap(),
+///         str::from_utf8(header.value()).unwrap());
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
