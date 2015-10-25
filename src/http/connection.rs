@@ -549,7 +549,6 @@ mod tests {
         RawFrame,
         FrameIR,
     };
-    use http::transport::TransportStream;
     use http::{HttpError, HttpResult, HttpScheme, Header, OwnedHeader};
     use hpack;
 
@@ -567,100 +566,6 @@ mod tests {
             HttpFrame::HeadersFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::UnknownFrame(_) => Ok(()),
         }
-    }
-
-    /// Tests the implementation of the `SendFrame` for `TransportStream`s when
-    /// writing individual frames.
-    #[test]
-    fn test_send_frame_for_transport_stream_individual() {
-        let frames: Vec<HttpFrame> = vec![
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
-            HttpFrame::DataFrame(DataFrame::new(1)),
-            HttpFrame::DataFrame(DataFrame::new(3)),
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![0; 9]))),
-        ];
-        for frame in frames.into_iter() {
-            let mut stream = StubTransportStream::with_stub_content(&[]);
-            let frame_serialized = match frame {
-                HttpFrame::DataFrame(frame) => {
-                    let ret = frame.serialize();
-                    stream.send_frame(frame).unwrap();
-                    ret
-                },
-                HttpFrame::HeadersFrame(frame) => {
-                    let ret = frame.serialize();
-                    stream.send_frame(frame).unwrap();
-                    ret
-                },
-                HttpFrame::SettingsFrame(frame) => {
-                    let ret = frame.serialize();
-                    stream.send_frame(frame).unwrap();
-                    ret
-                },
-                HttpFrame::UnknownFrame(frame) => {
-                    let ret = frame.serialize();
-                    let raw: RawFrame = frame.into();
-                    stream.send_frame(raw).unwrap();
-                    ret
-                },
-            };
-            assert_eq!(stream.get_written(), frame_serialized);
-        }
-    }
-
-    /// Tests the implementation of the `SendFrame` for `TransportStream`s.
-    #[test]
-    fn test_send_frame_for_transport_stream() {
-        let frames: Vec<HttpFrame> = vec![
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
-            HttpFrame::DataFrame(DataFrame::new(1)),
-            HttpFrame::DataFrame(DataFrame::new(3)),
-            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
-            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![0; 9]))),
-        ];
-        let mut stream = StubTransportStream::with_stub_content(&[]);
-        let mut previous = 0;
-        for frame in frames.into_iter() {
-            let frame_serialized = match frame {
-                HttpFrame::DataFrame(frame) => {
-                    let ret = frame.serialize();
-                    stream.send_frame(frame).unwrap();
-                    ret
-                },
-                HttpFrame::HeadersFrame(frame) => {
-                    let ret = frame.serialize();
-                    stream.send_frame(frame).unwrap();
-                    ret
-                },
-                HttpFrame::SettingsFrame(frame) => {
-                    let ret = frame.serialize();
-                    stream.send_frame(frame).unwrap();
-                    ret
-                },
-                HttpFrame::UnknownFrame(frame) => {
-                    let ret = frame.serialize();
-                    let raw: RawFrame = frame.into();
-                    stream.send_frame(raw).unwrap();
-                    ret
-                },
-            };
-            let written = stream.get_written();
-            assert_eq!(&written[previous..], &frame_serialized[..]);
-            previous = written.len();
-        }
-    }
-
-    /// Tests that trying to send a frame on a closed transport stream results in an error.
-    /// (i.e. an error returned by the underlying `io::Write` is propagated).
-    #[test]
-    fn test_send_frame_closed_stream() {
-        let mut stream = StubTransportStream::with_stub_content(&vec![]);
-        stream.close().unwrap();
-
-        let res = stream.send_frame(HeadersFrame::new(vec![], 1));
-
-        assert!(res.is_err());
     }
 
     /// Tests that the implementation of `ReceiveFrame` for `TransportReceiveFrame` types

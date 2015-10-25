@@ -101,3 +101,97 @@ impl TransportStream for SslStream<TcpStream> {
         self.get_ref().shutdown(Shutdown::Both)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TransportStream;
+
+    use http::tests::common::{
+        serialize_frame,
+        StubTransportStream,
+    };
+    use http::connection::{HttpFrame, SendFrame};
+    use http::frame::{
+        RawFrame,
+        DataFrame,
+        HeadersFrame,
+    };
+
+    /// A helper function that sends the given frame using the provided `sender` and also returns
+    /// the raw serialization of the frame.
+    fn send_frame<S: SendFrame>(sender: &mut S, frame: HttpFrame) -> Vec<u8> {
+        match frame {
+            HttpFrame::DataFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                sender.send_frame(frame).unwrap();
+                ret
+            },
+            HttpFrame::HeadersFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                sender.send_frame(frame).unwrap();
+                ret
+            },
+            HttpFrame::SettingsFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                sender.send_frame(frame).unwrap();
+                ret
+            },
+            HttpFrame::UnknownFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                let raw: RawFrame = frame.into();
+                sender.send_frame(raw).unwrap();
+                ret
+            },
+        }
+    }
+
+    /// Tests the implementation of the `SendFrame` for `TransportStream`s when
+    /// writing individual frames.
+    #[test]
+    fn test_send_frame_for_transport_stream_individual() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+            HttpFrame::DataFrame(DataFrame::new(1)),
+            HttpFrame::DataFrame(DataFrame::new(3)),
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
+            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![0; 9]))),
+        ];
+        for frame in frames.into_iter() {
+            let mut stream = StubTransportStream::with_stub_content(&[]);
+            let frame_serialized = send_frame(&mut stream, frame);
+            assert_eq!(stream.get_written(), frame_serialized);
+        }
+    }
+
+    /// Tests the implementation of the `SendFrame` for `TransportStream`s.
+    #[test]
+    fn test_send_frame_for_transport_stream() {
+        let frames: Vec<HttpFrame> = vec![
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 1)),
+            HttpFrame::DataFrame(DataFrame::new(1)),
+            HttpFrame::DataFrame(DataFrame::new(3)),
+            HttpFrame::HeadersFrame(HeadersFrame::new(vec![], 3)),
+            HttpFrame::UnknownFrame(From::from(RawFrame::from(vec![0; 9]))),
+        ];
+        let mut stream = StubTransportStream::with_stub_content(&[]);
+        let mut previous = 0;
+        for frame in frames.into_iter() {
+            let frame_serialized = send_frame(&mut stream, frame);
+            let written = stream.get_written();
+            assert_eq!(&written[previous..], &frame_serialized[..]);
+            previous = written.len();
+        }
+    }
+
+    /// Tests that trying to send a frame on a closed transport stream results in an error.
+    /// (i.e. an error returned by the underlying `io::Write` is propagated).
+    #[test]
+    fn test_send_frame_closed_stream() {
+        let mut stream = StubTransportStream::with_stub_content(&vec![]);
+        stream.close().unwrap();
+
+        let res = stream.send_frame(HeadersFrame::new(vec![], 1));
+
+        assert!(res.is_err());
+    }
+}
