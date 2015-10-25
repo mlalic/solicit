@@ -6,6 +6,7 @@ use http::{
     Header,
     HttpResult,
     HttpScheme,
+    ErrorCode,
 };
 use http::frame::{HttpSetting};
 use http::connection::{
@@ -113,6 +114,11 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
             Some(stream) => stream,
         };
         stream.close_remote();
+        Ok(())
+    }
+
+    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
+            -> HttpResult<()> {
         Ok(())
     }
 

@@ -6,7 +6,7 @@ use std::io;
 use std::fmt;
 use std::error;
 
-use http::{HttpScheme, HttpResult, StreamId, Header, HttpError};
+use http::{HttpScheme, HttpResult, StreamId, Header, HttpError, ErrorCode};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, FrameIR};
 use http::connection::{
@@ -349,6 +349,12 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
         // close the local end of the stream, as well as the remote one; there's no need to keep
         // sending out the request body if the server's decided that it doesn't want to see it.
         stream.close();
+        Ok(())
+    }
+
+    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
+            -> HttpResult<()> {
+        debug!("RST_STREAM id={:?}, error={:?}", stream_id, error_code);
         Ok(())
     }
 

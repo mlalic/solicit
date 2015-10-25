@@ -12,6 +12,7 @@ use http::{
     StreamId,
     Header,
     OwnedHeader,
+    ErrorCode,
 };
 use http::frame::{RawFrame, FrameIR, FrameHeader, pack_header, HttpSetting};
 use http::session::{
@@ -316,6 +317,11 @@ impl Session for TestSession {
     }
 
     fn end_of_stream(&mut self, _: StreamId, _: &mut HttpConnection)
+            -> HttpResult<()> {
+        Ok(())
+    }
+
+    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
             -> HttpResult<()> {
         Ok(())
     }

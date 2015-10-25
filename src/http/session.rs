@@ -9,7 +9,7 @@ use std::error::Error;
 use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
-use http::{StreamId, OwnedHeader, Header, HttpResult};
+use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode};
 use http::frame::HttpSetting;
 use http::connection::{HttpConnection};
 
@@ -36,6 +36,10 @@ pub trait Session {
             -> HttpResult<()>;
     /// Notifies the `Session` that a particular stream got closed by the peer.
     fn end_of_stream(&mut self, stream_id: StreamId, conn: &mut HttpConnection)
+            -> HttpResult<()>;
+    /// Notifies the `Session` that a particular stream was reset by the peer and provides the
+    /// reason behind it.
+    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, conn: &mut HttpConnection)
             -> HttpResult<()>;
     /// Notifies the `Session` that the peer has sent a new set of settings. The session itself is
     /// responsible for acknowledging the receipt of the settings.
