@@ -258,33 +258,19 @@ impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
     }
 
     /// A helper function that inserts a frame representing the given data into the `SendFrame`
-    /// stream.
-    ///
-    /// The `HttpConnection` itself does not track the flow control window and will happily send
-    /// data that exceeds a particular stream's or the connection's flow control window size.
-    ///
-    /// # Parameters
-    ///
-    /// - `data` - the data that should be sent on the connection
-    /// - `stream_id` - the ID of the stream on which the data will be sent
-    /// - `end_stream` - whether the stream should be closed from the peer's side immediately after
-    ///   sending the data (i.e. the last data frame closes the stream).
-    pub fn send_data(&mut self,
-                         chunk: DataChunk) -> HttpResult<()> {
+    /// stream. In doing so, the connection's outbound flow control window is adjusted
+    /// appropriately.
+    pub fn send_data(&mut self, chunk: DataChunk) -> HttpResult<()> {
+        // Prepare the frame...
         let DataChunk { data, stream_id, end_stream } = chunk;
-        self.send_data_inner(data.into_owned(), stream_id, end_stream)
-    }
-
-    /// A private helepr method: the non-generic implementation of the `send_data` method.
-    fn send_data_inner(&mut self, data: Vec<u8>, stream_id: StreamId, end_stream: EndStream)
-            -> HttpResult<()>{
-        // TODO Validate that the given data can fit into the maximum frame size allowed by the
-        //      current settings.
-        let mut frame = DataFrame::with_data(stream_id, data);
+        let mut frame = DataFrame::with_data(stream_id, data.as_ref());
         if end_stream == EndStream::Yes {
             frame.set_flag(DataFlag::EndStream);
         }
-
+        // Adjust the flow control window...
+        try!(self.conn.decrease_out_window(frame.payload_len()));
+        trace!("New OUT WINDOW size = {}", self.conn.out_window_size());
+        // ...and now send it out.
         self.send_frame(frame)
     }
 
@@ -518,6 +504,16 @@ impl HttpConnection {
 
         Ok(())
     }
+
+    /// Internal helper method that decreases the out-bound flow control window size.
+    fn decrease_out_window(&mut self, size: u32) -> HttpResult<()> {
+        // The size by which we decrease the window must be at most 2^31 - 1. We should be able to
+        // reach here only after sending a DATA frame, whose payload also cannot be larger than
+        // that, but we assert it just in case.
+        debug_assert!(size < 0x80000000);
+        self.out_window_size.try_decrease(size as i32)
+                            .map_err(|_| HttpError::WindowSizeOverflow)
+    }
 }
 
 #[cfg(test)]
@@ -658,16 +654,22 @@ mod tests {
         ];
         let mut prioritizer = StubDataPrioritizer::new(chunks.clone());
 
+        let mut expected_window = 65_535;
+        assert_eq!(conn.out_window_size(), expected_window);
         // Send as many chunks as we've given the prioritizer
         for chunk in chunks.iter() {
             assert_eq!(SendStatus::Sent,
                        conn.sender(&mut sender).send_next_data(&mut prioritizer).unwrap());
             let last = sender.sent.pop().unwrap();
             expect_chunk(&chunk, &HttpFrame::from_raw(&last).unwrap());
+            expected_window -= chunk.len() as i32;
+            assert_eq!(conn.out_window_size(), expected_window);
         }
         // Nothing to send any more
         assert_eq!(SendStatus::Nothing,
                    conn.sender(&mut sender).send_next_data(&mut prioritizer).unwrap());
+        // No change to the window either, of course.
+        assert_eq!(conn.out_window_size(), expected_window);
     }
 
     /// Tests that multiple frames are correctly written to the stream.
@@ -789,6 +791,7 @@ mod tests {
             };
             assert_eq!(&frame.data[..], data);
             assert!(!frame.is_end_of_stream());
+            assert_eq!(conn.out_window_size(), 65_535 - data.len() as i32);
         }
         {
             // Data should end the stream...
@@ -810,6 +813,7 @@ mod tests {
             };
             assert_eq!(&frame.data[..], data);
             assert!(frame.is_end_of_stream());
+            assert_eq!(conn.out_window_size(), 65_535 - data.len() as i32);
         }
         {
             // given a `Vec` we're good too?
@@ -835,6 +839,7 @@ mod tests {
             };
             assert_eq!(&frame.data[..], data);
             assert!(frame.is_end_of_stream());
+            assert_eq!(conn.out_window_size(), 65_535 - data.len() as i32);
         }
     }
 

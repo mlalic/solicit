@@ -339,6 +339,9 @@ pub enum HttpError {
     /// Any decoder error is fatal to the HTTP/2 connection as it means that the decoder contexts
     /// will be out of sync.
     CompressionError(DecoderError),
+    /// Indicates that the local peer has discovered an overflow in the size of one of the
+    /// connection flow control window, which is a connection error.
+    WindowSizeOverflow,
     UnknownStreamId,
     UnableToConnect,
     MalformedResponse,
@@ -366,6 +369,7 @@ impl Error for HttpError {
             HttpError::InvalidFrame => "Encountered an invalid HTTP/2 frame",
             HttpError::PeerConnectionError(ref err) => err.description(),
             HttpError::CompressionError(_) => "Encountered an error with HPACK compression",
+            HttpError::WindowSizeOverflow => "The connection flow control window overflowed",
             HttpError::UnknownStreamId => "Attempted an operation with an unknown HTTP/2 stream ID",
             HttpError::UnableToConnect => "An error attempting to establish an HTTP/2 connection",
             HttpError::MalformedResponse => "The received response was malformed",

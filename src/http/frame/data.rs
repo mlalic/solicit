@@ -117,7 +117,7 @@ impl<'a> DataFrame<'a> {
 
     /// Returns the total length of the payload, taking into account possible
     /// padding.
-    fn payload_len(&self) -> u32 {
+    pub fn payload_len(&self) -> u32 {
         if self.is_padded() {
             1 + (self.data.len() as u32) + (self.padding_len.unwrap_or(0) as u32)
         } else {
