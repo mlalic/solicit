@@ -407,6 +407,96 @@ impl PartialEq for HttpError {
 /// type and a generic Ok result type.
 pub type HttpResult<T> = Result<T, HttpError>;
 
+/// The struct represents the size of a flow control window.
+///
+/// It exposes methods that allow the manipulation of window sizes, such that they can never
+/// overflow the spec-mandated upper bound.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct WindowSize(i32);
+impl WindowSize {
+    /// Tries to increase the window size by the given delta. If the WindowSize would overflow the
+    /// maximum allowed value (2^31 - 1), returns an error case. If the increase succeeds, returns
+    /// `Ok`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use solicit::http::WindowSize;
+    ///
+    /// let mut window_size = WindowSize::new(65_535);
+    /// assert_eq!(window_size.size(), 65_535);
+    /// // An increase within the bounds...
+    /// assert!(window_size.try_increase(100).is_ok());
+    /// assert_eq!(window_size.size(), 65_635);
+    /// // An increase that would overflow
+    /// assert!(window_size.try_increase(0x7fffffff).is_err());
+    /// assert_eq!(window_size.size(), 65_635);
+    /// ```
+    pub fn try_increase(&mut self, delta: u32) -> Result<(), ()> {
+        // Someone's provided a delta that would definitely overflow the window size.
+        if delta > 0x7fffffff {
+            return Err(())
+        }
+        // Now it is safe to cast the delta to the `i32`.
+        match self.0.checked_add(delta as i32) {
+            None => {
+                // When the add overflows, we will have went over the maximum allowed size of the
+                // window size...
+                Err(())
+            },
+            Some(next_val) => {
+                // The addition didn't overflow, so the next window size is in the range allowed by
+                // the spec.
+                self.0 = next_val;
+                Ok(())
+            }
+        }
+    }
+
+    /// Tries to decrease the size of the window by the given delta.
+    ///
+    /// There are situations where the window size should legitimately be allowed to become
+    /// negative, so the only situation where the result is an error is if the window size would
+    /// underflow, as this would definitely cause the peers to lose sync.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use solicit::http::WindowSize;
+    ///
+    /// let mut window_size = WindowSize::new(65_535);
+    /// assert_eq!(window_size.size(), 65_535);
+    /// // A decrease...
+    /// assert!(window_size.try_decrease(100).is_ok());
+    /// assert_eq!(window_size.size(), 65_435);
+    /// // A decrease that does not underflow
+    /// assert!(window_size.try_decrease(0x7fffffff).is_ok());
+    /// assert_eq!(window_size.size(), -2147418212);
+    /// // A decrease that *would* underflow
+    /// assert!(window_size.try_decrease(0x7fffffff).is_err());
+    /// assert_eq!(window_size.size(), -2147418212);
+    /// ```
+    pub fn try_decrease(&mut self, delta: i32) -> Result<(), ()> {
+        match self.0.checked_sub(delta) {
+            Some(new) => {
+                self.0 = new;
+                Ok(())
+            },
+            None => Err(()),
+        }
+    }
+
+    /// Creates a new `WindowSize` with the given initial size.
+    pub fn new(size: i32) -> WindowSize {
+        WindowSize(size)
+    }
+    /// Returns the current size of the window.
+    ///
+    /// The size is actually allowed to become negative (for instance if the peer changes its
+    /// intial window size in the settings); therefore, the return is an `i32`.
+    pub fn size(&self) -> i32 { self.0 }
+}
+
 /// An enum representing the two possible HTTP schemes.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum HttpScheme {
