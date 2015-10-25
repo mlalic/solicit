@@ -156,14 +156,6 @@ impl<'a> DataFrame<'a> {
     pub fn set_flag(&mut self, flag: DataFlag) {
         self.flags |= flag.bitmask();
     }
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    #[cfg(test)]
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::with_capacity(9 + self.payload_len() as usize));
-        self.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
-    }
 }
 
 impl<'a> Frame<'a> for DataFrame<'a> {
@@ -252,7 +244,7 @@ impl<'a> FrameIR for DataFrame<'a> {
 mod tests {
     use super::{DataFlag, DataFrame};
     use http::frame::tests::{build_padded_frame_payload};
-    use http::tests::common::raw_frame_from_parts;
+    use http::tests::common::{raw_frame_from_parts, serialize_frame};
     use http::frame::{pack_header, Frame};
 
     /// Tests that the `DataFrame` struct correctly interprets a DATA frame
@@ -435,7 +427,7 @@ mod tests {
             res
         };
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }
@@ -455,7 +447,7 @@ mod tests {
             res
         };
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }
@@ -482,7 +474,7 @@ mod tests {
             res
         };
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }
@@ -508,7 +500,7 @@ mod tests {
             res
         };
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }

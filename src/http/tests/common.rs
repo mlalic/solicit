@@ -183,11 +183,11 @@ impl TransportStream for StubTransportStream {
 pub fn build_stub_from_frames(frames: &Vec<HttpFrame>) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     for frame in frames.iter() {
-        let serialized = match frame {
-            &HttpFrame::DataFrame(ref frame) => frame.serialize(),
-            &HttpFrame::HeadersFrame(ref frame) => frame.serialize(),
-            &HttpFrame::SettingsFrame(ref frame) => frame.serialize(),
-            &HttpFrame::UnknownFrame(ref frame) => frame.serialize(),
+        let serialized = match *frame {
+            HttpFrame::DataFrame(ref frame) => serialize_frame(frame),
+            HttpFrame::HeadersFrame(ref frame) => serialize_frame(frame),
+            HttpFrame::SettingsFrame(ref frame) => serialize_frame(frame),
+            HttpFrame::UnknownFrame(ref frame) => serialize_frame(frame),
         };
         buf.extend(serialized.into_iter());
     }

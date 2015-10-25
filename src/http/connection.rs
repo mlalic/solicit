@@ -536,6 +536,7 @@ mod tests {
     use http::tests::common::{
         build_mock_http_conn,
         build_stub_from_frames,
+        serialize_frame,
         StubTransportStream,
         StubDataPrioritizer,
         TestSession,
@@ -607,7 +608,7 @@ mod tests {
     #[test]
     fn test_recv_frame_for_transport_stream_incomplete_frame() {
         let frame = DataFrame::with_data(1, vec![1, 2, 3]);
-        let serialized: Vec<u8> = frame.serialize();
+        let serialized: Vec<u8> = serialize_frame(&frame);
 
         {
             // Incomplete header
@@ -630,7 +631,7 @@ mod tests {
     #[test]
     fn test_recv_frame_invalid() {
         // A DATA header which is attached to stream 0
-        let serialized = HeadersFrame::new(vec![], 0).serialize();
+        let serialized = serialize_frame(&HeadersFrame::new(vec![], 0));
         let mut stream = StubTransportStream::with_stub_content(&serialized);
         let mut receiver = TransportReceiveFrame::new(&mut stream);
 

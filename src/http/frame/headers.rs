@@ -210,19 +210,6 @@ impl<'a> HeadersFrame<'a> {
     pub fn set_flag(&mut self, flag: HeadersFlag) {
         self.flags |= flag.bitmask();
     }
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    ///
-    /// # Panics
-    ///
-    /// If the `HeadersFlag::Priority` flag was set, but no stream dependency
-    /// information is given (i.e. `stream_dep` is `None`).
-    #[cfg(test)]
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
-        self.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
-    }
 }
 
 impl<'a> Frame<'a> for HeadersFrame<'a> {
@@ -335,7 +322,7 @@ impl<'a> FrameIR for HeadersFrame<'a> {
 mod tests {
     use super::{HeadersFrame, HeadersFlag, StreamDependency};
     use http::frame::tests::{build_padded_frame_payload};
-    use http::tests::common::raw_frame_from_parts;
+    use http::tests::common::{raw_frame_from_parts, serialize_frame};
     use http::frame::{pack_header, Frame};
 
     /// Tests that a stream dependency structure can be correctly parsed by the
@@ -548,7 +535,7 @@ mod tests {
         };
         let frame = HeadersFrame::new(data.to_vec(), 1);
 
-        let actual = frame.serialize();
+        let actual = serialize_frame(&frame);
 
         assert_eq!(expected, actual);
     }
@@ -570,7 +557,7 @@ mod tests {
         let mut frame = HeadersFrame::new(data.to_vec(), 1);
         frame.set_padding(6);
 
-        let actual = frame.serialize();
+        let actual = serialize_frame(&frame);
 
         assert_eq!(expected, actual);
     }
@@ -598,7 +585,7 @@ mod tests {
         };
         let frame = HeadersFrame::with_dependency(data.to_vec(), 1, dep.clone());
 
-        let actual = frame.serialize();
+        let actual = serialize_frame(&frame);
 
         assert_eq!(expected, actual);
     }
@@ -629,7 +616,7 @@ mod tests {
         let mut frame = HeadersFrame::with_dependency(data.to_vec(), 1, dep.clone());
         frame.set_padding(4);
 
-        let actual = frame.serialize();
+        let actual = serialize_frame(&frame);
 
         assert_eq!(expected, actual);
     }

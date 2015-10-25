@@ -219,14 +219,6 @@ impl SettingsFrame {
     pub fn set_flag(&mut self, flag: SettingsFlag) {
         self.flags |= flag.bitmask();
     }
-
-    /// Returns a `Vec` with the serialized representation of the frame.
-    #[cfg(test)]
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::with_capacity(self.payload_len() as usize));
-        self.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
-    }
 }
 
 impl<'a> Frame<'a> for SettingsFrame {
@@ -318,7 +310,7 @@ impl FrameIR for SettingsFrame {
 #[cfg(test)]
 mod tests {
     use super::{HttpSetting, SettingsFrame};
-    use http::tests::common::raw_frame_from_parts;
+    use http::tests::common::{raw_frame_from_parts, serialize_frame};
     use http::frame::{pack_header, Frame};
 
     /// Tests that a `SettingsFrame` correctly handles a SETTINGS frame with
@@ -506,7 +498,7 @@ mod tests {
             res
         };
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }
@@ -527,7 +519,7 @@ mod tests {
             res
         };
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }
@@ -539,7 +531,7 @@ mod tests {
         let frame = SettingsFrame::new_ack();
         let expected = pack_header(&(0, 4, 1, 0)).to_vec();
 
-        let serialized = frame.serialize();
+        let serialized = serialize_frame(&frame);
 
         assert_eq!(serialized, expected);
     }
