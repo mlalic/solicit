@@ -27,6 +27,18 @@ macro_rules! unpack_octets_4 {
     );
 }
 
+/// Parse the next 4 octets in the given buffer, assuming they represent an HTTP/2 stream ID.
+/// This means that the most significant bit of the first octet is ignored and the rest interpreted
+/// as a network-endian 31-bit integer.
+#[inline]
+fn parse_stream_id(buf: &[u8]) -> u32 {
+    let unpacked = unpack_octets_4!(buf, 0, u32);
+    // Now clear the most significant bit, as that is reserved and MUST be ignored when received.
+    let id = unpacked & !0x80000000;
+
+    id
+}
+
 pub const FRAME_HEADER_LEN: usize = 9;
 
 pub mod builder;
@@ -64,7 +76,7 @@ pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
         ((header[2] as u32) <<  0);
     let frame_type = header[3];
     let flags = header[4];
-    let stream_id: u32 = unpack_octets_4!(header, 5, u32);
+    let stream_id = parse_stream_id(&header[5..]);
 
     (length, frame_type, flags, stream_id)
 }
@@ -346,6 +358,11 @@ mod tests {
             assert_eq!(
                 ((1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24)),
                 unpack_header(&header));
+        }
+        {
+            // Ignores reserved bit within the stream id (the most significant bit)
+            let header = [0, 0, 1, 0, 0, 0x80, 0, 0, 1];
+            assert_eq!((1, 0, 0, 1), unpack_header(&header));
         }
     }
 
