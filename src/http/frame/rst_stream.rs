@@ -99,22 +99,13 @@ impl FrameIR for RstStreamFrame {
 mod tests {
     use super::RstStreamFrame;
 
-    use std::io;
-
+    use http::tests::common::serialize_frame;
     use http::ErrorCode;
     use http::frame::{
         pack_header,
         FrameHeader,
-        FrameIR,
         Frame,
     };
-
-    /// A helper function that serializes the given frame into a newly allocated Vec.
-    fn serialize_frame(frame: &RstStreamFrame) -> Vec<u8> {
-        let mut buf = io::Cursor::new(Vec::new());
-        frame.clone().serialize_into(&mut buf).unwrap();
-        buf.into_inner()
-    }
 
     /// A helper function that creates a new Vec containing the serialized representation of the
     /// given `FrameHeader` followed by the raw provided payload.

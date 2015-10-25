@@ -46,6 +46,13 @@ pub fn raw_frame_from_parts<'a>(header: FrameHeader, payload: Vec<u8>) -> RawFra
     buf.into()
 }
 
+/// Serializes the given frame into a newly allocated vector (without consuming the frame).
+pub fn serialize_frame<F: FrameIR + Clone>(frame: &F) -> Vec<u8> {
+    let mut buf = io::Cursor::new(Vec::new());
+    frame.clone().serialize_into(&mut buf).expect("Expected the serialization to succeed");
+    buf.into_inner()
+}
+
 /// A mock `SendFrame` implementation that simply saves all frames that it is to send to a `Vec`.
 pub struct MockSendFrame {
     pub sent: Vec<RawFrame<'static>>,
