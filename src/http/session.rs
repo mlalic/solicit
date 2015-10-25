@@ -297,6 +297,15 @@ pub trait Stream {
     /// Sets the stream state to the newly provided state.
     fn set_state(&mut self, state: StreamState);
 
+    /// Invoked when the session detects that the peer has reset the stream (i.e. sent a RST_STREAM
+    /// frame for this stream).
+    ///
+    /// The default implementation simply closes the stream, discarding the provided error_code.
+    /// Concrete `Stream` implementations can override this.
+    fn on_rst_stream(&mut self, _error_code: ErrorCode) {
+        self.close();
+    }
+
     /// Places the next data chunk that should be written onto the stream into the given buffer.
     ///
     /// # Returns
@@ -464,6 +473,7 @@ mod tests {
         Client as ClientMarker,
         Server as ServerMarker,
     };
+    use http::ErrorCode;
     use http::tests::common::TestStream;
 
     /// Checks that the `Parity` struct indeed works as advertised.
@@ -650,5 +660,25 @@ mod tests {
             let res = stream.get_data_chunk(&mut buf).ok().unwrap();
             assert_eq!(res, StreamDataChunk::Last(0));
         }
+    }
+
+    #[test]
+    fn test_default_stream_get_data_after_rst() {
+        let mut buf = vec![0; 2];
+        let mut stream = DefaultStream::new();
+        stream.set_full_data(vec![1, 2, 3, 4, 5]);
+
+        let res = stream.get_data_chunk(&mut buf).ok().unwrap();
+        assert_eq!(res, StreamDataChunk::Chunk(2));
+        assert_eq!(buf, vec![1, 2]);
+
+        // Now signal the stream that it's been reset.
+        stream.on_rst_stream(ErrorCode::Cancel);
+        // The stream no longer provides data, as there's no point in sending any once it is fully
+        // closed on both ends for whatever reason.
+        assert!(match stream.get_data_chunk(&mut buf) {
+            Err(StreamDataError::Closed) => true,
+            _ => false,
+        });
     }
 }
