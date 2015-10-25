@@ -322,14 +322,22 @@ impl Error for ConnectionError {
     }
 }
 
+/// An enum representing errors that can arise when performing operations involving an HTTP/2
+/// connection.
 #[derive(Debug)]
 pub enum HttpError {
+    /// The underlying IO layer raised an error
     IoError(io::Error),
+    /// The HTTP/2 connection received an invalid HTTP/2 frame
     InvalidFrame,
+    /// The peer indicated a connection error
+    PeerConnectionError(ConnectionError),
+    /// The HPACK decoder was unable to decode a header chunk and raised an error.
+    /// Any decoder error is fatal to the HTTP/2 connection as it means that the decoder contexts
+    /// will be out of sync.
     CompressionError(DecoderError),
     UnknownStreamId,
     UnableToConnect,
-    // TODO This variant should be split into actual reasons for the response being malformed
     MalformedResponse,
     Other(Box<Error + Send + Sync>),
 }
@@ -353,6 +361,7 @@ impl Error for HttpError {
         match *self {
             HttpError::IoError(_) => "Encountered an IO error",
             HttpError::InvalidFrame => "Encountered an invalid HTTP/2 frame",
+            HttpError::PeerConnectionError(ref err) => err.description(),
             HttpError::CompressionError(_) => "Encountered an error with HPACK compression",
             HttpError::UnknownStreamId => "Attempted an operation with an unknown HTTP/2 stream ID",
             HttpError::UnableToConnect => "An error attempting to establish an HTTP/2 connection",
@@ -365,6 +374,7 @@ impl Error for HttpError {
         match *self {
             HttpError::Other(ref e) => Some(&**e),
             HttpError::IoError(ref e) => Some(e),
+            HttpError::PeerConnectionError(ref e) => Some(e),
             _ => None,
         }
     }
