@@ -464,9 +464,9 @@ impl HttpConnection {
                 debug!("Headers frame received");
                 self.handle_headers_frame(frame, session)
             },
-            HttpFrame::RstStreamFrame(_) => {
+            HttpFrame::RstStreamFrame(frame) => {
                 debug!("RST_STREAM frame received");
-                Ok(())
+                self.handle_rst_stream_frame(frame, session)
             },
             HttpFrame::SettingsFrame(frame) => {
                 debug!("Settings frame received");
@@ -511,6 +511,16 @@ impl HttpConnection {
         Ok(())
     }
 
+    /// Private helper method that handles a received `RstStreamFrame`
+    #[inline]
+    fn handle_rst_stream_frame<Sess: Session>(
+            &mut self,
+            frame: RstStreamFrame,
+            session: &mut Sess)
+            -> HttpResult<()> {
+        session.rst_stream(frame.get_stream_id(), frame.error_code(), self)
+    }
+
     /// Private helper method that handles a received `SettingsFrame`.
     fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, session: &mut Sess)
             -> HttpResult<()> {
@@ -552,12 +562,13 @@ mod tests {
     };
     use http::frame::{
         Frame, DataFrame, HeadersFrame,
+        RstStreamFrame,
         SettingsFrame,
         pack_header,
         RawFrame,
         FrameIR,
     };
-    use http::{HttpError, HttpResult, HttpScheme, Header, OwnedHeader};
+    use http::{HttpError, HttpResult, HttpScheme, Header, OwnedHeader, ErrorCode};
     use hpack;
 
     /// A helper function that performs a `send_frame` operation on the given
@@ -930,6 +941,7 @@ mod tests {
         assert_eq!(session.curr_header, 1);
         // ...no chunks were seen.
         assert_eq!(session.curr_chunk, 0);
+        assert_eq!(session.rst_streams.len(), 0);
     }
 
     /// Tests that the `HttpConnection` correctly notifies the session on
@@ -950,6 +962,7 @@ mod tests {
         assert_eq!(session.curr_header, 0);
         // and exactly one chunk seen.
         assert_eq!(session.curr_chunk, 1);
+        assert_eq!(session.rst_streams.len(), 0);
     }
 
     /// Tests that the session gets the correct values for the headers and data
@@ -980,6 +993,23 @@ mod tests {
         // Two chunks and one header processed?
         assert_eq!(session.curr_chunk, 2);
         assert_eq!(session.curr_header, 1);
+    }
+
+    /// Tests that the `HttpConnection` correctly notifies the session when a stream is reset.
+    #[test]
+    fn test_conn_rst_stream() {
+        let frames = vec![
+            HttpFrame::RstStreamFrame(RstStreamFrame::new(1, ErrorCode::ProtocolError)),
+        ];
+        let mut conn = HttpConnection::new(HttpScheme::Http);
+        let mut session = TestSession::new();
+        let mut frame_provider = MockReceiveFrame::new(frames);
+
+        conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+
+        // One stream reset.
+        assert_eq!(session.rst_streams.len(), 1);
+        assert_eq!(session.rst_streams[0], 1);
     }
 
     /// Tests that the `HttpConnection::expect_settings` method works correctly.

@@ -263,6 +263,8 @@ pub struct TestSession {
     pub curr_header: usize,
     /// The current number of data chunk calls.
     pub curr_chunk: usize,
+    /// The current number of `rst_stream` calls.
+    pub rst_streams: Vec<StreamId>,
 }
 
 impl TestSession {
@@ -275,6 +277,7 @@ impl TestSession {
             chunks: Vec::new(),
             curr_header: 0,
             curr_chunk: 0,
+            rst_streams: Vec::new(),
         }
     }
 
@@ -289,6 +292,7 @@ impl TestSession {
                 chunks: chunks,
                 curr_header: 0,
                 curr_chunk: 0,
+                rst_streams: Vec::new(),
             }
         }
 }
@@ -321,8 +325,9 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
+    fn rst_stream(&mut self, stream_id: StreamId, _: ErrorCode, _: &mut HttpConnection)
             -> HttpResult<()> {
+        self.rst_streams.push(stream_id);
         Ok(())
     }
 
