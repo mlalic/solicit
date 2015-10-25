@@ -19,7 +19,7 @@ use http::StreamId;
 /// ```
 #[macro_escape]
 macro_rules! unpack_octets_4 {
-    ($buf:ident, $offset:expr, $tip:ty) => (
+    ($buf:expr, $offset:expr, $tip:ty) => (
         (($buf[$offset + 0] as $tip) << 24) |
         (($buf[$offset + 1] as $tip) << 16) |
         (($buf[$offset + 2] as $tip) <<  8) |
