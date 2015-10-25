@@ -475,9 +475,13 @@ impl HttpConnection {
                 debug!("Settings frame received");
                 self.handle_settings_frame::<Sess>(frame, session)
             },
-            HttpFrame::GoawayFrame(_) => {
+            HttpFrame::GoawayFrame(frame) => {
                 debug!("GOAWAY frame received");
-                Ok(())
+                session.on_goaway(
+                    frame.last_stream_id(),
+                    frame.error_code(),
+                    frame.debug_data(),
+                    self)
             },
             HttpFrame::UnknownFrame(frame) => {
                 debug!("Unknown frame received; raw = {:?}", frame);
@@ -570,6 +574,7 @@ mod tests {
     use http::frame::{
         Frame, DataFrame, HeadersFrame,
         RstStreamFrame,
+        GoawayFrame,
         SettingsFrame,
         pack_header,
         RawFrame,
@@ -1018,6 +1023,26 @@ mod tests {
         // One stream reset.
         assert_eq!(session.rst_streams.len(), 1);
         assert_eq!(session.rst_streams[0], 1);
+    }
+
+    /// Tests that the `HttpConnection` correctly notifies the session when it receives a GOAWAY
+    /// frame.
+    #[test]
+    fn test_conn_on_goaway() {
+        let frames = vec![
+            HttpFrame::GoawayFrame(GoawayFrame::new(0, ErrorCode::ProtocolError)),
+        ];
+        let mut conn = HttpConnection::new(HttpScheme::Http);
+        let mut session = TestSession::new();
+        let mut frame_provider = MockReceiveFrame::new(frames);
+
+        conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+
+        assert_eq!(session.goaways.len(), 1);
+        assert_eq!(session.goaways[0], ErrorCode::ProtocolError);
+        assert_eq!(session.curr_header, 0);
+        assert_eq!(session.curr_chunk, 0);
+        assert_eq!(session.rst_streams.len(), 0);
     }
 
     /// Tests that the `HttpConnection::expect_settings` method works correctly.

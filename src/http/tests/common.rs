@@ -266,6 +266,8 @@ pub struct TestSession {
     pub curr_chunk: usize,
     /// The current number of `rst_stream` calls.
     pub rst_streams: Vec<StreamId>,
+    /// All the goaway error codes received.
+    pub goaways: Vec<ErrorCode>,
 }
 
 impl TestSession {
@@ -279,6 +281,7 @@ impl TestSession {
             curr_header: 0,
             curr_chunk: 0,
             rst_streams: Vec::new(),
+            goaways: Vec::new(),
         }
     }
 
@@ -294,6 +297,7 @@ impl TestSession {
                 curr_header: 0,
                 curr_chunk: 0,
                 rst_streams: Vec::new(),
+                goaways: Vec::new(),
             }
         }
 }
@@ -334,6 +338,17 @@ impl Session for TestSession {
 
     fn new_settings(&mut self, _settings: Vec<HttpSetting>, _conn: &mut HttpConnection)
             -> HttpResult<()> {
+        Ok(())
+    }
+
+    fn on_goaway(
+            &mut self,
+            _: StreamId,
+            error_code: ErrorCode,
+            _: Option<&[u8]>,
+            _: &mut HttpConnection)
+            -> HttpResult<()> {
+        self.goaways.push(error_code);
         Ok(())
     }
 }
