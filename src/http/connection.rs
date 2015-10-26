@@ -385,6 +385,15 @@ impl HttpConnection {
         self.out_window_size
     }
 
+    /// Increases the size of the inbound connection flow control window by the given delta.
+    ///
+    /// If this would cause the window to overflow the maximum value of 2^31 - 1, returns an error.
+    /// The method **does not** automatically send any window update frames. It is the caller's
+    /// responsibility to make sure that the peer is notified of the window increase.
+    pub fn increase_connection_window_size(&mut self, delta: u32) -> HttpResult<()> {
+        self.in_window_size.try_increase(delta).map_err(|_| HttpError::WindowSizeOverflow)
+    }
+
     /// The method processes the next frame provided by the given `ReceiveFrame` instance, expecting
     /// it to be a SETTINGS frame.
     /// Additionally, the frame cannot be an ACK settings frame, but rather it should contain the
@@ -599,7 +608,7 @@ mod tests {
                               MockReceiveFrame, MockSendFrame};
     use http::frame::{Frame, DataFrame, HeadersFrame, RstStreamFrame, GoawayFrame, SettingsFrame,
                       WindowUpdateFrame, PingFrame, pack_header, RawFrame, FrameIR};
-    use http::{HttpResult, HttpScheme, Header, OwnedHeader, ErrorCode};
+    use http::{HttpResult, HttpError, HttpScheme, Header, OwnedHeader, ErrorCode};
     use hpack;
 
     /// A helper function that performs a `send_frame` operation on the given
@@ -962,6 +971,21 @@ mod tests {
         conn.sender(&mut sender).send_stream_window_update(1, increment).unwrap();
 
         expect_frame_list(vec![], sender.sent);
+    }
+
+    #[test]
+    fn test_increase_connection_window() {
+        let mut conn = build_mock_http_conn();
+        assert_eq!(conn.in_window_size(), 0xffff);
+        conn.increase_connection_window_size(500).unwrap();
+        assert_eq!(conn.in_window_size(), 0xffff + 500);
+        conn.increase_connection_window_size(5).unwrap();
+        assert_eq!(conn.in_window_size(), 0xffff + 500 + 5);
+        // Overflow!
+        assert!(match conn.increase_connection_window_size(0x7fffffff).err().unwrap() {
+            HttpError::WindowSizeOverflow => true,
+            _ => false,
+        });
     }
 
     /// Tests that the `HttpConnection` correctly notifies the session on a
