@@ -279,6 +279,29 @@ impl<'a, S> HttpConnectionSender<'a, S>
         self.send_frame(frame)
     }
 
+    /// Sends a window update frame for the peer's connection level flow control window.
+    pub fn send_connection_window_update(&mut self, increment: u32) -> HttpResult<()> {
+        if increment == 0 {
+            warn!("Tried to increase window by zero, which would be invalid; frame not sent.");
+            return Ok(());
+        }
+        let frame = WindowUpdateFrame::for_connection(increment);
+        self.send_frame(frame)
+    }
+
+    /// Sends a window update frame for the given stream's flow control window.
+    pub fn send_stream_window_update(&mut self,
+                                     stream_id: StreamId,
+                                     increment: u32)
+                                     -> HttpResult<()> {
+        if increment == 0 {
+            warn!("Tried to increase window by zero, which would be invalid; frame not sent.");
+            return Ok(());
+        }
+        let frame = WindowUpdateFrame::for_stream(stream_id, increment);
+        self.send_frame(frame)
+    }
+
     /// Sends the chunk of data provided by the given `DataPrioritizer`.
     ///
     /// # Returns
@@ -575,7 +598,7 @@ mod tests {
     use http::tests::common::{build_mock_http_conn, StubDataPrioritizer, TestSession,
                               MockReceiveFrame, MockSendFrame};
     use http::frame::{Frame, DataFrame, HeadersFrame, RstStreamFrame, GoawayFrame, SettingsFrame,
-                      PingFrame, pack_header, RawFrame, FrameIR};
+                      WindowUpdateFrame, PingFrame, pack_header, RawFrame, FrameIR};
     use http::{HttpResult, HttpScheme, Header, OwnedHeader, ErrorCode};
     use hpack;
 
@@ -889,6 +912,56 @@ mod tests {
         conn.sender(&mut sender).rst_stream(1, ErrorCode::InternalError).unwrap();
 
         expect_frame_list(expected, sender.sent);
+    }
+
+    #[test]
+    fn test_send_connection_window_update_non_zero() {
+        let increment = 100;
+        let expected = vec![
+            HttpFrame::WindowUpdateFrame(WindowUpdateFrame::for_connection(increment)),
+        ];
+
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        conn.sender(&mut sender).send_connection_window_update(increment).unwrap();
+
+        expect_frame_list(expected, sender.sent);
+    }
+
+    #[test]
+    fn test_send_connection_window_update_is_zero() {
+        let increment = 0;
+
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        conn.sender(&mut sender).send_connection_window_update(increment).unwrap();
+
+        expect_frame_list(vec![], sender.sent);
+    }
+
+    #[test]
+    fn test_send_stream_window_update_non_zero() {
+        let increment = 100;
+        let expected = vec![
+            HttpFrame::WindowUpdateFrame(WindowUpdateFrame::for_stream(1, increment)),
+        ];
+
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        conn.sender(&mut sender).send_stream_window_update(1, increment).unwrap();
+
+        expect_frame_list(expected, sender.sent);
+    }
+
+    #[test]
+    fn test_send_stream_window_update_is_zero() {
+        let increment = 0;
+
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        conn.sender(&mut sender).send_stream_window_update(1, increment).unwrap();
+
+        expect_frame_list(vec![], sender.sent);
     }
 
     /// Tests that the `HttpConnection` correctly notifies the session on a
