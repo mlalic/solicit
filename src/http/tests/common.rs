@@ -6,7 +6,7 @@ use std::cell::{RefCell, Cell};
 use std::borrow::Cow;
 use std::io::{Cursor, Read, Write};
 
-use http::{HttpResult, HttpScheme, StreamId, Header, OwnedHeader, ErrorCode};
+use http::{HttpResult, HttpScheme, StreamId, Header, OwnedHeader, ErrorCode, WindowSize};
 use http::frame::{RawFrame, FrameIR, FrameHeader, pack_header, HttpSetting, PingFrame};
 use http::session::{Session, DefaultSessionState, SessionState, Stream, StreamState,
                     StreamDataChunk, StreamDataError};
@@ -252,6 +252,10 @@ pub struct TestSession {
     pub pings: Vec<u64>,
     /// All the ping ack data received
     pub pongs: Vec<u64>,
+    /// All connection window updates as the value of the new connection window size
+    pub conn_window_updates: Vec<WindowSize>,
+    /// All stream window updates as a pair of the stream id and the increment value.
+    pub stream_window_updates: Vec<(StreamId, u32)>,
 }
 
 impl TestSession {
@@ -268,6 +272,8 @@ impl TestSession {
             goaways: Vec::new(),
             pings: Vec::new(),
             pongs: Vec::new(),
+            conn_window_updates: Vec::new(),
+            stream_window_updates: Vec::new(),
         }
     }
 
@@ -285,6 +291,8 @@ impl TestSession {
             goaways: Vec::new(),
             pings: Vec::new(),
             pongs: Vec::new(),
+            conn_window_updates: Vec::new(),
+            stream_window_updates: Vec::new(),
         }
     }
 }
@@ -351,6 +359,20 @@ impl Session for TestSession {
 
     fn on_pong(&mut self, ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
         self.pongs.push(ping.opaque_data());
+        Ok(())
+    }
+
+    fn on_connection_out_window_update(&mut self, conn: &mut HttpConnection) -> HttpResult<()> {
+        self.conn_window_updates.push(conn.out_window_size());
+        Ok(())
+    }
+
+    fn on_stream_out_window_update(&mut self,
+                                   stream_id: StreamId,
+                                   increment: u32,
+                                   _: &mut HttpConnection)
+                                   -> HttpResult<()> {
+        self.stream_window_updates.push((stream_id, increment));
         Ok(())
     }
 }

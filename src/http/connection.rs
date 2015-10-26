@@ -485,9 +485,9 @@ impl HttpConnection {
                                   frame.debug_data(),
                                   self)
             }
-            HttpFrame::WindowUpdateFrame(_) => {
+            HttpFrame::WindowUpdateFrame(frame) => {
                 debug!("WINDOW_UPDATE frame received");
-                Ok(())
+                self.handle_window_update(frame, session)
             }
             HttpFrame::UnknownFrame(frame) => {
                 debug!("Unknown frame received; raw = {:?}", frame);
@@ -565,9 +565,28 @@ impl HttpConnection {
                                             -> HttpResult<()> {
         if !frame.is_ack() {
             // TODO: Actually handle the settings change before sending out the ACK
-            //       sending out the ACK.
             trace!("New settings frame {:#?}", frame);
             try!(session.new_settings(frame.settings, self));
+        }
+
+        Ok(())
+    }
+
+    /// Private helper method that handles an incoming `WindowUpdateFrame`.
+    fn handle_window_update<Sess: Session>(&mut self,
+                                           frame: WindowUpdateFrame,
+                                           session: &mut Sess)
+                                           -> HttpResult<()> {
+        if frame.get_stream_id() == 0 {
+            // TODO: If overflow does occur, notify the session so that it can try to send a
+            //       GOAWAY before tearing down the connection.
+            try!(self.out_window_size.try_increase(frame.increment())
+                                     .map_err(|_| HttpError::WindowSizeOverflow));
+            try!(session.on_connection_out_window_update(self));
+        } else {
+            try!(session.on_stream_out_window_update(frame.get_stream_id(),
+                                                     frame.increment(),
+                                                     self));
         }
 
         Ok(())
@@ -1093,6 +1112,48 @@ mod tests {
 
         assert_eq!(session.goaways.len(), 1);
         assert_eq!(session.goaways[0], ErrorCode::ProtocolError);
+        assert_eq!(session.curr_header, 0);
+        assert_eq!(session.curr_chunk, 0);
+        assert_eq!(session.rst_streams.len(), 0);
+    }
+
+    #[test]
+    fn test_conn_window_update() {
+        let frames = vec![
+            HttpFrame::WindowUpdateFrame(WindowUpdateFrame::for_connection(100)),
+        ];
+        let mut conn = HttpConnection::new(HttpScheme::Http);
+        let mut session = TestSession::new();
+        let mut frame_provider = MockReceiveFrame::new(frames);
+
+        conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+
+        assert_eq!(session.conn_window_updates.len(), 1);
+        assert_eq!(session.conn_window_updates[0], 0xffff + 100);
+        // Nothing happened with the rest...
+        assert_eq!(session.stream_window_updates.len(), 0);
+        assert_eq!(session.goaways.len(), 0);
+        assert_eq!(session.curr_header, 0);
+        assert_eq!(session.curr_chunk, 0);
+        assert_eq!(session.rst_streams.len(), 0);
+    }
+
+    #[test]
+    fn test_conn_stream_window_update() {
+        let frames = vec![
+            HttpFrame::WindowUpdateFrame(WindowUpdateFrame::for_stream(1, 100)),
+        ];
+        let mut conn = HttpConnection::new(HttpScheme::Http);
+        let mut session = TestSession::new();
+        let mut frame_provider = MockReceiveFrame::new(frames);
+
+        conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+
+        assert_eq!(session.stream_window_updates.len(), 1);
+        assert_eq!(session.stream_window_updates[0], (1, 100));
+        // Nothing happened with the rest...
+        assert_eq!(session.conn_window_updates.len(), 0);
+        assert_eq!(session.goaways.len(), 0);
         assert_eq!(session.curr_header, 0);
         assert_eq!(session.curr_chunk, 0);
         assert_eq!(session.rst_streams.len(), 0);

@@ -78,6 +78,30 @@ pub trait Session {
             debug_data: debug_data.map(|data| data.to_vec()),
         }))
     }
+
+    /// Notifies the `Session` that the connection's outbound flow control window was updated.
+    ///
+    /// The default implementation of the method ignores any change.
+    ///
+    /// Concrete implementations can rely on this to, for example, trigger more writes on a
+    /// connection that was previously blocked on flow control (rather than on socket IO).
+    fn on_connection_out_window_update(&mut self, _conn: &mut HttpConnection) -> HttpResult<()> {
+        Ok(())
+    }
+
+    /// Notifies the `Session` that the given stream's outbound flow control window should be
+    /// updated. Unlike the `on_connection_out_window_update`, the new size is not provided, but
+    /// rather the size of the increment. This is due to the fact that the `HttpConnection` does
+    /// not handle individual streams, but expects the session layer to be in charge of that.
+    ///
+    /// The default implementation of the method ignores any change.
+    fn on_stream_out_window_update(&mut self,
+                                   _stream_id: StreamId,
+                                   _increment: u32,
+                                   _conn: &mut HttpConnection)
+                                   -> HttpResult<()> {
+        Ok(())
+    }
 }
 
 /// A newtype for an iterator over `Stream`s saved in a `SessionState`.
