@@ -504,13 +504,19 @@ impl HttpConnection {
                                         frame: DataFrame,
                                         session: &mut Sess)
                                         -> HttpResult<()> {
+        // Decrease the connection inbound window...
         try!(self.decrease_in_window(frame.payload_len()));
         trace!("New IN WINDOW size = {:?}", self.in_window_size());
+        try!(session.on_connection_in_window_decrease(self));
+
+        // ...as well as the stream's...
+        try!(session.on_stream_in_window_decrease(
+                frame.get_stream_id(),
+                frame.payload_len(),
+                self));
+
+        // ...before passing off the actual data chunk to the session.
         try!(session.new_data_chunk(frame.get_stream_id(), &frame.data, self));
-        // TODO(mlalic): Should the connection separately signal the decrease in the flow control
-        //               window? For now, it is expected that the data callback is enough, as the
-        //               session would be able to inspect the new window size there (and know that
-        //               it was affected by the data already).
 
         if frame.is_set(DataFlag::EndStream) {
             debug!("End of stream {}", frame.get_stream_id());
@@ -1041,13 +1047,21 @@ mod tests {
 
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
 
-        // A poor man's mock...
         // The header callback was not called
         assert_eq!(session.curr_header, 0);
         // and exactly one chunk seen.
         assert_eq!(session.curr_chunk, 1);
+        // which caused the stream's window to decrease
+        assert_eq!(session.stream_window_decreases.len(), 1);
+        assert_eq!(session.stream_window_decreases[0], (1, 6));
+
+        // as well as the connection's...
+        let new_conn_in_window = 65_535 - 6;
+        assert_eq!(conn.in_window_size(), new_conn_in_window);
+        // ...which was reported to the session
+        assert_eq!(session.conn_in_window_decreases, vec![new_conn_in_window]);
+
         assert_eq!(session.rst_streams.len(), 0);
-        assert_eq!(conn.in_window_size(), 65_535 - 6);
     }
 
     /// Tests that the session gets the correct values for the headers and data
@@ -1060,10 +1074,8 @@ mod tests {
                     hpack::Encoder::new().encode(
                         expected_headers.iter().map(|h| (&h.0[..], &h.1[..]))),
                     1)),
-            HttpFrame::DataFrame(DataFrame::new(1)), {
-                let frame = DataFrame::with_data(1, &b"1234"[..]);
-                HttpFrame::DataFrame(frame)
-            },
+            HttpFrame::DataFrame(DataFrame::new(1)),
+            HttpFrame::DataFrame(DataFrame::with_data(1, &b"1234"[..])),
         ];
         let mut conn = HttpConnection::new(HttpScheme::Http);
         let mut session = TestSession::new_verify(vec![expected_headers],
@@ -1074,6 +1086,10 @@ mod tests {
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
         assert_eq!(conn.in_window_size(), 65_535 - 4);
+        assert_eq!(session.conn_in_window_decreases, vec![65_535, 65_535 - 4]);
+        assert_eq!(session.stream_window_decreases.len(), 2);
+        assert_eq!(session.stream_window_decreases[0], (1, 0));
+        assert_eq!(session.stream_window_decreases[1], (1, 4));
 
         // Two chunks and one header processed?
         assert_eq!(session.curr_chunk, 2);

@@ -102,6 +102,23 @@ pub trait Session {
                                    -> HttpResult<()> {
         Ok(())
     }
+
+    /// Notifies the `Session` that the connection-level inbound flow control window has decreased.
+    /// The new value can be obtained from the given `HttpConnection` instance.
+    fn on_connection_in_window_decrease(&mut self, _conn: &mut HttpConnection) -> HttpResult<()> {
+        Ok(())
+    }
+
+    /// Notifies the `Session` that the given stream's inbound flow control window has decreased by
+    /// the given number of octets.
+    fn on_stream_in_window_decrease(
+            &mut self,
+            _stream_id: StreamId,
+            _size: u32,
+            _conn: &mut HttpConnection)
+            -> HttpResult<()> {
+        Ok(())
+    }
 }
 
 /// A newtype for an iterator over `Stream`s saved in a `SessionState`.

@@ -256,6 +256,10 @@ pub struct TestSession {
     pub conn_window_updates: Vec<WindowSize>,
     /// All stream window updates as a pair of the stream id and the increment value.
     pub stream_window_updates: Vec<(StreamId, u32)>,
+    /// All connection window updates as the new size of the connection window after the update
+    pub conn_in_window_decreases: Vec<WindowSize>,
+    /// All stream window decreases that the session was notified of.
+    pub stream_window_decreases: Vec<(StreamId, u32)>,
 }
 
 impl TestSession {
@@ -274,6 +278,8 @@ impl TestSession {
             pongs: Vec::new(),
             conn_window_updates: Vec::new(),
             stream_window_updates: Vec::new(),
+            conn_in_window_decreases: Vec::new(),
+            stream_window_decreases: Vec::new(),
         }
     }
 
@@ -293,6 +299,8 @@ impl TestSession {
             pongs: Vec::new(),
             conn_window_updates: Vec::new(),
             stream_window_updates: Vec::new(),
+            conn_in_window_decreases: Vec::new(),
+            stream_window_decreases: Vec::new(),
         }
     }
 }
@@ -373,6 +381,21 @@ impl Session for TestSession {
                                    _: &mut HttpConnection)
                                    -> HttpResult<()> {
         self.stream_window_updates.push((stream_id, increment));
+        Ok(())
+    }
+
+    fn on_connection_in_window_decrease(&mut self, conn: &mut HttpConnection) -> HttpResult<()> {
+        self.conn_in_window_decreases.push(conn.in_window_size());
+        Ok(())
+    }
+
+    fn on_stream_in_window_decrease(
+            &mut self,
+            stream_id: StreamId,
+            size: u32,
+            _: &mut HttpConnection)
+            -> HttpResult<()> {
+        self.stream_window_decreases.push((stream_id, size));
         Ok(())
     }
 }
