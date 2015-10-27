@@ -125,17 +125,38 @@ pub trait Session {
 ///
 /// Allows `SessionState` implementations to return iterators over its session without being forced
 /// to declare them as associated types.
-pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item = (&'a StreamId, &'a mut S)> + 'a>);
+pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item=(&'a StreamId, &'a mut Entry<S>)> + 'a>);
 
 impl<'a, S> Iterator for StreamIter<'a, S>
     where S: Stream + 'a
 {
-    type Item = (&'a StreamId, &'a mut S);
+    type Item = (&'a StreamId, &'a mut Entry<S>);
 
     #[inline]
-    fn next(&mut self) -> Option<(&'a StreamId, &'a mut S)> {
+    fn next(&mut self) -> Option<(&'a StreamId, &'a mut Entry<S>)> {
         self.0.next()
     }
+}
+
+/// A struct representing a single entry in the `SessionState`. The `Entry` represents all relevant
+/// information for a single HTTP/2 stream.
+pub struct Entry<S> where S: Stream {
+    stream: S,
+}
+
+impl<S> Entry<S> where S: Stream {
+    /// Create a new `Entry` with the given `Stream`
+    pub fn new(stream: S) -> Entry<S> {
+        Entry {
+            stream: stream,
+        }
+    }
+    /// Consumes the `Entry`, returning the underlying `Stream` instance
+    pub fn stream(self) -> S { self.stream }
+    /// Returns a reference to the `Stream`
+    pub fn stream_ref(&self) -> &S { &self.stream }
+    /// Returns a mutable reference to the `Stream`
+    pub fn stream_mut(&mut self) -> &mut S { &mut self.stream }
 }
 
 /// A trait defining a set of methods for accessing and influencing an HTTP/2 session's state.
@@ -159,15 +180,13 @@ pub trait SessionState {
     /// stream.
     /// TODO(mlalic): Allow the exact error to propagate out.
     fn insert_incoming(&mut self, id: StreamId, stream: Self::Stream) -> Result<(), ()>;
-    /// Returns a reference to a `Stream` with the given `StreamId`, if it is found in the current
-    /// session.
-    fn get_stream_ref(&self, stream_id: StreamId) -> Option<&Self::Stream>;
-    /// Returns a mutable reference to a `Stream` with the given `StreamId`, if it is found in the
-    /// current session.
-    fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut Self::Stream>;
+    /// Returns a reference to the `Entry` for the stream with the given id.
+    fn get_entry_ref(&self, id: StreamId) -> Option<&Entry<Self::Stream>>;
+    /// Returns a mutable reference to the `Entry` for the stream with the given id.
+    fn get_entry_mut(&mut self, id: StreamId) -> Option<&mut Entry<Self::Stream>>;
     /// Removes the stream with the given `StreamId` from the session. If the stream was found in
     /// the session, it is returned in the result.
-    fn remove_stream(&mut self, stream_id: StreamId) -> Option<Self::Stream>;
+    fn remove_stream(&mut self, stream_id: StreamId) -> Option<Entry<Self::Stream>>;
 
     /// Returns an iterator over the streams currently found in the session.
     fn iter(&mut self) -> StreamIter<Self::Stream>;
@@ -175,22 +194,33 @@ pub trait SessionState {
     /// The number of streams tracked by this state object
     fn len(&self) -> usize;
 
+    /// Returns a reference to a `Stream` with the given `StreamId`, if it is found in the current
+    /// session.
+    fn get_stream_ref(&self, stream_id: StreamId) -> Option<&Self::Stream> {
+        self.get_entry_ref(stream_id).map(|e| e.stream_ref())
+    }
+
+    /// Returns a mutable reference to a `Stream` with the given `StreamId`, if it is found in the
+    /// current session.
+    fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut Self::Stream> {
+        self.get_entry_mut(stream_id).map(|e| e.stream_mut())
+    }
+
     /// Returns all streams that are closed and tracked by the session state.
     ///
     /// The streams are moved out of the session state.
     ///
     /// The default implementations relies on the `iter` implementation to find the closed streams
     /// first and then calls `remove_stream` on all of them.
-    fn get_closed(&mut self) -> Vec<Self::Stream> {
+    fn get_closed(&mut self) -> Vec<Entry<Self::Stream>> {
         let ids: Vec<StreamId> = self.iter()
-                                     .filter_map(|(id, s)| {
-                                         if s.is_closed() {
+                                     .filter_map(|(id, e)| {
+                                         if e.stream_ref().is_closed() {
                                              Some(*id)
                                          } else {
                                              None
                                          }
-                                     })
-                                     .collect();
+                                     }).collect();
         FromIterator::from_iter(ids.into_iter().map(|i| self.remove_stream(i).unwrap()))
     }
 }
@@ -229,7 +259,7 @@ pub struct DefaultSessionState<T, S>
     where S: Stream
 {
     /// All streams that the session state is currently aware of.
-    streams: HashMap<StreamId, S>,
+    streams: HashMap<StreamId, Entry<S>>,
     /// The next available ID for outgoing streams.
     next_stream_id: StreamId,
     /// The parity bit for outgoing connections. Client-initiated connections must always be
@@ -301,7 +331,7 @@ impl<T, S> SessionState for DefaultSessionState<T, S>
 
     fn insert_outgoing(&mut self, stream: Self::Stream) -> StreamId {
         let id = self.next_stream_id;
-        self.streams.insert(id, stream);
+        self.streams.insert(id, Entry::new(stream));
         self.next_stream_id += 2;
         id
     }
@@ -309,24 +339,23 @@ impl<T, S> SessionState for DefaultSessionState<T, S>
     fn insert_incoming(&mut self, stream_id: StreamId, stream: Self::Stream) -> Result<(), ()> {
         if self.validate_incoming_parity(stream_id) {
             // TODO(mlalic): Assert that the stream IDs are monotonically increasing!
-            self.streams.insert(stream_id, stream);
+            self.streams.insert(stream_id, Entry::new(stream));
             Ok(())
         } else {
             Err(())
         }
     }
 
-    #[inline]
-    fn get_stream_ref(&self, stream_id: StreamId) -> Option<&Self::Stream> {
+    fn get_entry_ref(&self, stream_id: StreamId) -> Option<&Entry<Self::Stream>> {
         self.streams.get(&stream_id)
     }
-    #[inline]
-    fn get_stream_mut(&mut self, stream_id: StreamId) -> Option<&mut Self::Stream> {
+
+    fn get_entry_mut(&mut self, stream_id: StreamId) -> Option<&mut Entry<Self::Stream>> {
         self.streams.get_mut(&stream_id)
     }
 
     #[inline]
-    fn remove_stream(&mut self, stream_id: StreamId) -> Option<Self::Stream> {
+    fn remove_stream(&mut self, stream_id: StreamId) -> Option<Entry<Self::Stream>> {
         self.streams.remove(&stream_id)
     }
 

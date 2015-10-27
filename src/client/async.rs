@@ -563,7 +563,7 @@ impl ClientService {
     /// stream might end up being closed by the server with an error.
     fn handle_closed(&mut self) {
         let done = self.conn.state.get_closed();
-        for stream in done {
+        for stream in done.into_iter().map(|e| e.stream()) {
             self.send_response(stream);
             self.outstanding_reqs -= 1;
         }

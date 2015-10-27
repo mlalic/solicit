@@ -146,10 +146,9 @@ impl<TS, H> SimpleServer<TS, H>
     /// into the returned `Vec`.
     fn handle_requests(&mut self) -> HttpResult<Vec<StaticResponse>> {
         let handler = &mut self.handler;
-        let closed = self.conn
-                         .state
-                         .iter()
-                         .filter(|&(_, ref s)| s.is_closed_remote());
+        let closed = self.conn.state.iter()
+                                    .map(|(id, e)| (id, e.stream_mut()))
+                                    .filter(|&(_, ref s)| s.is_closed_remote());
         let responses = closed.map(|(&stream_id, stream)| {
             let req = ServerRequest {
                 stream_id: stream_id,

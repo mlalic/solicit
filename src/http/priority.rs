@@ -48,7 +48,10 @@ impl<'a, 'b, State> DataPrioritizer for SimplePrioritizer<'a, 'b, State>
 {
     fn get_next_chunk(&mut self) -> HttpResult<Option<DataChunk>> {
         // Returns the data of the first stream that has data to be written.
-        for (stream_id, stream) in self.state.iter().filter(|&(_, ref s)| !s.is_closed_local()) {
+        let streams = self.state.iter()
+                                .map(|(id, e)| (id, e.stream_mut()))
+                                .filter(|&(_, ref s)| !s.is_closed_local());
+        for (stream_id, stream) in streams {
             let res = stream.get_data_chunk(self.buf);
             match res {
                 Ok(StreamDataChunk::Last(total)) => {
