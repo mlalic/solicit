@@ -19,12 +19,11 @@ use std::borrow::Cow;
 use std::borrow::Borrow;
 
 use http::{Header, StreamId, HttpError, HttpResult, HttpScheme, WindowSize,
-           INITIAL_CONNECTION_WINDOW_SIZE};
+           ErrorCode, INITIAL_CONNECTION_WINDOW_SIZE};
 use http::priority::DataPrioritizer;
 use http::session::Session;
 use http::frame::{Frame, FrameIR, RawFrame, DataFrame, DataFlag, HeadersFrame, HeadersFlag,
                   SettingsFrame, RstStreamFrame, PingFrame, GoawayFrame, WindowUpdateFrame};
-use http::ErrorCode;
 use hpack;
 
 /// An enum representing all frame variants that can be returned by an `HttpConnection` can handle.
@@ -876,6 +875,19 @@ mod tests {
             assert!(frame.is_end_of_stream());
             assert_eq!(conn.out_window_size(), 65_535 - data.len() as i32);
         }
+    }
+
+    #[test]
+    fn test_send_rst_stream() {
+        let expected = vec![
+            HttpFrame::RstStreamFrame(RstStreamFrame::new(1, ErrorCode::InternalError)),
+        ];
+
+        let mut conn = build_mock_http_conn();
+        let mut sender = MockSendFrame::new();
+        conn.sender(&mut sender).rst_stream(1, ErrorCode::InternalError).unwrap();
+
+        expect_frame_list(expected, sender.sent);
     }
 
     /// Tests that the `HttpConnection` correctly notifies the session on a
