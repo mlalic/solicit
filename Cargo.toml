@@ -17,7 +17,7 @@ hpack = "0.3"
 log = "^0.3"
 
 [dependencies.openssl]
-version = "*"
+version = "0.6"
 features = ["tlsv1_2", "npn"]
 optional = true
 
