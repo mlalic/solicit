@@ -150,4 +150,14 @@ mod test_header {
             _ => {},
         };
     }
+
+    #[test]
+    fn test_debug() {
+        assert_eq!(
+            "Header { name: b\":method\", value: b\"GET\" }",
+            format!("{:?}", Header::new(b":method", b"GET")));
+        assert_eq!(
+            "Header { name: b\":method\", value: b\"\\xcd\" }",
+            format!("{:?}", Header::new(b":method", b"\xcd")));
+    }
 }

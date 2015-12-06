@@ -2,6 +2,7 @@
 use std::io;
 use std::fmt;
 use std::borrow::Cow;
+use std::borrow::Borrow;
 use std::convert::From;
 use std::error::Error;
 
@@ -28,6 +29,24 @@ pub type OwnedHeader = (Vec<u8>, Vec<u8>);
 /// A convenience struct representing a part of a header (either the name or the value) that can be
 /// either an owned or a borrowed byte sequence.
 pub struct HeaderPart<'a>(Cow<'a, [u8]>);
+
+impl<'a> fmt::Debug for HeaderPart<'a> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        try!(write!(fmt, "b\""));
+        let u8a: &[u8] = self.0.borrow();
+        for &c in u8a {
+            // ASCII printable
+            if c >= 0x20 && c < 0x7f {
+                try!(write!(fmt, "{}", c as char));
+            } else {
+                try!(write!(fmt, "\\x{:02x}", c));
+            }
+        }
+        try!(write!(fmt, "\""));
+        Ok(())
+    }
+}
+
 impl<'a> From<Vec<u8>> for HeaderPart<'a> {
     fn from(vec: Vec<u8>) -> HeaderPart<'a> {
         HeaderPart(Cow::Owned(vec))
@@ -126,7 +145,7 @@ impl<'n, 'v> PartialEq<OwnedHeader> for Header<'n, 'v> {
 ///     assert_eq!(header.value(), &[1][..]);
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Header<'n, 'v> {
     name: Cow<'n, [u8]>,
     value: Cow<'v, [u8]>,
@@ -152,6 +171,13 @@ impl<'n, 'v> Header<'n, 'v> {
     pub fn name(&self) -> &[u8] { &self.name }
     /// Return a borrowed representation of the `Header` value.
     pub fn value(&self) -> &[u8] { &self.value }
+}
+
+impl<'n, 'v> fmt::Debug for Header<'n, 'v> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(fmt, "Header {{ name: {:?}, value: {:?} }}",
+            HeaderPart::from(self.name()), HeaderPart::from(self.value()))
+    }
 }
 
 impl<'n, 'v> Into<OwnedHeader> for Header<'n, 'v> {
