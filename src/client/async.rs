@@ -644,13 +644,19 @@ impl Client {
               S: TransportStream + Send + 'static
     {
         // Use the provided connector to establish a network connection...
-        let client_stream = connector.connect().ok().unwrap();
+        let client_stream = match connector.connect().ok() {
+            Some(cs) => cs,
+            None => return None,
+        };
         // Keep a socket handle in order to shut it down once the service stops. This is required
         // because if the service decides to stop (due to all clients disconnecting) while the
         // socket is still open and the read thread waiting, it can happen that the read thread
         // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
         // decides to close it), effectively leaking the socket and thread.
-        let mut sck = client_stream.0.try_split().unwrap();
+        let mut sck = match client_stream.0.try_split() {
+            Ok(sck) => sck,
+            Err(_) => return None,
+        };
 
         let service = match ClientService::new(client_stream) {
             Some(service) => service,

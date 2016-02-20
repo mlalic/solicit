@@ -68,13 +68,15 @@ mod async {
     /// The requests are all issued concurrently (spawning as many threads as there are requests).
     fn get(host: &str, paths: &[String]) -> Vec<Response<'static, 'static>> {
         let client = Client::with_connector(CleartextConnector::new(host)).unwrap();
-        let threads: Vec<_> = paths.iter().map(|path| {
-            let this = client.clone();
-            let path = path.clone();
-            thread::spawn(move || {
-                this.get(path.as_bytes(), &[]).unwrap().recv().unwrap()
-            })
-        }).collect();
+        let threads: Vec<_> = paths.iter()
+                                   .map(|path| {
+                                       let this = client.clone();
+                                       let path = path.clone();
+                                       thread::spawn(move || {
+                                           this.get(path.as_bytes(), &[]).unwrap().recv().unwrap()
+                                       })
+                                   })
+                                   .collect();
 
         threads.into_iter().map(|t| t.join().unwrap()).collect()
     }
@@ -102,5 +104,15 @@ mod async {
 
         let body = str::from_utf8(&res.body).unwrap();
         assert!(body.contains("Hello, World!"));
+    }
+
+    /// Tests that `with_connector` returns an none when the connector is unable to establish a new
+    /// connection.
+    #[test]
+    fn test_error_on_connect_failure2() {
+        let connector = CleartextConnector::new("unknown.host.name.lcl");
+        let client = Client::with_connector(connector);
+
+        assert!(client.is_none());
     }
 }
