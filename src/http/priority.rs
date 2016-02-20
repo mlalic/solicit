@@ -6,15 +6,8 @@
 //! implementations to trigger.
 
 use http::{HttpResult, HttpError};
-use http::connection::{
-    DataChunk,
-    EndStream,
-};
-use http::session::{
-    SessionState,
-    StreamDataChunk, StreamDataError,
-    Stream,
-};
+use http::connection::{DataChunk, EndStream};
+use http::session::{SessionState, StreamDataChunk, StreamDataError, Stream};
 
 /// A trait that types that want to provide data to an HTTP/2 connection need to implement.
 pub trait DataPrioritizer {
@@ -28,14 +21,18 @@ pub trait DataPrioritizer {
 ///
 /// For all means and purposes, the order of data chunks that the prioritizer returns is undefined
 /// and should not be relied on.
-pub struct SimplePrioritizer<'a, 'b, State> where State: SessionState + 'a {
+pub struct SimplePrioritizer<'a, 'b, State>
+    where State: SessionState + 'a
+{
     /// The session state from which the streams' data will be taken
     state: &'a mut State,
     /// The buffer into which the prioritizer can place the stream data chunk
     buf: &'b mut [u8],
 }
 
-impl<'a, 'b, State> SimplePrioritizer<'a, 'b, State> where State: SessionState +'a {
+impl<'a, 'b, State> SimplePrioritizer<'a, 'b, State>
+    where State: SessionState + 'a
+{
     /// Creates a new `SimplePrioritizer` that will use the given state to find stream data that
     /// should be sent and use the given buffer to hold the data of the returned chunk.
     pub fn new(state: &'a mut State, buf: &'b mut [u8]) -> SimplePrioritizer<'a, 'b, State> {
@@ -47,34 +44,37 @@ impl<'a, 'b, State> SimplePrioritizer<'a, 'b, State> where State: SessionState +
 }
 
 impl<'a, 'b, State> DataPrioritizer for SimplePrioritizer<'a, 'b, State>
-        where State: SessionState +'a {
+    where State: SessionState + 'a
+{
     fn get_next_chunk(&mut self) -> HttpResult<Option<DataChunk>> {
         // Returns the data of the first stream that has data to be written.
         for (stream_id, stream) in self.state.iter().filter(|&(_, ref s)| !s.is_closed_local()) {
             let res = stream.get_data_chunk(self.buf);
             match res {
                 Ok(StreamDataChunk::Last(total)) => {
-                    return Ok(Some(DataChunk::new_borrowed(
-                                &self.buf[..total], *stream_id, EndStream::Yes)));
-                },
+                    return Ok(Some(DataChunk::new_borrowed(&self.buf[..total],
+                                                           *stream_id,
+                                                           EndStream::Yes)));
+                }
                 Ok(StreamDataChunk::Chunk(total)) => {
-                    return Ok(Some(DataChunk::new_borrowed(
-                                &self.buf[..total], *stream_id, EndStream::No)));
-                },
+                    return Ok(Some(DataChunk::new_borrowed(&self.buf[..total],
+                                                           *stream_id,
+                                                           EndStream::No)));
+                }
                 Ok(StreamDataChunk::Unavailable) => {
                     // Stream is still open, but currently has no data that could be sent.
                     // Pass...
-                },
+                }
                 Err(StreamDataError::Closed) => {
                     // Transition the stream state to be locally closed, so we don't attempt to
                     // write any more data on this stream.
                     stream.close_local();
                     // Find a stream with data to actually write to...
-                },
+                }
                 Err(StreamDataError::Other(e)) => {
                     // Any other error is fatal!
                     return Err(HttpError::Other(e));
-                },
+                }
             };
         }
         // Nothing can be sent if we reach here -- no streams have data that can be sent.
@@ -164,7 +164,9 @@ mod tests {
                 }
                 // Zero out the buffer to make sure we don't get false results due to the previous
                 // data being the same
-                for b in buf.iter_mut() { *b = 0; }
+                for b in buf.iter_mut() {
+                    *b = 0;
+                }
             }
 
             // Now we have no more data?

@@ -3,17 +3,15 @@
 use http::{Response, StaticResponse, HttpResult, HttpError, HttpScheme, StreamId, Header};
 use http::transport::{TransportStream, TransportReceiveFrame};
 use http::connection::{HttpConnection, EndStream, SendStatus};
-use http::session::{
-    DefaultSessionState,
-    SessionState,
-    Stream,
-    DefaultStream,
-};
+use http::session::{DefaultSessionState, SessionState, Stream, DefaultStream};
 use http::session::Server as ServerMarker;
 use http::server::{ServerConnection, StreamFactory};
 
 /// The struct represents a fully received request.
-pub struct ServerRequest<'a, 'n, 'v> where 'n: 'a, 'v: 'a {
+pub struct ServerRequest<'a, 'n, 'v>
+    where 'n: 'a,
+          'v: 'a
+{
     pub stream_id: StreamId,
     pub headers: &'a [Header<'n, 'v>],
     pub body: &'a [u8],
@@ -86,8 +84,9 @@ impl StreamFactory for SimpleFactory {
 /// }
 /// ```
 pub struct SimpleServer<TS, H>
-        where TS: TransportStream,
-              H: FnMut(ServerRequest) -> Response<'static, 'static> {
+    where TS: TransportStream,
+          H: FnMut(ServerRequest) -> Response<'static, 'static>
+{
     conn: ServerConnection<SimpleFactory>,
     receiver: TS,
     sender: TS,
@@ -95,7 +94,9 @@ pub struct SimpleServer<TS, H>
 }
 
 impl<TS, H> SimpleServer<TS, H>
-        where TS: TransportStream, H: FnMut(ServerRequest) -> Response<'static, 'static> {
+    where TS: TransportStream,
+          H: FnMut(ServerRequest) -> Response<'static, 'static>
+{
     /// Creates a new `SimpleServer` that will use the given `TransportStream` to communicate to
     /// the client. Assumes that the stream is fully uninitialized -- no preface sent or read yet.
     pub fn new(mut stream: TS, handler: H) -> HttpResult<SimpleServer<TS, H>> {
@@ -118,9 +119,8 @@ impl<TS, H> SimpleServer<TS, H>
 
         // Initialize the connection -- send own settings and process the peer's
         try!(server.conn.send_settings(&mut server.sender));
-        try!(server.conn.expect_settings(
-            &mut TransportReceiveFrame::new(&mut server.receiver),
-            &mut server.sender));
+        try!(server.conn.expect_settings(&mut TransportReceiveFrame::new(&mut server.receiver),
+                                         &mut server.sender));
 
         // Set up done
         Ok(server)
@@ -132,9 +132,8 @@ impl<TS, H> SimpleServer<TS, H>
     /// Handling the frame can trigger the handler callback. Any responses returned by the handler
     /// are immediately flushed out to the client (blocking the call until it's done).
     pub fn handle_next(&mut self) -> HttpResult<()> {
-        try!(self.conn.handle_next_frame(
-            &mut TransportReceiveFrame::new(&mut self.receiver),
-            &mut self.sender));
+        try!(self.conn.handle_next_frame(&mut TransportReceiveFrame::new(&mut self.receiver),
+                                         &mut self.sender));
         let responses = try!(self.handle_requests());
         try!(self.prepare_responses(responses));
         try!(self.flush_streams());
@@ -147,8 +146,10 @@ impl<TS, H> SimpleServer<TS, H>
     /// into the returned `Vec`.
     fn handle_requests(&mut self) -> HttpResult<Vec<StaticResponse>> {
         let handler = &mut self.handler;
-        let closed = self.conn.state.iter()
-                       .filter(|&(_, ref s)| s.is_closed_remote());
+        let closed = self.conn
+                         .state
+                         .iter()
+                         .filter(|&(_, ref s)| s.is_closed_remote());
         let responses = closed.map(|(&stream_id, stream)| {
             let req = ServerRequest {
                 stream_id: stream_id,
@@ -165,11 +166,10 @@ impl<TS, H> SimpleServer<TS, H>
     /// immediately sent and the data staged into the streams' outgoing buffer.
     fn prepare_responses(&mut self, responses: Vec<Response>) -> HttpResult<()> {
         for response in responses.into_iter() {
-            try!(self.conn.start_response(
-                    response.headers,
-                    response.stream_id,
-                    EndStream::No,
-                    &mut self.sender));
+            try!(self.conn.start_response(response.headers,
+                                          response.stream_id,
+                                          EndStream::No,
+                                          &mut self.sender));
             let mut stream = self.conn.state.get_stream_mut(response.stream_id).unwrap();
             stream.set_full_data(response.body);
         }

@@ -9,17 +9,8 @@ use std::error;
 use http::{HttpScheme, HttpResult, StreamId, Header, HttpError, ErrorCode};
 use http::transport::TransportStream;
 use http::frame::{SettingsFrame, HttpSetting, FrameIR};
-use http::connection::{
-    SendFrame, ReceiveFrame,
-    SendStatus,
-    HttpConnection,
-    EndStream,
-};
-use http::session::{
-    Session,
-    Stream, DefaultStream,
-    DefaultSessionState, SessionState,
-};
+use http::connection::{SendFrame, ReceiveFrame, SendStatus, HttpConnection, EndStream};
+use http::session::{Session, Stream, DefaultStream, DefaultSessionState, SessionState};
 use http::session::Client as ClientMarker;
 use http::priority::SimplePrioritizer;
 
@@ -65,8 +56,12 @@ pub struct ClientStream<TS: TransportStream>(pub TS, pub HttpScheme, pub String)
 /// connection.
 pub trait HttpConnectError: error::Error + Send + Sync {}
 
-impl<E> From<E> for HttpError where E: HttpConnectError + 'static {
-    fn from(e: E) -> HttpError { HttpError::Other(Box::new(e)) }
+impl<E> From<E> for HttpError
+    where E: HttpConnectError + 'static
+{
+    fn from(e: E) -> HttpError {
+        HttpError::Other(Box::new(e))
+    }
 }
 
 /// A trait that can be implemented by structs that want to provide the
@@ -109,13 +104,19 @@ impl<'a> CleartextConnector<'a> {
     /// Creates a new `CleartextConnector` that will attempt to establish a connection to the given
     /// host on port 80.
     pub fn new(host: &'a str) -> CleartextConnector {
-        CleartextConnector { host: host, port: 80 }
+        CleartextConnector {
+            host: host,
+            port: 80,
+        }
     }
 
     /// Creates a new `CleartextConnector` that will attempt to establish a connection to the given
     /// host on the given port.
     pub fn with_port(host: &'a str, port: u16) -> CleartextConnector {
-        CleartextConnector { host: host, port: port }
+        CleartextConnector {
+            host: host,
+            port: port,
+        }
     }
 }
 
@@ -126,7 +127,9 @@ pub struct CleartextConnectError(io::Error);
 
 impl fmt::Display for CleartextConnectError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "Cleartext HTTP/2 connect error: {}", (self as &error::Error).description())
+        write!(fmt,
+               "Cleartext HTTP/2 connect error: {}",
+               (self as &error::Error).description())
     }
 }
 
@@ -143,7 +146,9 @@ impl error::Error for CleartextConnectError {
 /// For convenience we make sure that `io::Error`s are easily convertible to
 /// the `CleartextConnectError`, if needed.
 impl From<io::Error> for CleartextConnectError {
-    fn from(e: io::Error) -> CleartextConnectError { CleartextConnectError(e) }
+    fn from(e: io::Error) -> CleartextConnectError {
+        CleartextConnectError(e)
+    }
 }
 
 /// The error is marked as an `HttpConnectError`
@@ -169,7 +174,9 @@ impl<'a> HttpConnect for CleartextConnector<'a> {
 /// A struct representing a request stream. It provides the headers that are to be sent when
 /// initiating the request, as well as a `Stream` instance that handles the received response and
 /// provides the request body.
-pub struct RequestStream<'n, 'v, S> where S: Stream {
+pub struct RequestStream<'n, 'v, S>
+    where S: Stream
+{
     /// The list of headers that will be sent with the request.
     pub headers: Vec<Header<'n, 'v>>,
     /// The underlying `Stream` instance, which will handle the response, as well as optionally
@@ -179,8 +186,9 @@ pub struct RequestStream<'n, 'v, S> where S: Stream {
 
 /// The struct extends the `HttpConnection` API with client-specific methods (such as
 /// `start_request`) and wires the `HttpConnection` to the client `Session` callbacks.
-pub struct ClientConnection<State=DefaultSessionState<ClientMarker, DefaultStream>>
-        where State: SessionState {
+pub struct ClientConnection<State = DefaultSessionState<ClientMarker, DefaultStream>>
+    where State: SessionState
+{
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection,
@@ -190,13 +198,13 @@ pub struct ClientConnection<State=DefaultSessionState<ClientMarker, DefaultStrea
 }
 
 impl<State> ClientConnection<State>
-        where State: SessionState {
+    where State: SessionState
+{
     /// Creates a new `ClientConnection` that will use the given `HttpConnection`
     /// for all its underlying HTTP/2 communication.
     ///
     /// The given `state` instance will handle the maintenance of the session's state.
-    pub fn with_connection(conn: HttpConnection, state: State)
-            -> ClientConnection<State> {
+    pub fn with_connection(conn: HttpConnection, state: State) -> ClientConnection<State> {
         ClientConnection {
             conn: conn,
             state: state,
@@ -215,11 +223,10 @@ impl<State> ClientConnection<State>
     /// The method is a convenience method that can be used during the initialization of the
     /// connection, as the first frame that any peer is allowed to send is an initial settings
     /// frame.
-    pub fn expect_settings<Recv: ReceiveFrame, Sender: SendFrame>(
-            &mut self,
-            rx: &mut Recv,
-            tx: &mut Sender)
-            -> HttpResult<()> {
+    pub fn expect_settings<Recv: ReceiveFrame, Sender: SendFrame>(&mut self,
+                                                                  rx: &mut Recv,
+                                                                  tx: &mut Sender)
+                                                                  -> HttpResult<()> {
         let mut session = ClientSession::new(&mut self.state, tx);
         self.conn.expect_settings(rx, &mut session)
     }
@@ -227,11 +234,15 @@ impl<State> ClientConnection<State>
     /// Starts a new request based on the given `RequestStream`.
     ///
     /// For now it does not perform any validation whether the given `RequestStream` is valid.
-    pub fn start_request<S: SendFrame>(
-            &mut self,
-            req: RequestStream<State::Stream>,
-            sender: &mut S) -> HttpResult<StreamId> {
-        let end_stream = if req.stream.is_closed_local() { EndStream::Yes } else { EndStream::No };
+    pub fn start_request<S: SendFrame>(&mut self,
+                                       req: RequestStream<State::Stream>,
+                                       sender: &mut S)
+                                       -> HttpResult<StreamId> {
+        let end_stream = if req.stream.is_closed_local() {
+            EndStream::Yes
+        } else {
+            EndStream::No
+        };
         let stream_id = self.state.insert_outgoing(req.stream);
         try!(self.conn.sender(sender).send_headers(req.headers, stream_id, end_stream));
 
@@ -240,11 +251,10 @@ impl<State> ClientConnection<State>
 
     /// Fully handles the next incoming frame provided by the given `ReceiveFrame` instance.
     /// Handling a frame may cause changes to the session state exposed by the `ClientConnection`.
-    pub fn handle_next_frame<Recv: ReceiveFrame, Sender: SendFrame>(
-            &mut self,
-            rx: &mut Recv,
-            tx: &mut Sender)
-            -> HttpResult<()> {
+    pub fn handle_next_frame<Recv: ReceiveFrame, Sender: SendFrame>(&mut self,
+                                                                    rx: &mut Recv,
+                                                                    tx: &mut Sender)
+                                                                    -> HttpResult<()> {
         let mut session = ClientSession::new(&mut self.state, tx);
         self.conn.handle_next_frame(rx, &mut session)
     }
@@ -277,12 +287,18 @@ impl<State> ClientConnection<State>
 /// a client that streams responses directly into a file on the local file system,
 /// instead of keeping it in memory (like the `DefaultStream` does), without
 /// having to change any HTTP/2-specific logic.
-pub struct ClientSession<'a, State, S> where State: SessionState + 'a, S: SendFrame + 'a {
+pub struct ClientSession<'a, State, S>
+    where State: SessionState + 'a,
+          S: SendFrame + 'a
+{
     state: &'a mut State,
     sender: &'a mut S,
 }
 
-impl<'a, State, S> ClientSession<'a, State, S> where State: SessionState + 'a, S: SendFrame + 'a {
+impl<'a, State, S> ClientSession<'a, State, S>
+    where State: SessionState + 'a,
+          S: SendFrame + 'a
+{
     /// Returns a new `ClientSession` associated to the given state.
     #[inline]
     pub fn new(state: &'a mut State, sender: &'a mut S) -> ClientSession<'a, State, S> {
@@ -294,10 +310,14 @@ impl<'a, State, S> ClientSession<'a, State, S> where State: SessionState + 'a, S
 }
 
 impl<'a, State, S> Session for ClientSession<'a, State, S>
-        where State: SessionState + 'a,
-              S: SendFrame + 'a {
-    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection)
-            -> HttpResult<()> {
+    where State: SessionState + 'a,
+          S: SendFrame + 'a
+{
+    fn new_data_chunk(&mut self,
+                      stream_id: StreamId,
+                      data: &[u8],
+                      _: &mut HttpConnection)
+                      -> HttpResult<()> {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -306,7 +326,7 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
                 //                 1) the stream was idle => PROTOCOL_ERROR
                 //                 2) the stream was closed => STREAM_CLOSED (stream error)
                 return Ok(());
-            },
+            }
             Some(stream) => stream,
         };
         // Now let the stream handle the data chunk
@@ -314,12 +334,11 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
         Ok(())
     }
 
-    fn new_headers<'n, 'v>(
-            &mut self,
-            stream_id: StreamId,
-            headers: Vec<Header<'n, 'v>>,
-            _conn: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_headers<'n, 'v>(&mut self,
+                           stream_id: StreamId,
+                           headers: Vec<Header<'n, 'v>>,
+                           _conn: &mut HttpConnection)
+                           -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
@@ -327,7 +346,7 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
                 // TODO(mlalic): This means that the server's header is not associated to any
                 //               request made by the client nor any server-initiated stream (pushed)
                 return Ok(());
-            },
+            }
             Some(stream) => stream,
         };
         // Now let the stream handle the headers
@@ -335,14 +354,13 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
         Ok(())
     }
 
-    fn end_of_stream(&mut self, stream_id: StreamId, _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn end_of_stream(&mut self, stream_id: StreamId, _: &mut HttpConnection) -> HttpResult<()> {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
                 return Ok(());
-            },
+            }
             Some(stream) => stream,
         };
         // Since this implies that the server has closed the stream (i.e. provided a response), we
@@ -352,15 +370,20 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
         Ok(())
     }
 
-    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn rst_stream(&mut self,
+                  stream_id: StreamId,
+                  error_code: ErrorCode,
+                  _: &mut HttpConnection)
+                  -> HttpResult<()> {
         debug!("RST_STREAM id={:?}, error={:?}", stream_id, error_code);
         self.state.get_stream_mut(stream_id).map(|stream| stream.on_rst_stream(error_code));
         Ok(())
     }
 
-    fn new_settings(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_settings(&mut self,
+                    _settings: Vec<HttpSetting>,
+                    conn: &mut HttpConnection)
+                    -> HttpResult<()> {
         debug!("Sending a SETTINGS ack");
         conn.sender(self.sender).send_settings_ack()
     }
@@ -368,36 +391,14 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ClientSession,
-        write_preface,
-        RequestStream,
-    };
+    use super::{ClientSession, write_preface, RequestStream};
 
     use http::{Header, ErrorCode, HttpError};
-    use http::tests::common::{
-        TestStream,
-        build_mock_client_conn,
-        build_mock_http_conn,
-        MockReceiveFrame,
-        MockSendFrame,
-    };
-    use http::frame::{
-        SettingsFrame,
-        DataFrame,
-        Frame,
-        RawFrame,
-    };
-    use http::connection::{
-        HttpFrame,
-        SendStatus,
-    };
-    use http::session::{
-        Session,
-        SessionState,
-        Stream,
-        DefaultSessionState,
-    };
+    use http::tests::common::{TestStream, build_mock_client_conn, build_mock_http_conn,
+                              MockReceiveFrame, MockSendFrame};
+    use http::frame::{SettingsFrame, DataFrame, Frame, RawFrame};
+    use http::connection::{HttpFrame, SendStatus};
+    use http::session::{Session, SessionState, Stream, DefaultSessionState};
     use http::session::Client as ClientMarker;
 
     /// Tests that a client connection is correctly initialized, by reading the
@@ -520,7 +521,7 @@ mod tests {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The frame closed the stream?
                     assert!(frame.is_end_of_stream());
-                },
+                }
                 _ => panic!("Expected a Headers frame"),
             };
         }
@@ -546,7 +547,7 @@ mod tests {
                 HttpFrame::HeadersFrame(ref frame) => {
                     // The stream is still open
                     assert!(!frame.is_end_of_stream());
-                },
+                }
                 _ => panic!("Expected a Headers frame"),
             };
         }
@@ -627,9 +628,11 @@ mod tests {
             let mut session = ClientSession::new(&mut state, &mut sender);
             session.rst_stream(3, ErrorCode::Cancel, &mut conn).unwrap();
         }
-        assert!(state.get_stream_ref(3).map(|stream| {
-            stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
-        }).unwrap());
+        assert!(state.get_stream_ref(3)
+                     .map(|stream| {
+                         stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
+                     })
+                     .unwrap());
         assert!(state.get_stream_ref(1).map(|stream| stream.errors.len() == 0).unwrap());
     }
 

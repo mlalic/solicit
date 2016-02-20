@@ -1,26 +1,10 @@
 //! The module contains a number of reusable components for implementing the server side of an
 //! HTTP/2 connection.
 
-use http::{
-    StreamId,
-    Header,
-    HttpResult,
-    HttpScheme,
-    ErrorCode,
-};
-use http::frame::{HttpSetting};
-use http::connection::{
-    SendFrame, ReceiveFrame,
-    HttpConnection, EndStream,
-    SendStatus,
-};
-use http::session::{
-    Session,
-    SessionState,
-    Stream,
-    DefaultStream,
-    DefaultSessionState,
-};
+use http::{StreamId, Header, HttpResult, HttpScheme, ErrorCode};
+use http::frame::HttpSetting;
+use http::connection::{SendFrame, ReceiveFrame, HttpConnection, EndStream, SendStatus};
+use http::session::{Session, SessionState, Stream, DefaultStream, DefaultSessionState};
 use http::session::Server as ServerMarker;
 use http::priority::SimplePrioritizer;
 
@@ -37,21 +21,25 @@ pub trait StreamFactory {
 
 /// An implementation of the `Session` trait for a server-side HTTP/2 connection.
 pub struct ServerSession<'a, State, F, S>
-        where State: SessionState + 'a,
-              S: SendFrame + 'a,
-              F: StreamFactory<Stream=State::Stream> + 'a {
+    where State: SessionState + 'a,
+          S: SendFrame + 'a,
+          F: StreamFactory<Stream = State::Stream> + 'a
+{
     state: &'a mut State,
     factory: &'a mut F,
     sender: &'a mut S,
 }
 
 impl<'a, State, F, S> ServerSession<'a, State, F, S>
-        where State: SessionState + 'a,
-              S: SendFrame + 'a,
-              F: StreamFactory<Stream=State::Stream> + 'a {
+    where State: SessionState + 'a,
+          S: SendFrame + 'a,
+          F: StreamFactory<Stream = State::Stream> + 'a
+{
     #[inline]
-    pub fn new(state: &'a mut State, factory: &'a mut F, sender: &'a mut S)
-            -> ServerSession<'a, State, F, S> {
+    pub fn new(state: &'a mut State,
+               factory: &'a mut F,
+               sender: &'a mut S)
+               -> ServerSession<'a, State, F, S> {
         ServerSession {
             state: state,
             factory: factory,
@@ -61,17 +49,21 @@ impl<'a, State, F, S> ServerSession<'a, State, F, S>
 }
 
 impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
-        where State: SessionState + 'a,
-              S: SendFrame + 'a,
-              F: StreamFactory<Stream=State::Stream> + 'a {
-    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8], _: &mut HttpConnection)
-            -> HttpResult<()> {
+    where State: SessionState + 'a,
+          S: SendFrame + 'a,
+          F: StreamFactory<Stream = State::Stream> + 'a
+{
+    fn new_data_chunk(&mut self,
+                      stream_id: StreamId,
+                      data: &[u8],
+                      _: &mut HttpConnection)
+                      -> HttpResult<()> {
         debug!("Data chunk for stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
                 return Ok(());
-            },
+            }
             Some(stream) => stream,
         };
         // Now let the stream handle the data chunk
@@ -79,20 +71,19 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
         Ok(())
     }
 
-    fn new_headers<'n, 'v>(
-            &mut self,
-            stream_id: StreamId,
-            headers: Vec<Header<'n, 'v>>,
-            _conn: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_headers<'n, 'v>(&mut self,
+                           stream_id: StreamId,
+                           headers: Vec<Header<'n, 'v>>,
+                           _conn: &mut HttpConnection)
+                           -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
         match self.state.get_stream_mut(stream_id) {
             Some(stream) => {
                 // This'd correspond to having received trailers...
                 stream.set_headers(headers);
                 return Ok(());
-            },
-            None => {},
+            }
+            None => {}
         };
         // New stream initiated by the client
         let mut stream = self.factory.create(stream_id);
@@ -103,29 +94,33 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
         Ok(())
     }
 
-    fn end_of_stream(&mut self, stream_id: StreamId, _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn end_of_stream(&mut self, stream_id: StreamId, _: &mut HttpConnection) -> HttpResult<()> {
         debug!("End of stream {}", stream_id);
         let mut stream = match self.state.get_stream_mut(stream_id) {
             None => {
                 debug!("Received a frame for an unknown stream!");
                 return Ok(());
-            },
+            }
             Some(stream) => stream,
         };
         stream.close_remote();
         Ok(())
     }
 
-    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn rst_stream(&mut self,
+                  stream_id: StreamId,
+                  error_code: ErrorCode,
+                  _: &mut HttpConnection)
+                  -> HttpResult<()> {
         debug!("RST_STREAM id={:?}, error={:?}", stream_id, error_code);
         self.state.get_stream_mut(stream_id).map(|stream| stream.on_rst_stream(error_code));
         Ok(())
     }
 
-    fn new_settings(&mut self, _settings: Vec<HttpSetting>, conn: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_settings(&mut self,
+                    _settings: Vec<HttpSetting>,
+                    conn: &mut HttpConnection)
+                    -> HttpResult<()> {
         debug!("Sending a SETTINGS ack");
         conn.sender(self.sender).send_settings_ack()
     }
@@ -133,9 +128,10 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
 
 /// The struct provides a more convenient API for server-related functionality of an HTTP/2
 /// connection, such as sending a response back to the client.
-pub struct ServerConnection<F, State=DefaultSessionState<ServerMarker, DefaultStream>>
-        where State: SessionState,
-              F: StreamFactory<Stream=State::Stream> {
+pub struct ServerConnection<F, State = DefaultSessionState<ServerMarker, DefaultStream>>
+    where State: SessionState,
+          F: StreamFactory<Stream = State::Stream>
+{
     /// The underlying `HttpConnection` that will be used for any HTTP/2
     /// communication.
     conn: HttpConnection,
@@ -148,13 +144,17 @@ pub struct ServerConnection<F, State=DefaultSessionState<ServerMarker, DefaultSt
 }
 
 impl<F, State> ServerConnection<F, State>
-        where State: SessionState, F: StreamFactory<Stream=State::Stream> {
+    where State: SessionState,
+          F: StreamFactory<Stream = State::Stream>
+{
     /// Creates a new `ServerConnection` that will use the given `HttpConnection` for its
     /// underlying HTTP/2 communication. The `state` and `factory` represent, respectively, the
     /// initial state of the connection and an instance of the `StreamFactory` type (allowing the
     /// client to handle newly created streams).
-    pub fn with_connection(conn: HttpConnection, state: State, factory: F)
-            -> ServerConnection<F, State> {
+    pub fn with_connection(conn: HttpConnection,
+                           state: State,
+                           factory: F)
+                           -> ServerConnection<F, State> {
         ServerConnection {
             conn: conn,
             state: state,
@@ -176,11 +176,10 @@ impl<F, State> ServerConnection<F, State>
 
     /// Handles the next frame on the given `ReceiveFrame` instance and expects it to be a
     /// (non-ACK) SETTINGS frame. Returns an error if not.
-    pub fn expect_settings<Recv: ReceiveFrame, Sender: SendFrame>(
-            &mut self,
-            rx: &mut Recv,
-            tx: &mut Sender)
-            -> HttpResult<()> {
+    pub fn expect_settings<Recv: ReceiveFrame, Sender: SendFrame>(&mut self,
+                                                                  rx: &mut Recv,
+                                                                  tx: &mut Sender)
+                                                                  -> HttpResult<()> {
         let mut session = ServerSession::new(&mut self.state, &mut self.factory, tx);
         self.conn.expect_settings(rx, &mut session)
     }
@@ -188,11 +187,10 @@ impl<F, State> ServerConnection<F, State>
     /// Fully handles the next frame provided by the given `ReceiveFrame` instance.
     /// Handling the frame can cause the session state of the `ServerConnection` to update.
     #[inline]
-    pub fn handle_next_frame<Recv: ReceiveFrame, Sender: SendFrame>(
-            &mut self,
-            rx: &mut Recv,
-            tx: &mut Sender)
-            -> HttpResult<()> {
+    pub fn handle_next_frame<Recv: ReceiveFrame, Sender: SendFrame>(&mut self,
+                                                                    rx: &mut Recv,
+                                                                    tx: &mut Sender)
+                                                                    -> HttpResult<()> {
         let mut session = ServerSession::new(&mut self.state, &mut self.factory, tx);
         self.conn.handle_next_frame(rx, &mut session)
     }
@@ -203,17 +201,13 @@ impl<F, State> ServerConnection<F, State>
     /// the connection's state. (The body does not have to be ready when this method is called, as
     /// long as the `Stream` instance knows how to provide it to the connection later on.)
     #[inline]
-    pub fn start_response<'n, 'v, S: SendFrame>(
-            &mut self,
-            headers: Vec<Header<'n, 'v>>,
-            stream_id: StreamId,
-            end_stream: EndStream,
-            sender: &mut S)
-            -> HttpResult<()> {
-        self.conn.sender(sender).send_headers(
-            headers,
-            stream_id,
-            end_stream)
+    pub fn start_response<'n, 'v, S: SendFrame>(&mut self,
+                                                headers: Vec<Header<'n, 'v>>,
+                                                stream_id: StreamId,
+                                                end_stream: EndStream,
+                                                sender: &mut S)
+                                                -> HttpResult<()> {
+        self.conn.sender(sender).send_headers(headers, stream_id, end_stream)
     }
 
     /// Queues a new DATA frame onto the underlying `SendFrame`.
@@ -240,12 +234,7 @@ mod tests {
     use http::tests::common::{TestStream, TestStreamFactory, build_mock_http_conn, MockSendFrame};
 
     use http::{Header, ErrorCode, HttpError};
-    use http::session::{
-        DefaultSessionState,
-        SessionState,
-        Stream,
-        Session,
-    };
+    use http::session::{DefaultSessionState, SessionState, Stream, Session};
     use http::session::Server as ServerMarker;
 
     /// Tests that the `ServerSession` correctly manages the stream state.
@@ -256,9 +245,7 @@ mod tests {
         let mut sender = MockSendFrame::new();
 
         // Receiving new headers results in a new stream being created
-        let headers = vec![
-            Header::new(b":method".to_vec(), b"GET".to_vec())
-        ];
+        let headers = vec![Header::new(b":method".to_vec(), b"GET".to_vec())];
         {
             let mut factory = TestStreamFactory;
             let mut session = ServerSession::new(&mut state, &mut factory, &mut sender);
@@ -320,9 +307,11 @@ mod tests {
             session.rst_stream(3, ErrorCode::Cancel, &mut conn).unwrap();
         }
         assert!(state.get_stream_ref(1).map(|stream| stream.errors.len() == 0).unwrap());
-        assert!(state.get_stream_ref(3).map(|stream| {
-            stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
-        }).unwrap());
+        assert!(state.get_stream_ref(3)
+                     .map(|stream| {
+                         stream.errors.len() == 1 && stream.errors[0] == ErrorCode::Cancel
+                     })
+                     .unwrap());
         assert!(state.get_stream_ref(5).map(|stream| stream.errors.len() == 0).unwrap());
     }
 

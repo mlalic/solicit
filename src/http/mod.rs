@@ -140,8 +140,9 @@ impl<'n, 'v> Header<'n, 'v> {
     /// Creates a new `Header` with the given name and value.
     ///
     /// The name and value need to be convertible into a `HeaderPart`.
-    pub fn new<N: Into<HeaderPart<'n>>, V: Into<HeaderPart<'v>>>(name: N, value: V)
-            -> Header<'n, 'v> {
+    pub fn new<N: Into<HeaderPart<'n>>, V: Into<HeaderPart<'v>>>(name: N,
+                                                                 value: V)
+                                                                 -> Header<'n, 'v> {
         Header {
             name: name.into().0,
             value: value.into().0,
@@ -149,9 +150,13 @@ impl<'n, 'v> Header<'n, 'v> {
     }
 
     /// Return a borrowed representation of the `Header` name.
-    pub fn name(&self) -> &[u8] { &self.name }
+    pub fn name(&self) -> &[u8] {
+        &self.name
+    }
     /// Return a borrowed representation of the `Header` value.
-    pub fn value(&self) -> &[u8] { &self.value }
+    pub fn value(&self) -> &[u8] {
+        &self.value
+    }
 }
 
 impl<'n, 'v> Into<OwnedHeader> for Header<'n, 'v> {
@@ -172,12 +177,7 @@ impl<'n, 'v> Into<Header<'n, 'v>> for OwnedHeader {
 /// difference for all intents and purposes (and some servers out there still
 /// only officially advertise draft support).
 /// TODO: Eventually only use "h2".
-pub const ALPN_PROTOCOLS: &'static [&'static [u8]] = &[
-    b"h2",
-    b"h2-16",
-    b"h2-15",
-    b"h2-14",
-];
+pub const ALPN_PROTOCOLS: &'static [&'static [u8]] = &[b"h2", b"h2-16", b"h2-15", b"h2-14"];
 
 /// The enum represents an error code that are used in `RST_STREAM` and `GOAWAY` frames.
 /// These are defined in [Section 7](http://http2.github.io/http2-spec/#ErrorCodes) of the HTTP/2
@@ -394,17 +394,16 @@ impl PartialEq for HttpError {
         match (self, other) {
             (&HttpError::IoError(ref e1), &HttpError::IoError(ref e2)) => {
                 e1.kind() == e2.kind() && e1.description() == e2.description()
-            },
+            }
             (&HttpError::InvalidFrame, &HttpError::InvalidFrame) => true,
-            (&HttpError::CompressionError(ref e1), &HttpError::CompressionError(ref e2)) => {
-                e1 == e2
-            },
+            (&HttpError::CompressionError(ref e1),
+             &HttpError::CompressionError(ref e2)) => e1 == e2,
             (&HttpError::UnknownStreamId, &HttpError::UnknownStreamId) => true,
             (&HttpError::UnableToConnect, &HttpError::UnableToConnect) => true,
             (&HttpError::MalformedResponse, &HttpError::MalformedResponse) => true,
             (&HttpError::Other(ref e1), &HttpError::Other(ref e2)) => {
                 e1.description() == e2.description()
-            },
+            }
             _ => false,
         }
     }
@@ -442,7 +441,7 @@ impl WindowSize {
     pub fn try_increase(&mut self, delta: u32) -> Result<(), ()> {
         // Someone's provided a delta that would definitely overflow the window size.
         if delta > 0x7fffffff {
-            return Err(())
+            return Err(());
         }
         // Now it is safe to cast the delta to the `i32`.
         match self.0.checked_add(delta as i32) {
@@ -450,7 +449,7 @@ impl WindowSize {
                 // When the add overflows, we will have went over the maximum allowed size of the
                 // window size...
                 Err(())
-            },
+            }
             Some(next_val) => {
                 // The addition didn't overflow, so the next window size is in the range allowed by
                 // the spec.
@@ -488,7 +487,7 @@ impl WindowSize {
             Some(new) => {
                 self.0 = new;
                 Ok(())
-            },
+            }
             None => Err(()),
         }
     }
@@ -501,7 +500,9 @@ impl WindowSize {
     ///
     /// The size is actually allowed to become negative (for instance if the peer changes its
     /// intial window size in the settings); therefore, the return is an `i32`.
-    pub fn size(&self) -> i32 { self.0 }
+    pub fn size(&self) -> i32 {
+        self.0
+    }
 }
 
 /// An enum representing the two possible HTTP schemes.
@@ -547,8 +548,7 @@ pub type StaticResponse = Response<'static, 'static>;
 
 impl<'n, 'v> Response<'n, 'v> {
     /// Creates a new `Response` with all the components already provided.
-    pub fn new(stream_id: StreamId, headers: Vec<OwnedHeader>, body: Vec<u8>)
-            -> Response<'n, 'v> {
+    pub fn new(stream_id: StreamId, headers: Vec<OwnedHeader>, body: Vec<u8>) -> Response<'n, 'v> {
         Response {
             stream_id: stream_id,
             headers: headers.into_iter().map(|h| Header::new(h.0, h.1)).collect(),
@@ -565,7 +565,7 @@ impl<'n, 'v> Response<'n, 'v> {
         // field, the `:status` MUST be the first header; otherwise, the
         // response is malformed.
         if self.headers.len() < 1 {
-            return Err(HttpError::MalformedResponse)
+            return Err(HttpError::MalformedResponse);
         }
         if &self.headers[0].name[..] != &b":status"[..] {
             Err(HttpError::MalformedResponse)
@@ -593,8 +593,7 @@ impl<'n, 'v> Response<'n, 'v> {
         }
 
         // Finally, we can merge them into an integer
-        Ok(100 * ((buf[0] - b'0') as u16) +
-           10 * ((buf[1] - b'0') as u16) +
+        Ok(100 * ((buf[0] - b'0') as u16) + 10 * ((buf[1] - b'0') as u16) +
            1 * ((buf[2] - b'0') as u16))
     }
 }

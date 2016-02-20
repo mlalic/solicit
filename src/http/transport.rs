@@ -50,8 +50,7 @@ pub trait TransportStream: Read + Write + Sized {
                 // We consider this an unexpected end of file and return an
                 // error since we were unable to read the minimum amount of
                 // bytes.
-                return Err(io::Error::new(io::ErrorKind::Other,
-                                          "Not enough bytes"));
+                return Err(io::Error::new(io::ErrorKind::Other, "Not enough bytes"));
             }
             total += read;
         }
@@ -80,7 +79,9 @@ impl TransportStream for TcpStream {
     }
 }
 
-impl<T> SendFrame for T where T: TransportStream {
+impl<T> SendFrame for T
+    where T: TransportStream
+{
     fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
         let mut buf = io::Cursor::new(Vec::with_capacity(1024));
         try!(frame.serialize_into(&mut buf));
@@ -93,12 +94,16 @@ impl<T> SendFrame for T where T: TransportStream {
 /// `TransportStream` and uses it to provide HTTP/2 frames, when asked for one, by reading from the
 /// stream.
 /// The implementation always allocates a new buffer on the heap for every incoming frame.
-pub struct TransportReceiveFrame<'a, TS> where TS: TransportStream + 'a {
+pub struct TransportReceiveFrame<'a, TS>
+    where TS: TransportStream + 'a
+{
     ts: &'a mut TS,
     raw_frame: Option<RawFrame<'a>>,
 }
 
-impl<'a, TS> TransportReceiveFrame<'a, TS> where TS: TransportStream {
+impl<'a, TS> TransportReceiveFrame<'a, TS>
+    where TS: TransportStream
+{
     /// Create a new `TransportReceiveFrame` that will use the given `TransportStream` for reading
     /// the frame.
     pub fn new(ts: &'a mut TS) -> TransportReceiveFrame<'a, TS> {
@@ -109,7 +114,9 @@ impl<'a, TS> TransportReceiveFrame<'a, TS> where TS: TransportStream {
     }
 }
 
-impl<'a, TS> ReceiveFrame for TransportReceiveFrame<'a, TS> where TS: TransportStream {
+impl<'a, TS> ReceiveFrame for TransportReceiveFrame<'a, TS>
+    where TS: TransportStream
+{
     fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
         let raw_header = {
             let mut buf = [0; 9];
@@ -125,7 +132,9 @@ impl<'a, TS> ReceiveFrame for TransportReceiveFrame<'a, TS> where TS: TransportS
         // First copy the header into the buffer...
         try!(io::copy(&mut &raw_header[..], &mut full_frame));
         // Now expand it to its full size...
-        unsafe { full_frame.set_len(total_len); }
+        unsafe {
+            full_frame.set_len(total_len);
+        }
         // ...and have the stream read into the payload section the exact number of bytes that the
         // header indicated.
         try!(TransportStream::read_exact(self.ts, &mut full_frame[9..]));
@@ -155,19 +164,10 @@ impl TransportStream for SslStream<TcpStream> {
 mod tests {
     use super::{TransportStream, TransportReceiveFrame};
 
-    use http::tests::common::{
-        serialize_frame,
-        build_stub_from_frames,
-        StubTransportStream,
-    };
+    use http::tests::common::{serialize_frame, build_stub_from_frames, StubTransportStream};
     use http::HttpError;
     use http::connection::{HttpFrame, SendFrame, ReceiveFrame};
-    use http::frame::{
-        RawFrame,
-        DataFrame,
-        HeadersFrame,
-        pack_header,
-    };
+    use http::frame::{RawFrame, DataFrame, HeadersFrame, pack_header};
 
     /// A helper function that sends the given frame using the provided `sender` and also returns
     /// the raw serialization of the frame.
@@ -177,38 +177,38 @@ mod tests {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            },
+            }
             HttpFrame::HeadersFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            },
+            }
             HttpFrame::RstStreamFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            },
+            }
             HttpFrame::SettingsFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            },
+            }
             HttpFrame::GoawayFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            },
+            }
             HttpFrame::WindowUpdateFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            },
+            }
             HttpFrame::UnknownFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 let raw: RawFrame = frame.into();
                 sender.send_frame(raw).unwrap();
                 ret
-            },
+            }
         }
     }
 
@@ -328,7 +328,8 @@ mod tests {
         let mut stream = StubTransportStream::with_stub_content(&serialized);
         let mut receiver = TransportReceiveFrame::new(&mut stream);
 
-        assert_eq!(receiver.recv_frame().err().unwrap(), HttpError::InvalidFrame);
+        assert_eq!(receiver.recv_frame().err().unwrap(),
+                   HttpError::InvalidFrame);
     }
 
 }

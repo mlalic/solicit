@@ -6,34 +6,14 @@ use std::cell::{RefCell, Cell};
 use std::borrow::Cow;
 use std::io::{Cursor, Read, Write};
 
-use http::{
-    HttpResult,
-    HttpScheme,
-    StreamId,
-    Header,
-    OwnedHeader,
-    ErrorCode,
-};
+use http::{HttpResult, HttpScheme, StreamId, Header, OwnedHeader, ErrorCode};
 use http::frame::{RawFrame, FrameIR, FrameHeader, pack_header, HttpSetting};
-use http::session::{
-    Session,
-    DefaultSessionState,
-    SessionState,
-    Stream,
-    StreamState,
-    StreamDataChunk, StreamDataError,
-};
+use http::session::{Session, DefaultSessionState, SessionState, Stream, StreamState,
+                    StreamDataChunk, StreamDataError};
 use http::session::Client as ClientMarker;
 use http::priority::DataPrioritizer;
 use http::transport::TransportStream;
-use http::connection::{
-    SendFrame,
-    ReceiveFrame,
-    HttpFrame,
-    HttpConnection,
-    EndStream,
-    DataChunk,
-};
+use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnection, EndStream, DataChunk};
 use http::client::ClientConnection;
 use http::server::StreamFactory;
 
@@ -82,9 +62,7 @@ pub struct MockReceiveFrame<'a> {
 
 impl<'a> MockReceiveFrame<'a> {
     pub fn new(recv_list: Vec<HttpFrame<'a>>) -> MockReceiveFrame<'a> {
-        MockReceiveFrame {
-            recv_list: recv_list,
-        }
+        MockReceiveFrame { recv_list: recv_list }
     }
 }
 
@@ -289,23 +267,25 @@ impl TestSession {
     /// Returns a new `TestSession` that veriies that the headers received
     /// in the callbacks are equal to those in the given headers `Vec` and
     /// that they come in exactly the given order. Does the same for chunks.
-    pub fn new_verify(headers: Vec<Vec<OwnedHeader>>, chunks: Vec<Vec<u8>>)
-        -> TestSession {
-            TestSession {
-                silent: false,
-                headers: headers,
-                chunks: chunks,
-                curr_header: 0,
-                curr_chunk: 0,
-                rst_streams: Vec::new(),
-                goaways: Vec::new(),
-            }
+    pub fn new_verify(headers: Vec<Vec<OwnedHeader>>, chunks: Vec<Vec<u8>>) -> TestSession {
+        TestSession {
+            silent: false,
+            headers: headers,
+            chunks: chunks,
+            curr_header: 0,
+            curr_chunk: 0,
+            rst_streams: Vec::new(),
+            goaways: Vec::new(),
         }
+    }
 }
 
 impl Session for TestSession {
-    fn new_data_chunk(&mut self, _: StreamId, data: &[u8], _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_data_chunk(&mut self,
+                      _: StreamId,
+                      data: &[u8],
+                      _: &mut HttpConnection)
+                      -> HttpResult<()> {
         if !self.silent {
             assert_eq!(&self.chunks[self.curr_chunk], &data);
         }
@@ -313,12 +293,11 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn new_headers<'n, 'v>(
-            &mut self,
-            _: StreamId,
-            headers: Vec<Header<'n, 'v>>,
-            _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_headers<'n, 'v>(&mut self,
+                           _: StreamId,
+                           headers: Vec<Header<'n, 'v>>,
+                           _: &mut HttpConnection)
+                           -> HttpResult<()> {
         if !self.silent {
             assert_eq!(self.headers[self.curr_header], headers);
         }
@@ -326,29 +305,32 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn end_of_stream(&mut self, _: StreamId, _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn end_of_stream(&mut self, _: StreamId, _: &mut HttpConnection) -> HttpResult<()> {
         Ok(())
     }
 
-    fn rst_stream(&mut self, stream_id: StreamId, _: ErrorCode, _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn rst_stream(&mut self,
+                  stream_id: StreamId,
+                  _: ErrorCode,
+                  _: &mut HttpConnection)
+                  -> HttpResult<()> {
         self.rst_streams.push(stream_id);
         Ok(())
     }
 
-    fn new_settings(&mut self, _settings: Vec<HttpSetting>, _conn: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn new_settings(&mut self,
+                    _settings: Vec<HttpSetting>,
+                    _conn: &mut HttpConnection)
+                    -> HttpResult<()> {
         Ok(())
     }
 
-    fn on_goaway(
-            &mut self,
-            _: StreamId,
-            error_code: ErrorCode,
-            _: Option<&[u8]>,
-            _: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn on_goaway(&mut self,
+                 _: StreamId,
+                 error_code: ErrorCode,
+                 _: Option<&[u8]>,
+                 _: &mut HttpConnection)
+                 -> HttpResult<()> {
         self.goaways.push(error_code);
         Ok(())
     }
@@ -381,14 +363,20 @@ impl TestStream {
 }
 
 impl Stream for TestStream {
-    fn new_data_chunk(&mut self, data: &[u8]) { self.body.extend(data.to_vec()); }
-    fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
-        self.headers = Some(headers.into_iter().map(|h| {
-            let owned: OwnedHeader = h.into();
-            owned.into()
-        }).collect());
+    fn new_data_chunk(&mut self, data: &[u8]) {
+        self.body.extend(data.to_vec());
     }
-    fn set_state(&mut self, state: StreamState) { self.state = state; }
+    fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
+        self.headers = Some(headers.into_iter()
+                                   .map(|h| {
+                                       let owned: OwnedHeader = h.into();
+                                       owned.into()
+                                   })
+                                   .collect());
+    }
+    fn set_state(&mut self, state: StreamState) {
+        self.state = state;
+    }
 
     fn on_rst_stream(&mut self, error: ErrorCode) {
         self.errors.push(error);
@@ -401,7 +389,7 @@ impl Stream for TestStream {
         let chunk = match self.outgoing.as_mut() {
             // No data associated to the stream, but it's open => nothing available for writing
             None => StreamDataChunk::Unavailable,
-            Some(d) =>  {
+            Some(d) => {
                 // For the `Vec`-backed reader, this should never fail, so unwrapping is
                 // fine.
                 let read = d.read(buf).unwrap();
@@ -415,13 +403,15 @@ impl Stream for TestStream {
         // Transition the stream state to locally closed if we've extracted the final data chunk.
         match chunk {
             StreamDataChunk::Last(_) => self.close_local(),
-            _ => {},
+            _ => {}
         };
 
         Ok(chunk)
     }
 
-    fn state(&self) -> StreamState { self.state }
+    fn state(&self) -> StreamState {
+        self.state
+    }
 }
 
 pub struct TestStreamFactory;
@@ -464,7 +454,6 @@ pub type MockClientConnection = ClientConnection<DefaultSessionState<ClientMarke
 /// Returns a `ClientConnection` suitable for use in tests.
 #[inline]
 pub fn build_mock_client_conn() -> MockClientConnection {
-    ClientConnection::with_connection(
-        build_mock_http_conn(),
-        DefaultSessionState::<ClientMarker, TestStream>::new())
+    ClientConnection::with_connection(build_mock_http_conn(),
+                                      DefaultSessionState::<ClientMarker, TestStream>::new())
 }

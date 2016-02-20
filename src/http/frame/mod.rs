@@ -74,10 +74,8 @@ pub type FrameHeader = (u32, u8, u8, u32);
 /// The frame `type` and `flags` components are returned as their original
 /// octet representation, rather than reinterpreted.
 pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
-    let length: u32 =
-        ((header[0] as u32) << 16) |
-        ((header[1] as u32) <<  8) |
-        ((header[2] as u32) <<  0);
+    let length: u32 = ((header[0] as u32) << 16) | ((header[1] as u32) << 8) |
+                      ((header[2] as u32) << 0);
     let frame_type = header[3];
     let flags = header[4];
     let stream_id = parse_stream_id(&header[5..]);
@@ -89,17 +87,15 @@ pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
 pub fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     let &(length, frame_type, flags, stream_id) = header;
 
-    [
-        (((length >> 16) & 0x000000FF) as u8),
-        (((length >>  8) & 0x000000FF) as u8),
-        (((length >>  0) & 0x000000FF) as u8),
-        frame_type,
-        flags,
-        (((stream_id >> 24) & 0x000000FF) as u8),
-        (((stream_id >> 16) & 0x000000FF) as u8),
-        (((stream_id >>  8) & 0x000000FF) as u8),
-        (((stream_id >>  0) & 0x000000FF) as u8),
-    ]
+    [(((length >> 16) & 0x000000FF) as u8),
+     (((length >> 8) & 0x000000FF) as u8),
+     (((length >> 0) & 0x000000FF) as u8),
+     frame_type,
+     flags,
+     (((stream_id >> 24) & 0x000000FF) as u8),
+     (((stream_id >> 16) & 0x000000FF) as u8),
+     (((stream_id >> 8) & 0x000000FF) as u8),
+     (((stream_id >> 0) & 0x000000FF) as u8)]
 }
 
 /// A helper function that parses the given payload, considering it padded.
@@ -150,7 +146,9 @@ pub trait Flag {
 /// A helper struct that can be used by all frames that do not define any flags.
 pub struct NoFlag;
 impl Flag for NoFlag {
-    fn bitmask(&self) -> u8 { 0 }
+    fn bitmask(&self) -> u8 {
+        0
+    }
 }
 
 /// A trait that all HTTP/2 frame structs need to implement.
@@ -287,20 +285,28 @@ impl<'a> RawFrame<'a> {
 }
 
 impl<'a> Into<Vec<u8>> for RawFrame<'a> {
-    fn into(self) -> Vec<u8> { self.raw_content.into_owned() }
+    fn into(self) -> Vec<u8> {
+        self.raw_content.into_owned()
+    }
 }
 impl<'a> AsRef<[u8]> for RawFrame<'a> {
-    fn as_ref(&self) -> &[u8] { self.raw_content.as_ref() }
+    fn as_ref(&self) -> &[u8] {
+        self.raw_content.as_ref()
+    }
 }
 /// Provide a conversion from a `Vec`.
 ///
 /// This conversion is unchecked and could cause the resulting `RawFrame` to be an
 /// invalid HTTP/2 frame.
 impl<'a> From<Vec<u8>> for RawFrame<'a> {
-    fn from(raw: Vec<u8>) -> RawFrame<'a> { RawFrame { raw_content: Cow::Owned(raw) } }
+    fn from(raw: Vec<u8>) -> RawFrame<'a> {
+        RawFrame { raw_content: Cow::Owned(raw) }
+    }
 }
 impl<'a> From<&'a [u8]> for RawFrame<'a> {
-    fn from(raw: &'a [u8]) -> RawFrame<'a> { RawFrame { raw_content: Cow::Borrowed(raw) } }
+    fn from(raw: &'a [u8]) -> RawFrame<'a> {
+        RawFrame { raw_content: Cow::Borrowed(raw) }
+    }
 }
 
 /// `RawFrame`s can be serialized to an on-the-wire format.
@@ -313,12 +319,7 @@ impl<'a> FrameIR for RawFrame<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        unpack_header,
-        pack_header,
-        RawFrame,
-        FrameIR,
-    };
+    use super::{unpack_header, pack_header, RawFrame, FrameIR};
     use std::io;
 
     /// Tests that the `unpack_header` function correctly returns the
@@ -359,9 +360,8 @@ mod tests {
         }
         {
             let header = [0xFF, 0xFF, 0xFF, 0, 0, 1, 1, 1, 1];
-            assert_eq!(
-                ((1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24)),
-                unpack_header(&header));
+            assert_eq!(((1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24)),
+                       unpack_header(&header));
         }
         {
             // Ignores reserved bit within the stream id (the most significant bit)
@@ -408,9 +408,7 @@ mod tests {
         }
         {
             let header = [0xFF, 0xFF, 0xFF, 0, 0, 1, 1, 1, 1];
-            let header_components = (
-                (1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24)
-            );
+            let header_components = ((1 << 24) - 1, 0, 0, 1 + (1 << 8) + (1 << 16) + (1 << 24));
             assert_eq!(pack_header(&header_components), header);
         }
     }
@@ -424,7 +422,9 @@ mod tests {
         let mut payload: Vec<u8> = Vec::with_capacity(sz);
         payload.push(pad_len);
         payload.extend(data.to_vec().into_iter());
-        for _ in 0..pad_len { payload.push(0); }
+        for _ in 0..pad_len {
+            payload.push(0);
+        }
 
         payload
     }

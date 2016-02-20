@@ -3,12 +3,7 @@
 use http::{StreamId, HttpResult, HttpError, Response, Header, HttpScheme};
 use http::transport::{TransportStream, TransportReceiveFrame};
 use http::connection::{HttpConnection, SendStatus};
-use http::session::{
-    SessionState,
-    DefaultSessionState,
-    DefaultStream,
-    Stream,
-};
+use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 use http::session::Client as ClientMarker;
 use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 
@@ -97,7 +92,9 @@ use http::client::{ClientConnection, HttpConnect, RequestStream, ClientStream};
 /// }
 /// println!("{}", str::from_utf8(&response.body).unwrap());
 /// ```
-pub struct SimpleClient<S> where S: TransportStream {
+pub struct SimpleClient<S>
+    where S: TransportStream
+{
     /// The underlying `ClientConnection` that the client uses
     conn: ClientConnection,
     /// The name of the host to which the client is connected to.
@@ -109,15 +106,16 @@ pub struct SimpleClient<S> where S: TransportStream {
     sender: S,
 }
 
-impl<S> SimpleClient<S> where S: TransportStream {
+impl<S> SimpleClient<S>
+    where S: TransportStream
+{
     /// Creates a new `SimpleClient` instance that will use the given `stream` instance for its
     /// underlying communication with the host. Additionally, requires the host identifier and the
     /// scheme of the connection.
     ///
     /// It assumes that the given `stream` has already been initialized for HTTP/2 communication
     /// (by having the required protocol negotiation done and writing the client preface).
-    pub fn with_stream(stream: S, host: String, scheme: HttpScheme)
-            -> HttpResult<SimpleClient<S>> {
+    pub fn with_stream(stream: S, host: String, scheme: HttpScheme) -> HttpResult<SimpleClient<S>> {
         let state = DefaultSessionState::<ClientMarker, _>::new();
         let receiver = try!(stream.try_split());
         let conn = HttpConnection::new(scheme);
@@ -141,7 +139,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
     ///
     /// Currently, it panics if the connector returns an error.
     pub fn with_connector<C>(connector: C) -> HttpResult<SimpleClient<S>>
-            where C: HttpConnect<Stream=S> {
+        where C: HttpConnect<Stream = S>
+    {
         let ClientStream(stream, scheme, host) = try!(connector.connect());
         SimpleClient::with_stream(stream, host, scheme)
     }
@@ -150,9 +149,8 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// connection.
     #[inline]
     fn init(&mut self) -> HttpResult<()> {
-        self.conn.expect_settings(
-            &mut TransportReceiveFrame::new(&mut self.receiver),
-            &mut self.sender)
+        self.conn.expect_settings(&mut TransportReceiveFrame::new(&mut self.receiver),
+                                  &mut self.sender)
     }
 
     /// Send a request to the server. Blocks until the entire request has been
@@ -170,13 +168,17 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// response.
     ///
     /// Any IO errors are propagated.
-    pub fn request(&mut self, method: &[u8], path: &[u8], extras: &[Header], body: Option<Vec<u8>>)
-            -> HttpResult<StreamId> {
+    pub fn request(&mut self,
+                   method: &[u8],
+                   path: &[u8],
+                   extras: &[Header],
+                   body: Option<Vec<u8>>)
+                   -> HttpResult<StreamId> {
         // Prepares the request stream
         let stream = self.new_stream(method, path, extras, body);
         // Starts the request (i.e. sends out the headers)
         let stream_id = try!(self.conn.start_request(stream, &mut self.receiver));
-        // TODO(mlalic): Remove when `Stream::on_id_assigned` is invoked by the session. 
+        // TODO(mlalic): Remove when `Stream::on_id_assigned` is invoked by the session.
         self.conn.state.get_stream_mut(stream_id).unwrap().stream_id = Some(stream_id);
 
         // And now makes sure the data is sent out...
@@ -204,7 +206,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     pub fn get_response(&mut self, stream_id: StreamId) -> HttpResult<Response<'static, 'static>> {
         match self.conn.state.get_stream_ref(stream_id) {
             None => return Err(HttpError::UnknownStreamId),
-            Some(_) => {},
+            Some(_) => {}
         };
         loop {
             if let Some(stream) = self.conn.state.get_stream_ref(stream_id) {
@@ -222,15 +224,20 @@ impl<S> SimpleClient<S> where S: TransportStream {
 
     /// Performs a GET request on the given path. This is a shortcut method for
     /// calling `request` followed by `get_response` for the returned stream ID.
-    pub fn get(&mut self, path: &[u8], extra_headers: &[Header])
-            -> HttpResult<Response<'static, 'static>> {
+    pub fn get(&mut self,
+               path: &[u8],
+               extra_headers: &[Header])
+               -> HttpResult<Response<'static, 'static>> {
         let stream_id = try!(self.request(b"GET", path, extra_headers, None));
         self.get_response(stream_id)
     }
 
     /// Performs a POST request on the given path.
-    pub fn post(&mut self, path: &[u8], extra_headers: &[Header], body: Vec<u8>)
-            -> HttpResult<Response<'static, 'static>> {
+    pub fn post(&mut self,
+                path: &[u8],
+                extra_headers: &[Header],
+                body: Vec<u8>)
+                -> HttpResult<Response<'static, 'static>> {
         let stream_id = try!(self.request(b"POST", path, extra_headers, Some(body)));
         self.get_response(stream_id)
     }
@@ -240,13 +247,12 @@ impl<S> SimpleClient<S> where S: TransportStream {
     ///
     /// The `RequestStream` is then ready to be passed on to the connection instance in order to
     /// start the request.
-    fn new_stream<'n ,'v>(
-            &self,
-            method: &'v [u8],
-            path: &'v [u8],
-            extras: &[Header<'n, 'v>],
-            body: Option<Vec<u8>>)
-            -> RequestStream<'n, 'v, DefaultStream> {
+    fn new_stream<'n, 'v>(&self,
+                          method: &'v [u8],
+                          path: &'v [u8],
+                          extras: &[Header<'n, 'v>],
+                          body: Option<Vec<u8>>)
+                          -> RequestStream<'n, 'v, DefaultStream> {
         let mut stream = DefaultStream::new();
         match body {
             Some(body) => stream.set_full_data(body),
@@ -274,8 +280,7 @@ impl<S> SimpleClient<S> where S: TransportStream {
     /// frame off the HTTP/2 connection.
     #[inline]
     fn handle_next_frame(&mut self) -> HttpResult<()> {
-        self.conn.handle_next_frame(
-            &mut TransportReceiveFrame::new(&mut self.receiver),
-            &mut self.sender)
+        self.conn.handle_next_frame(&mut TransportReceiveFrame::new(&mut self.receiver),
+                                    &mut self.sender)
     }
 }

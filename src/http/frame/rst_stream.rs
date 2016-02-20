@@ -2,14 +2,7 @@
 use std::io;
 
 use http::{ErrorCode, StreamId};
-use http::frame::{
-    Frame,
-    FrameIR,
-    FrameBuilder,
-    FrameHeader,
-    RawFrame,
-    NoFlag,
-};
+use http::frame::{Frame, FrameIR, FrameBuilder, FrameHeader, RawFrame, NoFlag};
 
 /// The total allowed size for the `RST_STREAM` frame payload.
 pub const RST_STREAM_FRAME_LEN: u32 = 4;
@@ -80,10 +73,17 @@ impl<'a> Frame<'a> for RstStreamFrame {
         })
     }
 
-    fn is_set(&self, _: NoFlag) -> bool { false }
-    fn get_stream_id(&self) -> StreamId { self.stream_id }
+    fn is_set(&self, _: NoFlag) -> bool {
+        false
+    }
+    fn get_stream_id(&self) -> StreamId {
+        self.stream_id
+    }
     fn get_header(&self) -> FrameHeader {
-        (RST_STREAM_FRAME_LEN, RST_STREAM_FRAME_TYPE, self.flags, self.stream_id)
+        (RST_STREAM_FRAME_LEN,
+         RST_STREAM_FRAME_TYPE,
+         self.flags,
+         self.stream_id)
     }
 }
 
@@ -101,11 +101,7 @@ mod tests {
 
     use http::tests::common::serialize_frame;
     use http::ErrorCode;
-    use http::frame::{
-        pack_header,
-        FrameHeader,
-        Frame,
-    };
+    use http::frame::{pack_header, FrameHeader, Frame};
 
     /// A helper function that creates a new Vec containing the serialized representation of the
     /// given `FrameHeader` followed by the raw provided payload.
@@ -182,7 +178,8 @@ mod tests {
     fn test_serialize_raw_error_code() {
         let frame = RstStreamFrame::with_raw_error_code(3, 1024);
         let raw = serialize_frame(&frame);
-        assert_eq!(raw, prepare_frame_bytes((4, 0x3, 0, 3), vec![0, 0, 0x04, 0]));
+        assert_eq!(raw,
+                   prepare_frame_bytes((4, 0x3, 0, 3), vec![0, 0, 0x04, 0]));
     }
 
     #[test]
