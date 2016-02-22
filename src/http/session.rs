@@ -479,18 +479,18 @@ impl Stream for DefaultStream {
     fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
         let mut new_headers = Vec::<Header<'static, 'static>>::new();
 
-        if let Some(hs) = self.headers.take() {
-            for h in hs {
-                new_headers.push(h)
-            }
-        }
-
         for h in headers.into_iter() {
             let owned: OwnedHeader = h.into();
             new_headers.push(owned.into());
         }
 
-        self.headers = Some(new_headers)
+        self.headers = match self.headers.take() {
+            Some(mut x) => {
+                x.extend(new_headers);
+                Some(x)
+            }
+            None => Some(new_headers),
+        };
     }
 
     fn set_state(&mut self, state: StreamState) {
