@@ -14,12 +14,7 @@ use http::{StreamId, HttpError, Response, StaticResponse, Header, HttpResult, St
 use http::frame::{RawFrame, FrameIR};
 use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnection};
-use http::session::{
-    SessionState,
-    DefaultSessionState,
-    DefaultStream,
-    Stream,
-};
+use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 use http::session::Client as ClientMarker;
 use http::client::{ClientConnection, HttpConnect, ClientStream, RequestStream};
 
@@ -50,7 +45,9 @@ struct AsyncRequest {
 /// As such, this is a convenience struct that makes it possible to provide non-blocking writes
 /// from within `HttpConnection`s, while handling the actual writes using a `SendFrame`
 /// implementation that will block until the frame is sent on a separate thread.
-struct ChannelFrameSender<S> where S: SendFrame {
+struct ChannelFrameSender<S>
+    where S: SendFrame
+{
     /// The receiving end of the channel. Buffers the frames that are to be sent.
     rx: Receiver<Vec<u8>>,
     /// The `SendFrame` instance that will perform the actual writes from within the `send_next`
@@ -58,7 +55,9 @@ struct ChannelFrameSender<S> where S: SendFrame {
     inner: S,
 }
 
-impl<S> ChannelFrameSender<S> where S: SendFrame {
+impl<S> ChannelFrameSender<S>
+    where S: SendFrame
+{
     /// Creates a new `ChannelFrameSender` that will use the provided `SendFrame` instance within
     /// the `send_next` method in order to perform the final send to the remote peer.
     /// The `ChannelFrameSenderHandle` that is returned can be used to queue frames for sending
@@ -81,12 +80,11 @@ impl<S> ChannelFrameSender<S> where S: SendFrame {
     /// If the channel becomes disconnected from all senders, indicating that all handles to the
     /// sender have been dropped, the mehod will return an error.
     fn send_next(&mut self) -> HttpResult<()> {
-        let frame_buffer = try!(
-            self.rx.recv()
-                   .map_err(|_| {
-                       io::Error::new(io::ErrorKind::Other, "Unable to send frame")
-                   })
-        );
+        let frame_buffer = try!(self.rx
+                                    .recv()
+                                    .map_err(|_| {
+                                        io::Error::new(io::ErrorKind::Other, "Unable to send frame")
+                                    }));
         debug!("Performing the actual send frame IO");
         let raw_frame: RawFrame = frame_buffer.into();
         try!(self.inner.send_frame(raw_frame));
@@ -107,10 +105,9 @@ impl SendFrame for ChannelFrameSenderHandle {
     fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
         let mut buf = io::Cursor::new(Vec::with_capacity(1024));
         try!(frame.serialize_into(&mut buf));
-        try!(self.tx.send(buf.into_inner())
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::Other, "Unable to send frame")
-                    }));
+        try!(self.tx
+                 .send(buf.into_inner())
+                 .map_err(|_| io::Error::new(io::ErrorKind::Other, "Unable to send frame")));
         debug!("Queued the frame for sending...");
         Ok(())
     }
@@ -129,7 +126,9 @@ impl SendFrame for ChannelFrameSenderHandle {
 /// from within `HttpConnection`s, while handling the actual reads using a `ReceiveFrame`
 /// implementation that can block. (Predicated on triggering a single frame handle operation on
 /// the connection for each successfully executed `read_next`.)
-struct ChannelFrameReceiver<TS> where TS: TransportStream {
+struct ChannelFrameReceiver<TS>
+    where TS: TransportStream
+{
     /// The sender side of the channel. Buffers the frames read by the wrapped `ReceiveFrame`
     /// instance for future consumation by the associated `ChannelFrameReceiverHandle`.
     tx: Sender<RawFrame<'static>>,
@@ -139,13 +138,18 @@ struct ChannelFrameReceiver<TS> where TS: TransportStream {
 }
 
 use http::frame::unpack_header;
-impl<TS> ChannelFrameReceiver<TS> where TS: TransportStream {
+impl<TS> ChannelFrameReceiver<TS>
+    where TS: TransportStream
+{
     /// Creates a new `ChannelFrameReceiver`, as well as the associated
     /// `ChannelFrameReceiverHandle`.
     fn new(inner: TS) -> (ChannelFrameReceiver<TS>, ChannelFrameReceiverHandle) {
         let (send, recv) = mpsc::channel();
 
-        let handle = ChannelFrameReceiverHandle { rx: recv, raw: None };
+        let handle = ChannelFrameReceiverHandle {
+            rx: recv,
+            raw: None,
+        };
         let receiver = ChannelFrameReceiver {
             tx: send,
             inner: inner,
@@ -161,13 +165,14 @@ impl<TS> ChannelFrameReceiver<TS> where TS: TransportStream {
         try!(TransportStream::read_exact(&mut self.inner, &mut header));
         let total_len = unpack_header(&header).0 as usize;
         let mut buf = Vec::with_capacity(9 + total_len);
-        unsafe { buf.set_len(9 + total_len); }
+        unsafe {
+            buf.set_len(9 + total_len);
+        }
         try!(io::copy(&mut &header[..], &mut &mut buf[..9]));
         try!(TransportStream::read_exact(&mut self.inner, &mut buf[9..]));
-        try!(self.tx.send(buf.into())
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::Other, "Unable to read frame")
-                    }));
+        try!(self.tx
+                 .send(buf.into())
+                 .map_err(|_| io::Error::new(io::ErrorKind::Other, "Unable to read frame")));
         Ok(())
     }
 }
@@ -187,10 +192,12 @@ struct ChannelFrameReceiverHandle {
 
 impl ReceiveFrame for ChannelFrameReceiverHandle {
     fn recv_frame(&mut self) -> HttpResult<HttpFrame> {
-        let raw = try!(self.rx.recv()
-            .map_err(|_| {
-                HttpError::from(io::Error::new(io::ErrorKind::Other, "Unable to read frame"))
-            }));
+        let raw = try!(self.rx
+                           .recv()
+                           .map_err(|_| {
+                               HttpError::from(io::Error::new(io::ErrorKind::Other,
+                                                              "Unable to read frame"))
+                           }));
         // Tethers the lifetime of the returned parsed HttpFrame to the lifetime of `self` (i.e.
         // the provider of the frame).
         self.raw = Some(raw);
@@ -209,7 +216,9 @@ enum ClientServiceErr {
 }
 
 impl From<HttpError> for ClientServiceErr {
-    fn from(err: HttpError) -> ClientServiceErr { ClientServiceErr::Http(err) }
+    fn from(err: HttpError) -> ClientServiceErr {
+        ClientServiceErr::Http(err)
+    }
 }
 
 /// An enum representing the types of work that the `ClientService` can perform from within its
@@ -293,11 +302,8 @@ struct ClientService {
 
 /// A helper wrapper around the components of the `ClientService` that are returned from its
 /// constructor.
-struct Service<S>(
-    ClientService,
-    Sender<WorkItem>,
-    ChannelFrameReceiver<S>,
-    ChannelFrameSender<S>) where S: TransportStream;
+struct Service<S>(ClientService, Sender<WorkItem>, ChannelFrameReceiver<S>, ChannelFrameSender<S>)
+    where S: TransportStream;
 
 impl ClientService {
     /// Creates a new `ClientService` that will use the provided `ClientStream` for its underlying
@@ -323,9 +329,9 @@ impl ClientService {
     /// If no HTTP/2 connection can be established to the given host on the
     /// given port, returns `None`.
     pub fn new<S>(client_stream: ClientStream<S>) -> Option<Service<S>>
-            where S: TransportStream {
-        let (tx, rx): (Sender<WorkItem>, Receiver<WorkItem>) =
-                mpsc::channel();
+        where S: TransportStream
+    {
+        let (tx, rx): (Sender<WorkItem>, Receiver<WorkItem>) = mpsc::channel();
         let ClientStream(stream, scheme, host) = client_stream;
 
         // Manually split the stream into the write/read ends, so that we can...
@@ -337,9 +343,8 @@ impl ClientService {
 
         // ...and pass the non-blocking/buffering ends into the `HttpConnect` instead of the
         // blocking socket itself.
-        let conn = ClientConnection::with_connection(
-                HttpConnection::new(scheme),
-                DefaultSessionState::<ClientMarker, _>::new());
+        let conn = ClientConnection::with_connection(HttpConnection::new(scheme),
+                                                     DefaultSessionState::<ClientMarker, _>::new());
 
         let service = ClientService {
             outstanding_reqs: 0,
@@ -408,7 +413,7 @@ impl ClientService {
                 self.request_queue.push(async_req);
                 self.queue_next_request();
                 Ok(())
-            },
+            }
             WorkItem::HandleFrame => {
                 if !self.initialized {
                     try!(self.conn.expect_settings(&mut self.recv_handle, &mut self.send_handle));
@@ -417,7 +422,7 @@ impl ClientService {
                 } else {
                     self.handle_frame()
                 }
-            },
+            }
             WorkItem::SendData => {
                 debug!("Will queue some request data");
                 try!(self.conn.send_next_data(&mut self.send_handle));
@@ -426,7 +431,7 @@ impl ClientService {
             WorkItem::NewClient => {
                 self.client_count += 1;
                 Ok(())
-            },
+            }
             WorkItem::ClientLeft => {
                 self.client_count -= 1;
                 if self.client_count == 0 {
@@ -481,15 +486,18 @@ impl ClientService {
     /// the connection for transmission to the server (i.e. `start_request`).
     /// Also returns the sender end of the channel to which the response is to be transmitted,
     /// once received.
-    fn create_request(&self, async_req: AsyncRequest)
-            -> (RequestStream<'static, 'static, DefaultStream>, Sender<StaticResponse>) {
+    fn create_request(&self,
+                      async_req: AsyncRequest)
+                      -> (RequestStream<'static, 'static, DefaultStream>,
+                          Sender<StaticResponse>) {
         let mut headers: Vec<Header> = Vec::new();
         headers.extend(vec![
             Header::new(b":method", async_req.method),
             Header::new(b":path", async_req.path),
             Header::new(b":authority", self.host.clone()),
             Header::new(b":scheme", self.conn.scheme().as_bytes().to_vec()),
-        ].into_iter());
+        ]
+                           .into_iter());
         headers.extend(async_req.headers.into_iter());
 
         let mut stream = DefaultStream::new();
@@ -498,13 +506,11 @@ impl ClientService {
             None => stream.close_local(),
         };
 
-        (
-            RequestStream {
-                stream: stream,
-                headers: headers,
-            },
-            async_req.tx
-        )
+        (RequestStream {
+            stream: stream,
+            headers: headers,
+        },
+         async_req.tx)
     }
 
     /// Internal helper method. Sends a response assembled from the given
@@ -518,7 +524,7 @@ impl ClientService {
                 // This should never happen, it means the session gave us
                 // a response that we didn't request.
                 panic!("Received a response for an unknown request!");
-            },
+            }
             Some(tx) => {
                 let _ = tx.send(Response {
                     stream_id: stream_id,
@@ -604,9 +610,7 @@ pub struct Client {
 impl Clone for Client {
     fn clone(&self) -> Client {
         self.sender.send(WorkItem::NewClient).unwrap();
-        Client {
-            sender: self.sender.clone(),
-        }
+        Client { sender: self.sender.clone() }
     }
 }
 
@@ -636,15 +640,23 @@ impl Client {
     ///
     /// If the HTTP/2 connection cannot be initialized returns `None`.
     pub fn with_connector<C, S>(connector: C) -> Option<Client>
-            where C: HttpConnect<Stream=S>, S: TransportStream + Send + 'static {
+        where C: HttpConnect<Stream = S>,
+              S: TransportStream + Send + 'static
+    {
         // Use the provided connector to establish a network connection...
-        let client_stream = connector.connect().ok().unwrap();
+        let client_stream = match connector.connect().ok() {
+            Some(cs) => cs,
+            None => return None,
+        };
         // Keep a socket handle in order to shut it down once the service stops. This is required
         // because if the service decides to stop (due to all clients disconnecting) while the
         // socket is still open and the read thread waiting, it can happen that the read thread
         // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
         // decides to close it), effectively leaking the socket and thread.
-        let mut sck = client_stream.0.try_split().unwrap();
+        let mut sck = match client_stream.0.try_split() {
+            Ok(sck) => sck,
+            Err(_) => return None,
+        };
 
         let service = match ClientService::new(client_stream) {
             Some(service) => service,
@@ -682,9 +694,7 @@ impl Client {
             debug!("Reader thread halting");
         });
 
-        Some(Client {
-            sender: rx,
-        })
+        Some(Client { sender: rx })
     }
 
     /// Issues a new request to the server.
@@ -707,15 +717,14 @@ impl Client {
     /// If the method is unable to queue the request, it must mean that the
     /// underlying HTTP/2 connection to which this client is associated has
     /// failed and it returns `None`.
-    pub fn request(
-            &self,
-            method: &[u8],
-            path: &[u8],
-            headers: &[StaticHeader],
-            body: Option<Vec<u8>>)
-            -> Option<Receiver<StaticResponse>> {
+    pub fn request(&self,
+                   method: &[u8],
+                   path: &[u8],
+                   headers: &[StaticHeader],
+                   body: Option<Vec<u8>>)
+                   -> Option<Receiver<StaticResponse>> {
         let (resp_tx, resp_rx): (Sender<StaticResponse>, Receiver<StaticResponse>) =
-                mpsc::channel();
+            mpsc::channel();
         // A send can only fail if the receiver is disconnected. If the send
         // fails here, it means that the service hit an error on the underlying
         // HTTP/2 connection and will never come alive again.
@@ -744,8 +753,11 @@ impl Client {
     /// Issues a POST request to the server.
     ///
     /// Returns the receiving end of a channel where the `Response` will eventually be pushed.
-    pub fn post(&self, path: &[u8], headers: &[StaticHeader], body: Vec<u8>)
-            -> Option<Receiver<StaticResponse>> {
+    pub fn post(&self,
+                path: &[u8],
+                headers: &[StaticHeader],
+                body: Vec<u8>)
+                -> Option<Receiver<StaticResponse>> {
         self.request(b"POST", path, headers, Some(body))
     }
 }
