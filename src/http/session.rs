@@ -535,7 +535,7 @@ mod tests {
                 SessionState, Parity};
     use super::Client as ClientMarker;
     use super::Server as ServerMarker;
-    use http::ErrorCode;
+    use http::{ErrorCode, Header};
     use http::tests::common::TestStream;
 
     /// Checks that the `Parity` struct indeed works as advertised.
@@ -744,5 +744,29 @@ mod tests {
             Err(StreamDataError::Closed) => true,
             _ => false,
         });
+    }
+
+    #[test]
+    /// test_second_header_call will ensure that if headers are called twice in one stream (such as
+    /// to set trailers) both results will be added to the stream's headers.
+    fn test_second_header_call() {
+        let mut stream = DefaultStream::new();
+
+        let headers1 = vec![Header::new(b"Foo", b"Bar")];
+        let headers2 = vec![Header::new(b"Baz", b"Bop")];
+
+        stream.set_headers(headers1);
+        stream.set_headers(headers2);
+
+        assert!(stream.headers.is_some());
+        let headers = stream.headers.unwrap();
+
+        assert_eq!(headers.len(), 2);
+        // These assert checks are ugly, but they make the borrow checker happy.
+        assert_eq!(headers[0].clone().name.into_owned(), b"Foo");
+        assert_eq!(headers[1].clone().name.into_owned(), b"Baz");
+
+        assert_eq!(headers[0].clone().value.into_owned(), b"Bar");
+        assert_eq!(headers[1].clone().value.into_owned(), b"Bop");
     }
 }
