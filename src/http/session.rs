@@ -477,19 +477,17 @@ impl Stream for DefaultStream {
     }
 
     fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
-        let mut new_headers = Vec::<Header<'static, 'static>>::new();
-
-        for h in headers.into_iter() {
+        let new_headers = headers.into_iter().map(|h| {
             let owned: OwnedHeader = h.into();
-            new_headers.push(owned.into());
-        }
+            owned.into()
+        });
 
         self.headers = match self.headers.take() {
             Some(mut x) => {
-                x.extend(new_headers);
+                x.extend(new_headers.collect::<Vec<Header<'static, 'static>>>());
                 Some(x)
             }
-            None => Some(new_headers),
+            None => Some(new_headers.collect()),
         };
     }
 
