@@ -3,15 +3,7 @@
 use std::io;
 use std::borrow::Cow;
 use http::StreamId;
-use http::frame::{
-    FrameBuilder,
-    FrameIR,
-    Flag,
-    Frame,
-    FrameHeader,
-    RawFrame,
-    parse_padded_payload,
-};
+use http::frame::{FrameBuilder, FrameIR, Flag, Frame, FrameHeader, RawFrame, parse_padded_payload};
 
 /// An enum representing the flags that a `DataFrame` can have.
 /// The integer representation associated to each variant is that flag's
@@ -138,8 +130,7 @@ impl<'a> DataFrame<'a> {
     /// If there was no padding, returns `None` for the second tuple member.
     ///
     /// If the payload was invalid for a DATA frame, returns `None`
-    fn parse_payload(payload: &[u8], padded: bool)
-            -> Option<(&[u8], Option<u8>)> {
+    fn parse_payload(payload: &[u8], padded: bool) -> Option<(&[u8], Option<u8>)> {
         let (data, pad_len) = if padded {
             match parse_padded_payload(payload) {
                 Some((data, pad_len)) => (data, Some(pad_len)),
@@ -195,7 +186,7 @@ impl<'a> Frame<'a> for DataFrame<'a> {
                     data: Cow::Borrowed(data),
                     padding_len: Some(padding_len),
                 })
-            },
+            }
             Some((data, None)) => {
                 // The data got extracted (from a no-padding frame)
                 Some(DataFrame {
@@ -204,7 +195,7 @@ impl<'a> Frame<'a> for DataFrame<'a> {
                     data: Cow::Borrowed(data),
                     padding_len: None,
                 })
-            },
+            }
             None => None,
         }
     }
@@ -243,7 +234,7 @@ impl<'a> FrameIR for DataFrame<'a> {
 #[cfg(test)]
 mod tests {
     use super::{DataFlag, DataFrame};
-    use http::frame::tests::{build_padded_frame_payload};
+    use http::frame::tests::build_padded_frame_payload;
     use http::tests::common::{raw_frame_from_parts, serialize_frame};
     use http::frame::{pack_header, Frame};
 
@@ -469,7 +460,9 @@ mod tests {
             // Data
             res.extend(data.clone());
             // Actual padding
-            for _ in 0..5 { res.push(0); }
+            for _ in 0..5 {
+                res.push(0);
+            }
 
             res
         };

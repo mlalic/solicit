@@ -11,7 +11,7 @@ use std::io::Cursor;
 use std::iter::FromIterator;
 use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode, HttpError, ConnectionError};
 use http::frame::HttpSetting;
-use http::connection::{HttpConnection};
+use http::connection::HttpConnection;
 
 /// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
 /// it. Essentially, it allows the `HttpConnection` to pass information onto those higher levels
@@ -23,28 +23,34 @@ pub trait Session {
     /// Notifies the `Session` that a new data chunk has arrived on the
     /// connection for a particular stream. Only the raw data is passed
     /// to the callback (all padding is already discarded by the connection).
-    fn new_data_chunk(&mut self, stream_id: StreamId, data: &[u8], conn: &mut HttpConnection)
-            -> HttpResult<()>;
+    fn new_data_chunk(&mut self,
+                      stream_id: StreamId,
+                      data: &[u8],
+                      conn: &mut HttpConnection)
+                      -> HttpResult<()>;
     /// Notifies the `Session` that headers have arrived for a particular
     /// stream. The given list of headers is already decoded by the connection.
     /// TODO: The Session should be notified separately for every header that is decoded.
-    fn new_headers<'n, 'v>(
-            &mut self,
-            stream_id: StreamId,
-            headers: Vec<Header<'n, 'v>>,
-            conn: &mut HttpConnection)
-            -> HttpResult<()>;
+    fn new_headers<'n, 'v>(&mut self,
+                           stream_id: StreamId,
+                           headers: Vec<Header<'n, 'v>>,
+                           conn: &mut HttpConnection)
+                           -> HttpResult<()>;
     /// Notifies the `Session` that a particular stream got closed by the peer.
-    fn end_of_stream(&mut self, stream_id: StreamId, conn: &mut HttpConnection)
-            -> HttpResult<()>;
+    fn end_of_stream(&mut self, stream_id: StreamId, conn: &mut HttpConnection) -> HttpResult<()>;
     /// Notifies the `Session` that a particular stream was reset by the peer and provides the
     /// reason behind it.
-    fn rst_stream(&mut self, stream_id: StreamId, error_code: ErrorCode, conn: &mut HttpConnection)
-            -> HttpResult<()>;
+    fn rst_stream(&mut self,
+                  stream_id: StreamId,
+                  error_code: ErrorCode,
+                  conn: &mut HttpConnection)
+                  -> HttpResult<()>;
     /// Notifies the `Session` that the peer has sent a new set of settings. The session itself is
     /// responsible for acknowledging the receipt of the settings.
-    fn new_settings(&mut self, settings: Vec<HttpSetting>, conn: &mut HttpConnection)
-            -> HttpResult<()>;
+    fn new_settings(&mut self,
+                    settings: Vec<HttpSetting>,
+                    conn: &mut HttpConnection)
+                    -> HttpResult<()>;
 
     /// Notifies the `Session` that the peer has sent a GOAWAY frame, indicating that the
     /// connection is terminated.
@@ -54,13 +60,12 @@ pub trait Session {
     ///
     /// Concrete `Session` implementations can override this in order to, for example, figure out
     /// which streams can be safely retried (based on the last processed stream id).
-    fn on_goaway(
-            &mut self,
-            _last_stream_id: StreamId,
-            error_code: ErrorCode,
-            debug_data: Option<&[u8]>,
-            _conn: &mut HttpConnection)
-            -> HttpResult<()> {
+    fn on_goaway(&mut self,
+                 _last_stream_id: StreamId,
+                 error_code: ErrorCode,
+                 debug_data: Option<&[u8]>,
+                 _conn: &mut HttpConnection)
+                 -> HttpResult<()> {
         Err(HttpError::PeerConnectionError(ConnectionError {
             error_code: error_code,
             debug_data: debug_data.map(|data| data.to_vec()),
@@ -72,13 +77,17 @@ pub trait Session {
 ///
 /// Allows `SessionState` implementations to return iterators over its session without being forced
 /// to declare them as associated types.
-pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item=(&'a StreamId, &'a mut S)> + 'a>);
+pub struct StreamIter<'a, S: Stream + 'a>(Box<Iterator<Item = (&'a StreamId, &'a mut S)> + 'a>);
 
-impl<'a, S> Iterator for StreamIter<'a, S> where S: Stream + 'a {
+impl<'a, S> Iterator for StreamIter<'a, S>
+    where S: Stream + 'a
+{
     type Item = (&'a StreamId, &'a mut S);
 
     #[inline]
-    fn next(&mut self) -> Option<(&'a StreamId, &'a mut S)> { self.0.next() }
+    fn next(&mut self) -> Option<(&'a StreamId, &'a mut S)> {
+        self.0.next()
+    }
 }
 
 /// A trait defining a set of methods for accessing and influencing an HTTP/2 session's state.
@@ -122,10 +131,15 @@ pub trait SessionState {
     /// The default implementations relies on the `iter` implementation to find the closed streams
     /// first and then calls `remove_stream` on all of them.
     fn get_closed(&mut self) -> Vec<Self::Stream> {
-        let ids: Vec<StreamId> =
-            self.iter().filter_map(|(id, s)| {
-                if s.is_closed() { Some(*id) } else { None }
-            }).collect();
+        let ids: Vec<StreamId> = self.iter()
+                                     .filter_map(|(id, s)| {
+                                         if s.is_closed() {
+                                             Some(*id)
+                                         } else {
+                                             None
+                                         }
+                                     })
+                                     .collect();
         FromIterator::from_iter(ids.into_iter().map(|i| self.remove_stream(i).unwrap()))
     }
 }
@@ -160,7 +174,9 @@ impl Parity {
 
 /// An implementation of the `SessionState` trait that tracks the active streams in a `HashMap`,
 /// mapping the stream ID to the concrete `Stream` instance.
-pub struct DefaultSessionState<T, S> where S: Stream {
+pub struct DefaultSessionState<T, S>
+    where S: Stream
+{
     /// All streams that the session state is currently aware of.
     streams: HashMap<StreamId, S>,
     /// The next available ID for outgoing streams.
@@ -175,7 +191,9 @@ pub struct DefaultSessionState<T, S> where S: Stream {
     _server_or_client: PhantomData<T>,
 }
 
-impl<T, S> DefaultSessionState<T, S> where S: Stream {
+impl<T, S> DefaultSessionState<T, S>
+    where S: Stream
+{
     /// A helper function that returns `true` iff the given `StreamId` is a valid ID for an
     /// incoming stream, depending on whether the session is that of a client or a server.
     fn validate_incoming_parity(&self, stream_id: StreamId) -> bool {
@@ -184,7 +202,9 @@ impl<T, S> DefaultSessionState<T, S> where S: Stream {
     }
 }
 
-impl<S> DefaultSessionState<Client, S> where S: Stream {
+impl<S> DefaultSessionState<Client, S>
+    where S: Stream
+{
     /// Creates a new `DefaultSessionState` for a client session with no known streams.
     pub fn new() -> DefaultSessionState<Client, S> {
         DefaultSessionState {
@@ -196,7 +216,9 @@ impl<S> DefaultSessionState<Client, S> where S: Stream {
     }
 }
 
-impl<S> DefaultSessionState<Server, S> where S: Stream {
+impl<S> DefaultSessionState<Server, S>
+    where S: Stream
+{
     /// Creates a new `DefaultSessionState` for a server session with no known streams.
     pub fn new() -> DefaultSessionState<Server, S> {
         DefaultSessionState {
@@ -221,7 +243,9 @@ pub fn default_server_state<S: Stream>() -> DefaultSessionState<Server, S> {
     DefaultSessionState::<Server, S>::new()
 }
 
-impl<T, S> SessionState for DefaultSessionState<T, S> where S: Stream {
+impl<T, S> SessionState for DefaultSessionState<T, S>
+    where S: Stream
+{
     type Stream = S;
 
     fn insert_outgoing(&mut self, stream: Self::Stream) -> StreamId {
@@ -238,7 +262,7 @@ impl<T, S> SessionState for DefaultSessionState<T, S> where S: Stream {
                 // TODO(mlalic): Assert that the stream IDs are monotonically increasing!
                 self.streams.insert(stream_id, stream);
                 Ok(())
-            },
+            }
         }
     }
 
@@ -286,8 +310,12 @@ pub enum StreamDataError {
     Other(Box<Error + Send + Sync>),
 }
 
-impl<E> From<E> for StreamDataError where E: Error + Send + Sync + 'static {
-    fn from(err: E) -> StreamDataError { StreamDataError::Other(Box::new(err)) }
+impl<E> From<E> for StreamDataError
+    where E: Error + Send + Sync + 'static
+{
+    fn from(err: E) -> StreamDataError {
+        StreamDataError::Other(Box::new(err))
+    }
 }
 
 /// The enum represents the successful completion of the `Stream::get_data_chunk` method.
@@ -347,7 +375,9 @@ pub trait Stream {
 
     /// Transitions the stream state to closed. After this, the stream is considered to be closed
     /// for any further reads or writes.
-    fn close(&mut self) { self.set_state(StreamState::Closed); }
+    fn close(&mut self) {
+        self.set_state(StreamState::Closed);
+    }
     /// Updates the `Stream` status to indicate that it is closed locally.
     ///
     /// If the stream is closed on the remote end, then it is fully closed after this call.
@@ -371,7 +401,9 @@ pub trait Stream {
     /// Returns whether the stream is closed.
     ///
     /// A stream is considered to be closed iff its state is set to `Closed`.
-    fn is_closed(&self) -> bool { self.state() == StreamState::Closed }
+    fn is_closed(&self) -> bool {
+        self.state() == StreamState::Closed
+    }
     /// Returns whether the stream is closed locally.
     fn is_closed_local(&self) -> bool {
         match self.state() {
@@ -445,14 +477,27 @@ impl Stream for DefaultStream {
     }
 
     fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>) {
-        self.headers = Some(headers.into_iter().map(|h| {
+        let new_headers = headers.into_iter().map(|h| {
             let owned: OwnedHeader = h.into();
             owned.into()
-        }).collect());
-    }
-    fn set_state(&mut self, state: StreamState) { self.state = state; }
+        });
 
-    fn state(&self) -> StreamState { self.state }
+        self.headers = match self.headers.take() {
+            Some(mut x) => {
+                x.extend(new_headers.collect::<Vec<Header<'static, 'static>>>());
+                Some(x)
+            }
+            None => Some(new_headers.collect()),
+        };
+    }
+
+    fn set_state(&mut self, state: StreamState) {
+        self.state = state;
+    }
+
+    fn state(&self) -> StreamState {
+        self.state
+    }
 
     fn get_data_chunk(&mut self, buf: &mut [u8]) -> Result<StreamDataChunk, StreamDataError> {
         if self.is_closed_local() {
@@ -461,7 +506,7 @@ impl Stream for DefaultStream {
         let chunk = match self.data.as_mut() {
             // No data associated to the stream, but it's open => nothing available for writing
             None => StreamDataChunk::Unavailable,
-            Some(d) =>  {
+            Some(d) => {
                 // For the `Vec`-backed reader, this should never fail, so unwrapping is
                 // fine.
                 let read = d.read(buf).unwrap();
@@ -475,7 +520,7 @@ impl Stream for DefaultStream {
         // Transition the stream state to locally closed if we've extracted the final data chunk.
         match chunk {
             StreamDataChunk::Last(_) => self.close_local(),
-            _ => {},
+            _ => {}
         };
 
         Ok(chunk)
@@ -484,17 +529,11 @@ impl Stream for DefaultStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Stream,
-        DefaultSessionState,
-        DefaultStream,
-        StreamDataChunk, StreamDataError,
-        SessionState,
-        Parity,
-    };
+    use super::{Stream, DefaultSessionState, DefaultStream, StreamDataChunk, StreamDataError,
+                SessionState, Parity};
     use super::Client as ClientMarker;
     use super::Server as ServerMarker;
-    use http::ErrorCode;
+    use http::{ErrorCode, Header};
     use http::tests::common::TestStream;
 
     /// Checks that the `Parity` struct indeed works as advertised.
@@ -608,7 +647,9 @@ mod tests {
     fn test_default_stream_get_data() {
         // The buffer that will be used in upcoming tests
         let mut buf = Vec::with_capacity(2);
-        unsafe { buf.set_len(2); }
+        unsafe {
+            buf.set_len(2);
+        }
 
         {
             // A newly open stream has no available data.
@@ -701,5 +742,29 @@ mod tests {
             Err(StreamDataError::Closed) => true,
             _ => false,
         });
+    }
+
+    #[test]
+    /// test_second_header_call will ensure that if headers are called twice in one stream (such as
+    /// to set trailers) both results will be added to the stream's headers.
+    fn test_second_header_call() {
+        let mut stream = DefaultStream::new();
+
+        let headers1 = vec![Header::new(b"Foo", b"Bar")];
+        let headers2 = vec![Header::new(b"Baz", b"Bop")];
+
+        stream.set_headers(headers1);
+        stream.set_headers(headers2);
+
+        assert!(stream.headers.is_some());
+        let headers = stream.headers.unwrap();
+
+        assert_eq!(headers.len(), 2);
+        // These assert checks are ugly, but they make the borrow checker happy.
+        assert_eq!(headers[0].clone().name.into_owned(), b"Foo");
+        assert_eq!(headers[1].clone().name.into_owned(), b"Baz");
+
+        assert_eq!(headers[0].clone().value.into_owned(), b"Bar");
+        assert_eq!(headers[1].clone().value.into_owned(), b"Bop");
     }
 }

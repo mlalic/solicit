@@ -120,11 +120,13 @@ pub enum TlsConnectError {
 impl fmt::Debug for TlsConnectError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         // The enum variant...
-        try!(write!(fmt, "TlsConnectError::{}", match *self {
-            TlsConnectError::IoError(_) => "IoError",
-            TlsConnectError::SslError(_) => "SslError",
-            TlsConnectError::Http2NotSupported(_) => "Http2NotSupported",
-        }));
+        try!(write!(fmt,
+                    "TlsConnectError::{}",
+                    match *self {
+                        TlsConnectError::IoError(_) => "IoError",
+                        TlsConnectError::SslError(_) => "SslError",
+                        TlsConnectError::Http2NotSupported(_) => "Http2NotSupported",
+                    }));
         // ...and the wrapped value, except for when it's the stream.
         match *self {
             TlsConnectError::IoError(ref err) => try!(write!(fmt, "({:?})", err)),
@@ -138,7 +140,9 @@ impl fmt::Debug for TlsConnectError {
 
 impl fmt::Display for TlsConnectError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "TLS HTTP/2 connect error: {}", (self as &error::Error).description())
+        write!(fmt,
+               "TLS HTTP/2 connect error: {}",
+               (self as &error::Error).description())
     }
 }
 
@@ -225,7 +229,7 @@ impl<'a, 'ctx> HttpConnect for TlsConnector<'a, 'ctx> {
             Http2TlsContext::CertPath(path) => {
                 let ctx = try!(TlsConnector::build_default_context(&path));
                 try!(Ssl::new(&ctx))
-            },
+            }
             Http2TlsContext::Wrapped(ctx) => try!(Ssl::new(ctx)),
         };
         // SNI must be used

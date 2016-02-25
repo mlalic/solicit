@@ -4,15 +4,7 @@ use std::io;
 use std::borrow::Cow;
 
 use http::StreamId;
-use http::frame::{
-    FrameBuilder,
-    FrameIR,
-    Flag,
-    Frame,
-    FrameHeader,
-    RawFrame,
-    parse_padded_payload,
-};
+use http::frame::{FrameBuilder, FrameIR, Flag, Frame, FrameHeader, RawFrame, parse_padded_payload};
 
 /// An enum representing the flags that a `HeadersFrame` can have.
 /// The integer representation associated to each variant is that flag's
@@ -56,8 +48,7 @@ pub struct StreamDependency {
 impl StreamDependency {
     /// Creates a new `StreamDependency` with the given stream ID, weight, and
     /// exclusivity.
-    pub fn new(stream_id: StreamId, weight: u8, is_exclusive: bool)
-            -> StreamDependency {
+    pub fn new(stream_id: StreamId, weight: u8, is_exclusive: bool) -> StreamDependency {
         StreamDependency {
             stream_id: stream_id,
             weight: weight,
@@ -112,13 +103,11 @@ impl StreamDependency {
         } else {
             0
         };
-        [
-            (((self.stream_id >> 24) & 0x000000FF) as u8) | e_bit,
-            (((self.stream_id >> 16) & 0x000000FF) as u8),
-            (((self.stream_id >>  8) & 0x000000FF) as u8),
-            (((self.stream_id >>  0) & 0x000000FF) as u8),
-            self.weight,
-        ]
+        [(((self.stream_id >> 24) & 0x000000FF) as u8) | e_bit,
+         (((self.stream_id >> 16) & 0x000000FF) as u8),
+         (((self.stream_id >> 8) & 0x000000FF) as u8),
+         (((self.stream_id >> 0) & 0x000000FF) as u8),
+         self.weight]
     }
 }
 
@@ -155,10 +144,10 @@ impl<'a> HeadersFrame<'a> {
 
     /// Creates a new `HeadersFrame` with the given header fragment, stream ID
     /// and stream dependency information. No padding and no flags are set.
-    pub fn with_dependency(
-            fragment: Vec<u8>,
-            stream_id: StreamId,
-            stream_dep: StreamDependency) -> HeadersFrame<'a> {
+    pub fn with_dependency(fragment: Vec<u8>,
+                           stream_id: StreamId,
+                           stream_dep: StreamDependency)
+                           -> HeadersFrame<'a> {
         HeadersFrame {
             header_fragment: Cow::Owned(fragment),
             stream_id: stream_id,
@@ -204,7 +193,9 @@ impl<'a> HeadersFrame<'a> {
         self.header_fragment.len() as u32 + priority + padding
     }
 
-    pub fn header_fragment(&self) -> &[u8] { &self.header_fragment }
+    pub fn header_fragment(&self) -> &[u8] {
+        &self.header_fragment
+    }
 
     /// Sets the given flag for the frame.
     pub fn set_flag(&mut self, flag: HeadersFlag) {
@@ -321,7 +312,7 @@ impl<'a> FrameIR for HeadersFrame<'a> {
 #[cfg(test)]
 mod tests {
     use super::{HeadersFrame, HeadersFlag, StreamDependency};
-    use http::frame::tests::{build_padded_frame_payload};
+    use http::frame::tests::build_padded_frame_payload;
     use http::tests::common::{raw_frame_from_parts, serialize_frame};
     use http::frame::{pack_header, Frame};
 
@@ -500,7 +491,7 @@ mod tests {
 
         let raw = raw_frame_from_parts(header, payload);
         let frame: Option<HeadersFrame> = Frame::from_raw(&raw);
-        
+
         assert!(frame.is_none());
     }
 
@@ -514,7 +505,7 @@ mod tests {
 
         let raw = raw_frame_from_parts(header, payload);
         let frame: Option<HeadersFrame> = Frame::from_raw(&raw);
-        
+
         assert!(frame.is_none());
     }
 

@@ -2,15 +2,8 @@
 
 use std::io;
 
-use http::{StreamId};
-use http::frame::{
-    Frame,
-    FrameIR,
-    FrameBuilder,
-    FrameHeader,
-    RawFrame,
-    NoFlag,
-};
+use http::StreamId;
+use http::frame::{Frame, FrameIR, FrameBuilder, FrameHeader, RawFrame, NoFlag};
 
 /// The minimum size for the `WINDOW_UPDATE` frame payload.
 pub const WINDOW_UPDATE_FRAME_LEN: u32 = 4;
@@ -75,10 +68,17 @@ impl<'a> Frame<'a> for WindowUpdateFrame {
         })
     }
 
-    fn is_set(&self, _: NoFlag) -> bool { false }
-    fn get_stream_id(&self) -> StreamId { self.stream_id }
+    fn is_set(&self, _: NoFlag) -> bool {
+        false
+    }
+    fn get_stream_id(&self) -> StreamId {
+        self.stream_id
+    }
     fn get_header(&self) -> FrameHeader {
-        (WINDOW_UPDATE_FRAME_LEN, WINDOW_UPDATE_FRAME_TYPE, self.flags, self.get_stream_id())
+        (WINDOW_UPDATE_FRAME_LEN,
+         WINDOW_UPDATE_FRAME_TYPE,
+         self.flags,
+         self.get_stream_id())
     }
 }
 

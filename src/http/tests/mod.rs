@@ -13,36 +13,31 @@ mod root_tests {
     fn test_parse_status_code_response() {
         {
             // Only status => Ok
-            let resp = Response::new(
-                1,
-                vec![(b":status".to_vec(), b"200".to_vec())],
-                vec![]);
+            let resp = Response::new(1, vec![(b":status".to_vec(), b"200".to_vec())], vec![]);
             assert_eq!(resp.status_code().ok().unwrap(), 200);
         }
         {
             // Extra headers => still works
-            let resp = Response::new(
-                1,
-                vec![(b":status".to_vec(), b"200".to_vec()),
-                (b"key".to_vec(), b"val".to_vec())],
-                vec![]);
+            let resp = Response::new(1,
+                                     vec![(b":status".to_vec(), b"200".to_vec()),
+                                          (b"key".to_vec(), b"val".to_vec())],
+                                     vec![]);
             assert_eq!(resp.status_code().ok().unwrap(), 200);
         }
         {
             // Status is not the first header => malformed
-            let resp = Response::new(
-                1,
-                vec![(b"key".to_vec(), b"val".to_vec()),
-                (b":status".to_vec(), b"200".to_vec())],
-                vec![]);
+            let resp = Response::new(1,
+                                     vec![(b"key".to_vec(), b"val".to_vec()),
+                                          (b":status".to_vec(), b"200".to_vec())],
+                                     vec![]);
             assert_eq!(resp.status_code().err().unwrap(),
-            HttpError::MalformedResponse);
+                       HttpError::MalformedResponse);
         }
         {
             // No headers at all => Malformed
             let resp = Response::new(1, vec![], vec![]);
             assert_eq!(resp.status_code().err().unwrap(),
-            HttpError::MalformedResponse);
+                       HttpError::MalformedResponse);
         }
     }
 
@@ -143,11 +138,11 @@ mod test_header {
 
         match clone.name {
             Cow::Owned(_) => panic!("Expected a borrowed name"),
-            _ => {},
+            _ => {}
         };
         match clone.value {
             Cow::Owned(_) => panic!("Expected a borrowed value"),
-            _ => {},
+            _ => {}
         };
     }
 

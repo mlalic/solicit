@@ -3,15 +3,7 @@
 use std::io;
 
 use http::{ErrorCode, StreamId};
-use http::frame::{
-    Frame,
-    FrameIR,
-    FrameBuilder,
-    FrameHeader,
-    RawFrame,
-    NoFlag,
-    parse_stream_id,
-};
+use http::frame::{Frame, FrameIR, FrameBuilder, FrameHeader, RawFrame, NoFlag, parse_stream_id};
 
 /// The minimum size for the `GOAWAY` frame payload.
 /// It is 8 octets, as the last stream id and error code are required parts of the GOAWAY frame.
@@ -40,11 +32,7 @@ impl<'a> GoawayFrame<'a> {
     }
 
     /// Create a new `GOAWAY` frame with the given parts.
-    pub fn with_debug_data(
-            last_stream_id: StreamId,
-            raw_error: u32,
-            debug_data: &'a [u8])
-            -> Self {
+    pub fn with_debug_data(last_stream_id: StreamId, raw_error: u32, debug_data: &'a [u8]) -> Self {
         GoawayFrame {
             last_stream_id: last_stream_id,
             raw_error_code: raw_error,
@@ -112,8 +100,12 @@ impl<'a> Frame<'a> for GoawayFrame<'a> {
         })
     }
 
-    fn is_set(&self, _: NoFlag) -> bool { false }
-    fn get_stream_id(&self) -> StreamId { 0 }
+    fn is_set(&self, _: NoFlag) -> bool {
+        false
+    }
+    fn get_stream_id(&self) -> StreamId {
+        0
+    }
     fn get_header(&self) -> FrameHeader {
         (self.payload_len(), GOAWAY_FRAME_TYPE, self.flags, 0)
     }
@@ -184,7 +176,8 @@ mod tests {
     #[test]
     fn test_parse_invalid_stream_id() {
         let raw = raw_frame_from_parts((8, 0x7, 0, 3), vec![0, 0, 0, 0, 0, 0, 0, 1]);
-        assert!(GoawayFrame::from_raw(&raw).is_none(), "expected invalid stream id");
+        assert!(GoawayFrame::from_raw(&raw).is_none(),
+                "expected invalid stream id");
     }
 
     #[test]
@@ -197,8 +190,8 @@ mod tests {
     #[test]
     fn test_serialize_no_debug_data() {
         let frame = GoawayFrame::new(0, ErrorCode::ProtocolError);
-        let expected: Vec<u8> =
-            raw_frame_from_parts((8, 0x7, 0, 0), vec![0, 0, 0, 0, 0, 0, 0, 1]).into();
+        let expected: Vec<u8> = raw_frame_from_parts((8, 0x7, 0, 0), vec![0, 0, 0, 0, 0, 0, 0, 1])
+                                    .into();
         let raw = serialize_frame(&frame);
 
         assert_eq!(expected, raw);
@@ -206,11 +199,11 @@ mod tests {
 
     #[test]
     fn test_serialize_with_debug_data() {
-        let frame = GoawayFrame::with_debug_data(
-            0, ErrorCode::ProtocolError.into(), b"Hi!");
-        let expected: Vec<u8> = raw_frame_from_parts(
-            (11, 0x7, 0, 0),
-            vec![0, 0, 0, 0, 0, 0, 0, 1, b'H', b'i', b'!']).into();
+        let frame = GoawayFrame::with_debug_data(0, ErrorCode::ProtocolError.into(), b"Hi!");
+        let expected: Vec<u8> = raw_frame_from_parts((11, 0x7, 0, 0),
+                                                     vec![0, 0, 0, 0, 0, 0, 0, 1, b'H', b'i',
+                                                          b'!'])
+                                    .into();
         let raw = serialize_frame(&frame);
 
         assert_eq!(expected, raw);
@@ -218,11 +211,10 @@ mod tests {
 
     #[test]
     fn test_serialize_raw_error() {
-        let frame = GoawayFrame::with_debug_data(
-            1, 0x0001AA, &[]);
-        let expected: Vec<u8> = raw_frame_from_parts(
-            (8, 0x7, 0, 0),
-            vec![0, 0, 0, 1, 0, 0, 0x1, 0xAA]).into();
+        let frame = GoawayFrame::with_debug_data(1, 0x0001AA, &[]);
+        let expected: Vec<u8> = raw_frame_from_parts((8, 0x7, 0, 0),
+                                                     vec![0, 0, 0, 1, 0, 0, 0x1, 0xAA])
+                                    .into();
         let raw = serialize_frame(&frame);
 
         assert_eq!(expected, raw);

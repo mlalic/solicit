@@ -18,30 +18,12 @@
 use std::borrow::Cow;
 use std::borrow::Borrow;
 
-use http::{
-    Header,
-    StreamId,
-    HttpError,
-    HttpResult,
-    HttpScheme,
-    WindowSize,
-    INITIAL_CONNECTION_WINDOW_SIZE,
-};
+use http::{Header, StreamId, HttpError, HttpResult, HttpScheme, WindowSize,
+           INITIAL_CONNECTION_WINDOW_SIZE};
 use http::priority::DataPrioritizer;
 use http::session::Session;
-use http::frame::{
-    Frame,
-    FrameIR,
-    RawFrame,
-    DataFrame,
-    DataFlag,
-    HeadersFrame,
-    HeadersFlag,
-    SettingsFrame,
-    RstStreamFrame,
-    GoawayFrame,
-    WindowUpdateFrame,
-};
+use http::frame::{Frame, FrameIR, RawFrame, DataFrame, DataFlag, HeadersFrame, HeadersFlag,
+                  SettingsFrame, RstStreamFrame, GoawayFrame, WindowUpdateFrame};
 use hpack;
 
 /// An enum representing all frame variants that can be returned by an `HttpConnection` can handle.
@@ -172,8 +154,10 @@ impl<'a> DataChunk<'a> {
 
     /// Creates a new `DataChunk` from a borrowed slice. This method should become obsolete if we
     /// can take an `Into<Cow<_, _>>` without using unstable features.
-    pub fn new_borrowed<D: Borrow<&'a [u8]>>(data: D, stream_id: StreamId, end_stream: EndStream)
-            -> DataChunk<'a> {
+    pub fn new_borrowed<D: Borrow<&'a [u8]>>(data: D,
+                                             stream_id: StreamId,
+                                             end_stream: EndStream)
+                                             -> DataChunk<'a> {
         DataChunk {
             data: Cow::Borrowed(data.borrow()),
             stream_id: stream_id,
@@ -199,12 +183,16 @@ pub enum EndStream {
 /// The only way for clients to obtain an `HttpConnectionSender` is to invoke the
 /// `HttpConnection::sender` method and provide it a reference to the `SendFrame` that should be
 /// used.
-pub struct HttpConnectionSender<'a, S> where S: SendFrame + 'a {
+pub struct HttpConnectionSender<'a, S>
+    where S: SendFrame + 'a
+{
     sender: &'a mut S,
     conn: &'a mut HttpConnection,
 }
 
-impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
+impl<'a, S> HttpConnectionSender<'a, S>
+    where S: SendFrame + 'a
+{
     /// Sends the given frame to the peer.
     ///
     /// # Returns
@@ -236,14 +224,14 @@ impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
     ///   performs no checks as to whether the stream is a valid identifier.
     /// - `end_stream` - whether the stream should be closed from the peer's side immediately
     ///   after sending the headers
-    pub fn send_headers<'n, 'v, H: Into<Vec<Header<'n, 'v>>>>(
-            &mut self,
-            headers: H,
-            stream_id: StreamId,
-            end_stream: EndStream)
-            -> HttpResult<()> {
-        let headers_fragment = self.conn.encoder.encode(
-            headers.into().iter().map(|h| (h.name(), h.value())));
+    pub fn send_headers<'n, 'v, H: Into<Vec<Header<'n, 'v>>>>(&mut self,
+                                                              headers: H,
+                                                              stream_id: StreamId,
+                                                              end_stream: EndStream)
+                                                              -> HttpResult<()> {
+        let headers_fragment = self.conn
+                                   .encoder
+                                   .encode(headers.into().iter().map(|h| (h.name(), h.value())));
         // For now, sending header fragments larger than 16kB is not supported
         // (i.e. the encoded representation cannot be split into CONTINUATION
         // frames).
@@ -281,15 +269,16 @@ impl<'a, S> HttpConnectionSender<'a, S> where S: SendFrame + 'a {
     /// Returns the status of the operation. If the provider does not currently have any data that
     /// could be sent, returns `SendStatus::Nothing`. If any data is sent, returns
     /// `SendStatus::Sent`.
-    pub fn send_next_data<P: DataPrioritizer>(&mut self, prioritizer: &mut P)
-            -> HttpResult<SendStatus> {
+    pub fn send_next_data<P: DataPrioritizer>(&mut self,
+                                              prioritizer: &mut P)
+                                              -> HttpResult<SendStatus> {
         let chunk = try!(prioritizer.get_next_chunk());
         match chunk {
             None => Ok(SendStatus::Nothing),
             Some(chunk) => {
                 try!(self.send_data(chunk));
                 Ok(SendStatus::Sent)
-            },
+            }
         }
     }
 }
@@ -366,16 +355,15 @@ impl HttpConnection {
     ///
     /// If the received frame is not a SETTINGS frame, an `HttpError::UnableToConnect` variant is
     /// returned. (TODO: Change this variant's name, as it is a byproduct of this method's legacy)
-    pub fn expect_settings<Recv: ReceiveFrame, Sess: Session>(
-            &mut self,
-            rx: &mut Recv,
-            session: &mut Sess)
-            -> HttpResult<()> {
+    pub fn expect_settings<Recv: ReceiveFrame, Sess: Session>(&mut self,
+                                                              rx: &mut Recv,
+                                                              session: &mut Sess)
+                                                              -> HttpResult<()> {
         let frame = rx.recv_frame();
         match frame {
             Ok(HttpFrame::SettingsFrame(ref settings)) if !settings.is_ack() => {
                 debug!("Correctly received a SETTINGS frame from the server");
-            },
+            }
             // Wrong frame received...
             Ok(_) => return Err(HttpError::UnableToConnect),
             // Already an error -- propagate that.
@@ -394,68 +382,70 @@ impl HttpConnection {
     ///
     /// If the handling is successful, a unit `Ok` is returned; all HTTP and IO errors are
     /// propagated.
-    pub fn handle_next_frame<Recv: ReceiveFrame, Sess: Session>(
-            &mut self,
-            rx: &mut Recv,
-            session: &mut Sess)
-            -> HttpResult<()> {
+    pub fn handle_next_frame<Recv: ReceiveFrame, Sess: Session>(&mut self,
+                                                                rx: &mut Recv,
+                                                                session: &mut Sess)
+                                                                -> HttpResult<()> {
         debug!("Waiting for frame...");
         let frame = match rx.recv_frame() {
             Ok(frame) => frame,
             Err(e) => {
                 debug!("Encountered an HTTP/2 error, stopping.");
                 return Err(e);
-            },
+            }
         };
 
         self.handle_frame(frame, session)
     }
 
     /// Private helper method that actually handles a received frame.
-    fn handle_frame<Sess: Session>(&mut self, frame: HttpFrame, session: &mut Sess)
-            -> HttpResult<()> {
+    fn handle_frame<Sess: Session>(&mut self,
+                                   frame: HttpFrame,
+                                   session: &mut Sess)
+                                   -> HttpResult<()> {
         match frame {
             HttpFrame::DataFrame(frame) => {
                 debug!("Data frame received");
                 self.handle_data_frame(frame, session)
-            },
+            }
             HttpFrame::HeadersFrame(frame) => {
                 debug!("Headers frame received");
                 self.handle_headers_frame(frame, session)
-            },
+            }
             HttpFrame::RstStreamFrame(frame) => {
                 debug!("RST_STREAM frame received");
                 self.handle_rst_stream_frame(frame, session)
-            },
+            }
             HttpFrame::SettingsFrame(frame) => {
                 debug!("Settings frame received");
                 self.handle_settings_frame::<Sess>(frame, session)
-            },
+            }
             HttpFrame::GoawayFrame(frame) => {
                 debug!("GOAWAY frame received");
-                session.on_goaway(
-                    frame.last_stream_id(),
-                    frame.error_code(),
-                    frame.debug_data(),
-                    self)
-            },
+                session.on_goaway(frame.last_stream_id(),
+                                  frame.error_code(),
+                                  frame.debug_data(),
+                                  self)
+            }
             HttpFrame::WindowUpdateFrame(_) => {
                 debug!("WINDOW_UPDATE frame received");
                 Ok(())
-            },
+            }
             HttpFrame::UnknownFrame(frame) => {
                 debug!("Unknown frame received; raw = {:?}", frame);
                 // We simply drop any unknown frames...
                 // TODO Signal this to the session so that a hook is available
                 //      for implementing frame-level protocol extensions.
                 Ok(())
-            },
+            }
         }
     }
 
     /// Private helper method that handles a received `DataFrame`.
-    fn handle_data_frame<Sess: Session>(&mut self, frame: DataFrame, session: &mut Sess)
-            -> HttpResult<()> {
+    fn handle_data_frame<Sess: Session>(&mut self,
+                                        frame: DataFrame,
+                                        session: &mut Sess)
+                                        -> HttpResult<()> {
         try!(self.decrease_in_window(frame.payload_len()));
         trace!("New IN WINDOW size = {}", self.in_window_size());
         try!(session.new_data_chunk(frame.get_stream_id(), &frame.data, self));
@@ -473,10 +463,13 @@ impl HttpConnection {
     }
 
     /// Private helper method that handles a received `HeadersFrame`.
-    fn handle_headers_frame<Sess: Session>(&mut self, frame: HeadersFrame, session: &mut Sess)
-            -> HttpResult<()> {
-        let headers = try!(self.decoder.decode(&frame.header_fragment())
-                                       .map_err(|e| HttpError::CompressionError(e)));
+    fn handle_headers_frame<Sess: Session>(&mut self,
+                                           frame: HeadersFrame,
+                                           session: &mut Sess)
+                                           -> HttpResult<()> {
+        let headers = try!(self.decoder
+                               .decode(&frame.header_fragment())
+                               .map_err(|e| HttpError::CompressionError(e)));
         let headers = headers.into_iter().map(|h| h.into()).collect();
         try!(session.new_headers(frame.get_stream_id(), headers, self));
 
@@ -490,17 +483,18 @@ impl HttpConnection {
 
     /// Private helper method that handles a received `RstStreamFrame`
     #[inline]
-    fn handle_rst_stream_frame<Sess: Session>(
-            &mut self,
-            frame: RstStreamFrame,
-            session: &mut Sess)
-            -> HttpResult<()> {
+    fn handle_rst_stream_frame<Sess: Session>(&mut self,
+                                              frame: RstStreamFrame,
+                                              session: &mut Sess)
+                                              -> HttpResult<()> {
         session.rst_stream(frame.get_stream_id(), frame.error_code(), self)
     }
 
     /// Private helper method that handles a received `SettingsFrame`.
-    fn handle_settings_frame<Sess: Session>(&mut self, frame: SettingsFrame, session: &mut Sess)
-            -> HttpResult<()> {
+    fn handle_settings_frame<Sess: Session>(&mut self,
+                                            frame: SettingsFrame,
+                                            session: &mut Sess)
+                                            -> HttpResult<()> {
         if !frame.is_ack() {
             // TODO: Actually handle the settings change before sending out the ACK
             //       sending out the ACK.
@@ -517,8 +511,9 @@ impl HttpConnection {
         // reach here only after sending a DATA frame, whose payload also cannot be larger than
         // that, but we assert it just in case.
         debug_assert!(size < 0x80000000);
-        self.out_window_size.try_decrease(size as i32)
-                            .map_err(|_| HttpError::WindowSizeOverflow)
+        self.out_window_size
+            .try_decrease(size as i32)
+            .map_err(|_| HttpError::WindowSizeOverflow)
     }
 
     /// Internal helper method that decreases the inbound flow control window size.
@@ -528,8 +523,9 @@ impl HttpConnection {
         // parsed from the raw frame to have the correct payload size, but we assert it just in
         // case.
         debug_assert!(size < 0x80000000);
-        self.in_window_size.try_decrease(size as i32)
-                           .map_err(|_| HttpError::WindowSizeOverflow)
+        self.in_window_size
+            .try_decrease(size as i32)
+            .map_err(|_| HttpError::WindowSizeOverflow)
     }
 }
 
@@ -538,31 +534,12 @@ mod tests {
     use std::borrow::Cow;
     use std::io;
 
-    use super::{
-        HttpConnection,
-        HttpFrame,
-        SendFrame,
-        EndStream,
-        DataChunk,
-        SendStatus,
-    };
+    use super::{HttpConnection, HttpFrame, SendFrame, EndStream, DataChunk, SendStatus};
 
-    use http::tests::common::{
-        build_mock_http_conn,
-        StubDataPrioritizer,
-        TestSession,
-        MockReceiveFrame,
-        MockSendFrame,
-    };
-    use http::frame::{
-        Frame, DataFrame, HeadersFrame,
-        RstStreamFrame,
-        GoawayFrame,
-        SettingsFrame,
-        pack_header,
-        RawFrame,
-        FrameIR,
-    };
+    use http::tests::common::{build_mock_http_conn, StubDataPrioritizer, TestSession,
+                              MockReceiveFrame, MockSendFrame};
+    use http::frame::{Frame, DataFrame, HeadersFrame, RstStreamFrame, GoawayFrame, SettingsFrame,
+                      pack_header, RawFrame, FrameIR};
     use http::{HttpResult, HttpScheme, Header, OwnedHeader, ErrorCode};
     use hpack;
 
@@ -572,8 +549,10 @@ mod tests {
     ///
     /// If the `HttpFrame` variant is `HttpFrame::UnknownFrame`, nothing will
     /// be sent and an `Ok(())` is returned.
-    fn send_frame<S: SendFrame>(sender: &mut S, conn: &mut HttpConnection, frame: HttpFrame)
-            -> HttpResult<()> {
+    fn send_frame<S: SendFrame>(sender: &mut S,
+                                conn: &mut HttpConnection,
+                                frame: HttpFrame)
+                                -> HttpResult<()> {
         match frame {
             HttpFrame::DataFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::SettingsFrame(frame) => conn.sender(sender).send_frame(frame),
@@ -794,8 +773,9 @@ mod tests {
             let mut sender = MockSendFrame::new();
             let data: &[u8] = b"1234";
 
-            conn.sender(&mut sender).send_data(DataChunk::new_borrowed(data, 1, EndStream::No))
-                                    .unwrap();
+            conn.sender(&mut sender)
+                .send_data(DataChunk::new_borrowed(data, 1, EndStream::No))
+                .unwrap();
 
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
@@ -816,8 +796,9 @@ mod tests {
             let mut sender = MockSendFrame::new();
             let data: &[u8] = b"1234";
 
-            conn.sender(&mut sender).send_data(DataChunk::new_borrowed(data, 1, EndStream::Yes))
-                                    .unwrap();
+            conn.sender(&mut sender)
+                .send_data(DataChunk::new_borrowed(data, 1, EndStream::Yes))
+                .unwrap();
 
             // Only 1 frame sent?
             assert_eq!(sender.sent.len(), 1);
@@ -919,9 +900,8 @@ mod tests {
             },
         ];
         let mut conn = HttpConnection::new(HttpScheme::Http);
-        let mut session = TestSession::new_verify(
-                vec![expected_headers],
-                vec![b"".to_vec(), b"1234".to_vec()]);
+        let mut session = TestSession::new_verify(vec![expected_headers],
+                                                  vec![b"".to_vec(), b"1234".to_vec()]);
         let mut frame_provider = MockReceiveFrame::new(frames);
 
         conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();

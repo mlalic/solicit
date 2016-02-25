@@ -1,10 +1,7 @@
 //! Defines the `FrameBuilder` trait and some default implementations of the trait.
 
 use std::io;
-use http::frame::{
-    FrameHeader,
-    pack_header,
-};
+use http::frame::{FrameHeader, pack_header};
 
 /// A trait that provides additional methods for serializing HTTP/2 frames.
 ///
@@ -37,7 +34,8 @@ pub trait FrameBuilder: io::Write + io::Seek {
     /// efficiently than the `io::copy` function does (i.e. without the intermediate read into a
     /// stack-allocated buffer).
     fn copy_bytes_from<R: io::Read>(&mut self, provider: &mut R) -> io::Result<u64>
-            where Self: Sized {
+        where Self: Sized
+    {
         io::copy(provider, self)
     }
 
@@ -50,19 +48,19 @@ pub trait FrameBuilder: io::Write + io::Seek {
     /// known that the `FrameBuilder` is backed by a zeroed buffer, there's no need to write
     /// anything, only increment a cursor/offset).
     fn write_padding(&mut self, padding_length: u8) -> io::Result<()> {
-        for _ in 0..padding_length { try!(self.write_all(&[0])); }
+        for _ in 0..padding_length {
+            try!(self.write_all(&[0]));
+        }
         Ok(())
     }
 
     /// Write the given unsigned 32 bit integer to the underlying stream. The integer is written as
     /// four bytes in network endian style.
     fn write_u32(&mut self, num: u32) -> io::Result<()> {
-        self.write_all(&[
-            (((num >> 24) & 0x000000FF) as u8),
-            (((num >> 16) & 0x000000FF) as u8),
-            (((num >>  8) & 0x000000FF) as u8),
-            (((num >>  0) & 0x000000FF) as u8),
-        ])
+        self.write_all(&[(((num >> 24) & 0x000000FF) as u8),
+                         (((num >> 16) & 0x000000FF) as u8),
+                         (((num >> 8) & 0x000000FF) as u8),
+                         (((num >> 0) & 0x000000FF) as u8)])
     }
 }
 
@@ -72,7 +70,7 @@ impl FrameBuilder for io::Cursor<Vec<u8>> {}
 mod tests {
     use super::FrameBuilder;
     use std::io::{self, Write};
-    use http::frame::{pack_header};
+    use http::frame::pack_header;
 
     #[test]
     fn test_write_header_empty_buffer() {

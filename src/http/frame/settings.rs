@@ -2,14 +2,7 @@
 
 use std::io;
 use http::StreamId;
-use http::frame::{
-    FrameBuilder,
-    FrameIR,
-    Flag,
-    Frame,
-    FrameHeader,
-    RawFrame,
-};
+use http::frame::{FrameBuilder, FrameIR, Flag, Frame, FrameHeader, RawFrame};
 
 /// An enum that lists all valid settings that can be sent in a SETTINGS
 /// frame.
@@ -90,14 +83,12 @@ impl HttpSetting {
     /// according to section 6.5.1.
     fn serialize(&self) -> [u8; 6] {
         let (id, val) = (self.get_id(), self.get_val());
-        [
-            ((id >> 8) & 0x00FF) as u8,
-            ((id >> 0) & 0x00FF) as u8,
-            (((val >> 24) & 0x000000FF) as u8),
-            (((val >> 16) & 0x000000FF) as u8),
-            (((val >>  8) & 0x000000FF) as u8),
-            (((val >>  0) & 0x000000FF) as u8),
-        ]
+        [((id >> 8) & 0x00FF) as u8,
+         ((id >> 0) & 0x00FF) as u8,
+         (((val >> 24) & 0x000000FF) as u8),
+         (((val >> 16) & 0x000000FF) as u8),
+         (((val >> 8) & 0x000000FF) as u8),
+         (((val >> 0) & 0x000000FF) as u8)]
     }
 }
 
@@ -210,9 +201,9 @@ impl SettingsFrame {
 
         // Iterates through chunks of the raw payload of size 6 bytes and
         // parses each of them into an `HttpSetting`
-        Some(payload.chunks(6).filter_map(|chunk| {
-            HttpSetting::parse_setting(chunk)
-        }).collect())
+        Some(payload.chunks(6)
+                    .filter_map(|chunk| HttpSetting::parse_setting(chunk))
+                    .collect())
     }
 
     /// Sets the given flag for the frame.
@@ -273,7 +264,7 @@ impl<'a> Frame<'a> for SettingsFrame {
                     settings: settings,
                     flags: flags,
                 })
-            },
+            }
             None => None,
         }
     }
@@ -341,7 +332,9 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
+            for s in settings.iter().map(|s| s.serialize()) {
+                res.extend(s.to_vec().into_iter());
+            }
 
             res
         };
@@ -369,7 +362,9 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
+            for s in settings.iter().map(|s| s.serialize()) {
+                res.extend(s.to_vec().into_iter());
+            }
 
             res
         };
@@ -396,9 +391,13 @@ mod tests {
         ];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
+            for s in settings.iter().map(|s| s.serialize()) {
+                res.extend(s.to_vec().into_iter());
+            }
             res.extend(vec![0, 10, 0, 0, 0, 0].into_iter());
-            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
+            for s in settings.iter().map(|s| s.serialize()) {
+                res.extend(s.to_vec().into_iter());
+            }
 
             res
         };
@@ -439,12 +438,12 @@ mod tests {
     /// considered invalid.
     #[test]
     fn test_settings_frame_parse_ack_with_settings() {
-        let settings = [
-            HttpSetting::EnablePush(0),
-        ];
+        let settings = [HttpSetting::EnablePush(0)];
         let payload = {
             let mut res: Vec<u8> = Vec::new();
-            for s in settings.iter().map(|s| s.serialize()) { res.extend(s.to_vec().into_iter()); }
+            for s in settings.iter().map(|s| s.serialize()) {
+                res.extend(s.to_vec().into_iter());
+            }
 
             res
         };
