@@ -79,8 +79,8 @@ fn main() {
   // response is well formed.)
   for header in response.headers.iter() {
     println!("{}: {}",
-        str::from_utf8(&header.0).unwrap(),
-        str::from_utf8(&header.1).unwrap());
+        str::from_utf8(&header.name).unwrap(),
+        str::from_utf8(&header.value).unwrap());
   }
   println!("{}", str::from_utf8(&response.body).unwrap());
   // We can issue more requests after reading this one...
@@ -124,8 +124,8 @@ fn main() {
   // response is well formed.)
   for header in response.headers.iter() {
     println!("{}: {}",
-        str::from_utf8(&header.0).unwrap(),
-        str::from_utf8(&header.1).unwrap());
+        str::from_utf8(&header.name).unwrap(),
+        str::from_utf8(&header.value).unwrap());
   }
   println!("{}", str::from_utf8(&response.body).unwrap());
 }
@@ -192,8 +192,8 @@ fn main() {
       println!("The response contains the following headers:");
       for header in response.headers.iter() {
           println!("  {}: {}",
-                   str::from_utf8(&header.0).unwrap(),
-                   str::from_utf8(&header.1).unwrap());
+                   str::from_utf8(&header.name).unwrap(),
+                   str::from_utf8(&header.value).unwrap());
       }
       println!("{}", str::from_utf8(&response.body).unwrap());
   }
@@ -229,8 +229,8 @@ fn main() {
             println!("Received request:");
             for header in req.headers.iter() {
                 println!("  {}: {}",
-                str::from_utf8(&header.0).unwrap(),
-                str::from_utf8(&header.1).unwrap());
+                str::from_utf8(&header.name).unwrap(),
+                str::from_utf8(&header.value).unwrap());
             }
             println!("Body:\n{}", str::from_utf8(&req.body).unwrap());
 
