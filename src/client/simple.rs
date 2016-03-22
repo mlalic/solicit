@@ -268,7 +268,7 @@ impl<S> SimpleClient<S>
         // The clone is lightweight if the original Header was just borrowing something; it's a
         // deep copy if it was already owned. Consider requiring that this method gets an iterator
         // of Headers...
-        headers.extend(extras.iter().map(|h| h.clone()));
+        headers.extend(extras.iter().cloned());
 
         RequestStream {
             headers: headers,

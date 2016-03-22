@@ -77,13 +77,10 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
                            _conn: &mut HttpConnection)
                            -> HttpResult<()> {
         debug!("Headers for stream {}", stream_id);
-        match self.state.get_stream_mut(stream_id) {
-            Some(stream) => {
-                // This'd correspond to having received trailers...
-                stream.set_headers(headers);
-                return Ok(());
-            }
-            None => {}
+        if let Some(stream) = self.state.get_stream_mut(stream_id) {
+            // This'd correspond to having received trailers...
+            stream.set_headers(headers);
+            return Ok(());
         };
         // New stream initiated by the client
         let mut stream = self.factory.create(stream_id);

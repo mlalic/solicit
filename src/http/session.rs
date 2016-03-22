@@ -256,13 +256,12 @@ impl<T, S> SessionState for DefaultSessionState<T, S>
     }
 
     fn insert_incoming(&mut self, stream_id: StreamId, stream: Self::Stream) -> Result<(), ()> {
-        match self.validate_incoming_parity(stream_id) {
-            false => Err(()),
-            true => {
-                // TODO(mlalic): Assert that the stream IDs are monotonically increasing!
-                self.streams.insert(stream_id, stream);
-                Ok(())
-            }
+        if self.validate_incoming_parity(stream_id) {
+            // TODO(mlalic): Assert that the stream IDs are monotonically increasing!
+            self.streams.insert(stream_id, stream);
+            Ok(())
+        } else {
+            Err(())
         }
     }
 
@@ -518,10 +517,9 @@ impl Stream for DefaultStream {
             }
         };
         // Transition the stream state to locally closed if we've extracted the final data chunk.
-        match chunk {
-            StreamDataChunk::Last(_) => self.close_local(),
-            _ => {}
-        };
+        if let StreamDataChunk::Last(_) = chunk {
+            self.close_local()
+        }
 
         Ok(chunk)
     }
