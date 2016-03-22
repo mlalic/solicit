@@ -18,6 +18,16 @@ use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 use http::session::Client as ClientMarker;
 use http::client::{ClientConnection, HttpConnect, ClientStream, RequestStream};
 
+/// Like `thread::spawn`, but with a `name` argument
+pub fn spawn_named<F, T, S>(name: S, f: F) -> thread::JoinHandle<T>
+    where F: FnOnce() -> T,
+          F: Send + 'static,
+          T: Send + 'static,
+          S: Into<String>
+{
+    thread::Builder::new().name(name.into()).spawn(f).expect("spawn thread")
+}
+
 /// A struct representing an asynchronously dispatched request. It is used
 /// internally be the `ClientService` and `Client` structs.
 struct AsyncRequest {
@@ -673,21 +683,23 @@ impl Client {
         let read_notify = rx.clone();
         let sender_work_queue = rx.clone();
 
-        thread::spawn(move || {
+        spawn_named("Solicit Service", move || {
             while let Ok(_) = service.run_once() {}
             debug!("Service thread halting");
             // This is the one place where it's okay to unwrap, as if the shutdown fails, there's
             // really nothing we can do to recover at this point...
             // This forces the reader thread to stop, as the socket is no longer operational.
-            sck.close().unwrap();
+            sck.close().expect("close socket handler");
         });
-        thread::spawn(move || {
+
+        spawn_named("Solicit Sender", move || {
             while let Ok(_) = send_frame.send_next() {
                 sender_work_queue.send(WorkItem::SendData).unwrap();
             }
             debug!("Sender thread halting");
         });
-        thread::spawn(move || {
+
+        spawn_named("Solicit Reader", move || {
             while let Ok(_) = recv_frame.read_next() {
                 read_notify.send(WorkItem::HandleFrame).unwrap();
             }
