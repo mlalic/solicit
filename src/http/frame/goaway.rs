@@ -65,7 +65,7 @@ impl<'a> GoawayFrame<'a> {
 
     /// Returns the total length of the frame's payload, including any debug data.
     pub fn payload_len(&self) -> u32 {
-        GOAWAY_MIN_FRAME_LEN + self.debug_data.map(|d| d.len() as u32).unwrap_or(0)
+        GOAWAY_MIN_FRAME_LEN + self.debug_data.map_or(0, |d| d.len() as u32)
     }
 }
 

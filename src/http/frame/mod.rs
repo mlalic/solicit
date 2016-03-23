@@ -34,9 +34,7 @@ macro_rules! unpack_octets_4 {
 fn parse_stream_id(buf: &[u8]) -> u32 {
     let unpacked = unpack_octets_4!(buf, 0, u32);
     // Now clear the most significant bit, as that is reserved and MUST be ignored when received.
-    let id = unpacked & !0x80000000;
-
-    id
+    unpacked & !0x80000000
 }
 
 pub const FRAME_HEADER_LEN: usize = 9;
@@ -75,7 +73,7 @@ pub type FrameHeader = (u32, u8, u8, u32);
 /// octet representation, rather than reinterpreted.
 pub fn unpack_header(header: &FrameHeaderBuffer) -> FrameHeader {
     let length: u32 = ((header[0] as u32) << 16) | ((header[1] as u32) << 8) |
-                      ((header[2] as u32) << 0);
+                       (header[2] as u32);
     let frame_type = header[3];
     let flags = header[4];
     let stream_id = parse_stream_id(&header[5..]);
@@ -88,14 +86,14 @@ pub fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
     let &(length, frame_type, flags, stream_id) = header;
 
     [(((length >> 16) & 0x000000FF) as u8),
-     (((length >> 8) & 0x000000FF) as u8),
-     (((length >> 0) & 0x000000FF) as u8),
+     (((length >>  8) & 0x000000FF) as u8),
+     (((length      ) & 0x000000FF) as u8),
      frame_type,
      flags,
      (((stream_id >> 24) & 0x000000FF) as u8),
      (((stream_id >> 16) & 0x000000FF) as u8),
-     (((stream_id >> 8) & 0x000000FF) as u8),
-     (((stream_id >> 0) & 0x000000FF) as u8)]
+     (((stream_id >>  8) & 0x000000FF) as u8),
+     (((stream_id      ) & 0x000000FF) as u8)]
 }
 
 /// A helper function that parses the given payload, considering it padded.
@@ -110,7 +108,7 @@ pub fn pack_header(header: &FrameHeader) -> FrameHeaderBuffer {
 ///
 /// If the padded payload is invalid (e.g. the length of the padding is equal
 /// to the total length), returns `None`.
-fn parse_padded_payload<'a>(payload: &'a [u8]) -> Option<(&'a [u8], u8)> {
+fn parse_padded_payload(payload: &[u8]) -> Option<(&[u8], u8)> {
     if payload.len() == 0 {
         // We make sure not to index the payload before we're sure how
         // large the buffer is.

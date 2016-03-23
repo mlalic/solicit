@@ -593,10 +593,10 @@ impl<'n, 'v> Response<'n, 'v> {
         if self.headers.len() < 1 {
             return Err(HttpError::MalformedResponse);
         }
-        if &self.headers[0].name[..] != &b":status"[..] {
-            Err(HttpError::MalformedResponse)
-        } else {
+        if &self.headers[0].name[..] == &b":status"[..] {
             Ok(try!(Response::parse_status_code(&self.headers[0].value)))
+        } else {
+            Err(HttpError::MalformedResponse)
         }
     }
 
@@ -620,7 +620,7 @@ impl<'n, 'v> Response<'n, 'v> {
 
         // Finally, we can merge them into an integer
         Ok(100 * ((buf[0] - b'0') as u16) + 10 * ((buf[1] - b'0') as u16) +
-           1 * ((buf[2] - b'0') as u16))
+              ((buf[2] - b'0') as u16))
     }
 }
 

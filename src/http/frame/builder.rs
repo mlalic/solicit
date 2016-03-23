@@ -59,8 +59,8 @@ pub trait FrameBuilder: io::Write + io::Seek {
     fn write_u32(&mut self, num: u32) -> io::Result<()> {
         self.write_all(&[(((num >> 24) & 0x000000FF) as u8),
                          (((num >> 16) & 0x000000FF) as u8),
-                         (((num >> 8) & 0x000000FF) as u8),
-                         (((num >> 0) & 0x000000FF) as u8)])
+                         (((num >>  8) & 0x000000FF) as u8),
+                         (((num      ) & 0x000000FF) as u8)])
     }
 }
 

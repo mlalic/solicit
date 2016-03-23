@@ -57,25 +57,25 @@ impl HttpSetting {
     /// Returns the setting ID as an unsigned 16 bit integer, as defined in
     /// section 6.5.2.
     pub fn get_id(&self) -> u16 {
-        match self {
-            &HttpSetting::HeaderTableSize(_) => 1,
-            &HttpSetting::EnablePush(_) => 2,
-            &HttpSetting::MaxConcurrentStreams(_) => 3,
-            &HttpSetting::InitialWindowSize(_) => 4,
-            &HttpSetting::MaxFrameSize(_) => 5,
-            &HttpSetting::MaxHeaderListSize(_) => 6,
+        match *self {
+            HttpSetting::HeaderTableSize(_) => 1,
+            HttpSetting::EnablePush(_) => 2,
+            HttpSetting::MaxConcurrentStreams(_) => 3,
+            HttpSetting::InitialWindowSize(_) => 4,
+            HttpSetting::MaxFrameSize(_) => 5,
+            HttpSetting::MaxHeaderListSize(_) => 6,
         }
     }
 
     /// Gets the setting value by unpacking it from the wrapped `u32`.
     pub fn get_val(&self) -> u32 {
-        match self {
-            &HttpSetting::HeaderTableSize(ref val) => val.clone(),
-            &HttpSetting::EnablePush(ref val) => val.clone(),
-            &HttpSetting::MaxConcurrentStreams(ref val) => val.clone(),
-            &HttpSetting::InitialWindowSize(ref val) => val.clone(),
-            &HttpSetting::MaxFrameSize(ref val) => val.clone(),
-            &HttpSetting::MaxHeaderListSize(ref val) => val.clone(),
+        match *self {
+            HttpSetting::HeaderTableSize(ref val) |
+            HttpSetting::EnablePush(ref val) |
+            HttpSetting::MaxConcurrentStreams(ref val) |
+            HttpSetting::InitialWindowSize(ref val) |
+            HttpSetting::MaxFrameSize(ref val) |
+            HttpSetting::MaxHeaderListSize(ref val) => *val,
         }
     }
 
@@ -84,11 +84,11 @@ impl HttpSetting {
     fn serialize(&self) -> [u8; 6] {
         let (id, val) = (self.get_id(), self.get_val());
         [((id >> 8) & 0x00FF) as u8,
-         ((id >> 0) & 0x00FF) as u8,
+         ((id     ) & 0x00FF) as u8,
          (((val >> 24) & 0x000000FF) as u8),
          (((val >> 16) & 0x000000FF) as u8),
-         (((val >> 8) & 0x000000FF) as u8),
-         (((val >> 0) & 0x000000FF) as u8)]
+         (((val >>  8) & 0x000000FF) as u8),
+         (((val      ) & 0x000000FF) as u8)]
     }
 }
 
@@ -246,15 +246,15 @@ impl<'a> Frame<'a> for SettingsFrame {
             return None;
         }
         if (flags & SettingsFlag::Ack.bitmask()) != 0 {
-            if len != 0 {
-                // The SETTINGS flag MUST not have a payload if Ack is set
-                return None;
-            } else {
+            return if len == 0 {
                 // Ack is set and there's no payload => just an Ack frame
-                return Some(SettingsFrame {
+                Some(SettingsFrame {
                     settings: Vec::new(),
                     flags: flags,
-                });
+                })
+            } else {
+                // The SETTINGS flag MUST not have a payload if Ack is set
+                None
             }
         }
 
@@ -290,7 +290,7 @@ impl<'a> Frame<'a> for SettingsFrame {
 impl FrameIR for SettingsFrame {
     fn serialize_into<B: FrameBuilder>(self, b: &mut B) -> io::Result<()> {
         try!(b.write_header(self.get_header()));
-        for setting in self.settings.iter() {
+        for setting in &self.settings {
             try!(b.write_all(&setting.serialize()));
         }
 

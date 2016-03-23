@@ -469,7 +469,7 @@ impl HttpConnection {
                                            -> HttpResult<()> {
         let headers = try!(self.decoder
                                .decode(&frame.header_fragment())
-                               .map_err(|e| HttpError::CompressionError(e)));
+                               .map_err(HttpError::CompressionError));
         let headers = headers.into_iter().map(|h| h.into()).collect();
         try!(session.new_headers(frame.get_stream_id(), headers, self));
 

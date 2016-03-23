@@ -105,8 +105,8 @@ impl StreamDependency {
         };
         [(((self.stream_id >> 24) & 0x000000FF) as u8) | e_bit,
          (((self.stream_id >> 16) & 0x000000FF) as u8),
-         (((self.stream_id >> 8) & 0x000000FF) as u8),
-         (((self.stream_id >> 0) & 0x000000FF) as u8),
+         (((self.stream_id >>  8) & 0x000000FF) as u8),
+         (((self.stream_id      ) & 0x000000FF) as u8),
          self.weight]
     }
 }

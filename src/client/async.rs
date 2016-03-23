@@ -415,12 +415,12 @@ impl ClientService {
                 Ok(())
             }
             WorkItem::HandleFrame => {
-                if !self.initialized {
+                if self.initialized {
+                    self.handle_frame()
+                } else {
                     try!(self.conn.expect_settings(&mut self.recv_handle, &mut self.send_handle));
                     self.initialized = true;
                     Ok(())
-                } else {
-                    self.handle_frame()
                 }
             }
             WorkItem::SendData => {
@@ -557,7 +557,7 @@ impl ClientService {
             // Try to queue another request since we haven't gone over
             // the (arbitrary) limit.
             debug!("Not over the limit yet. Checking for more requests...");
-            if self.request_queue.len() > 0 {
+            if !self.request_queue.is_empty() {
                 let async_req = self.request_queue.remove(0);
                 self.send_request(async_req);
             }
