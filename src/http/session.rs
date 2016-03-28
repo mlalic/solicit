@@ -506,9 +506,7 @@ impl Stream for DefaultStream {
             // No data associated to the stream, but it's open => nothing available for writing
             None => StreamDataChunk::Unavailable,
             Some(d) => {
-                // For the `Vec`-backed reader, this should never fail, so unwrapping is
-                // fine.
-                let read = d.read(buf).unwrap();
+                let read = try!(d.read(buf));
                 if (d.position() as usize) == d.get_ref().len() {
                     StreamDataChunk::Last(read)
                 } else {
