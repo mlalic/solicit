@@ -361,16 +361,20 @@ impl HttpConnection {
                                                               -> HttpResult<()> {
         let frame = rx.recv_frame();
         match frame {
-            Ok(HttpFrame::SettingsFrame(ref settings)) if !settings.is_ack() => {
-                debug!("Correctly received a SETTINGS frame from the server");
+            Ok(HttpFrame::SettingsFrame(settings)) => {
+                if settings.is_ack() {
+                    Err(HttpError::UnableToConnect)
+                } else {
+                    debug!("Correctly received a SETTINGS frame from the server");
+                    try!(self.handle_frame(HttpFrame::SettingsFrame(settings), session));
+                    Ok(())
+                }
             }
             // Wrong frame received...
-            Ok(_) => return Err(HttpError::UnableToConnect),
+            Ok(_) => Err(HttpError::UnableToConnect),
             // Already an error -- propagate that.
-            Err(e) => return Err(e),
-        };
-        try!(self.handle_frame(frame.unwrap(), session));
-        Ok(())
+            Err(e) => Err(e),
+        }
     }
 
     /// Handles the next frame incoming on the given `ReceiveFrame` instance.
