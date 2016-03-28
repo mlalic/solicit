@@ -13,6 +13,7 @@ pub mod transport;
 pub mod connection;
 pub mod session;
 pub mod priority;
+pub mod flow_control;
 
 pub mod client;
 pub mod server;
