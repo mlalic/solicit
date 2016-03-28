@@ -17,14 +17,17 @@ use http::priority::SimplePrioritizer;
 #[cfg(feature="tls")]
 pub mod tls;
 
-/// Writes the client preface to the underlying HTTP/2 connection.
+/// Writes the client preface to the given `io::Write` instance.
 ///
-/// According to the HTTP/2 spec, a client preface is first a specific
-/// sequence of octets, followed by a settings frame.
+/// According to the HTTP/2 spec, a client preface is first a specific sequence of octets, followed
+/// by a settings frame.
+///
+/// This helper method can be utilized by different transport layer implementations to prepare the
+/// preface that needs to be written before initializing an `HttpConnection` instance.
 ///
 /// # Returns
 ///
-/// Any error raised by the underlying connection is propagated.
+/// Any error raised by the underlying `io::Write` instance is propagated.
 pub fn write_preface<W: io::Write>(stream: &mut W) -> Result<(), io::Error> {
     // The first part of the client preface is always this sequence of 24
     // raw octets.
