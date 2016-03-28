@@ -425,9 +425,11 @@ pub enum StreamDataChunk {
 pub trait Stream {
     /// Handle a new data chunk that has arrived for the stream.
     fn new_data_chunk(&mut self, data: &[u8]);
+
     /// Set headers for a stream. A stream is only allowed to have one set of
     /// headers.
     fn set_headers<'n, 'v>(&mut self, headers: Vec<Header<'n, 'v>>);
+
     /// Sets the stream state to the newly provided state.
     fn set_state(&mut self, state: StreamState);
 
@@ -437,6 +439,14 @@ pub trait Stream {
     /// The default implementation simply closes the stream, discarding the provided error_code.
     /// Concrete `Stream` implementations can override this.
     fn on_rst_stream(&mut self, _error_code: ErrorCode) {
+        self.close();
+    }
+
+    /// Notifies the `Stream` that a stream error has been detected. This differs from
+    /// `on_rst_stream` in that the error was detected by the local peer, rather than the remote.
+    ///
+    /// The default implementation simply closes the stream.
+    fn on_stream_error(&mut self, _error_code: ErrorCode) {
         self.close();
     }
 
@@ -463,6 +473,7 @@ pub trait Stream {
     fn close(&mut self) {
         self.set_state(StreamState::Closed);
     }
+
     /// Updates the `Stream` status to indicate that it is closed locally.
     ///
     /// If the stream is closed on the remote end, then it is fully closed after this call.
@@ -473,6 +484,7 @@ pub trait Stream {
         };
         self.set_state(next);
     }
+
     /// Updates the `Stream` status to indicate that it is closed on the remote peer's side.
     ///
     /// If the stream is also locally closed, then it is fully closed after this call.
@@ -483,12 +495,14 @@ pub trait Stream {
         };
         self.set_state(next);
     }
+
     /// Returns whether the stream is closed.
     ///
     /// A stream is considered to be closed iff its state is set to `Closed`.
     fn is_closed(&self) -> bool {
         self.state() == StreamState::Closed
     }
+
     /// Returns whether the stream is closed locally.
     fn is_closed_local(&self) -> bool {
         match self.state() {
@@ -496,6 +510,7 @@ pub trait Stream {
             _ => false,
         }
     }
+
     /// Returns whether the remote peer has closed the stream. This includes a fully closed stream.
     fn is_closed_remote(&self) -> bool {
         match self.state() {
@@ -612,7 +627,7 @@ impl Stream for DefaultStream {
 #[cfg(test)]
 mod tests {
     use super::{Stream, DefaultSessionState, DefaultStream, StreamDataChunk, StreamDataError,
-                SessionState, Parity};
+                SessionState, Parity, StreamState};
     use super::Client as ClientMarker;
     use super::Server as ServerMarker;
     use http::{ErrorCode, Header};
@@ -824,6 +839,14 @@ mod tests {
             Err(StreamDataError::Closed) => true,
             _ => false,
         });
+    }
+
+    /// Tests that when the `DefaultStream` receives an error, it closes the stream.
+    #[test]
+    fn test_default_stream_on_error() {
+        let mut stream = DefaultStream::new();
+        stream.on_stream_error(ErrorCode::FlowControlError);
+        assert_eq!(stream.state(), StreamState::Closed);
     }
 
     #[test]
