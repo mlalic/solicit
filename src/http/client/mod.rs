@@ -13,6 +13,7 @@ use http::connection::{SendFrame, ReceiveFrame, SendStatus, HttpConnection, EndS
 use http::session::{Session, Stream, DefaultStream, DefaultSessionState, SessionState};
 use http::session::Client as ClientMarker;
 use http::priority::SimplePrioritizer;
+use http::flow_control::{WindowUpdateStrategy, NoFlowControlStrategy, WindowUpdateAction};
 
 #[cfg(feature="tls")]
 pub mod tls;
@@ -304,6 +305,7 @@ pub struct ClientSession<'a, State, S>
 {
     state: &'a mut State,
     sender: &'a mut S,
+    window_update_strategy: Option<&'a mut WindowUpdateStrategy>,
 }
 
 impl<'a, State, S> ClientSession<'a, State, S>
@@ -316,6 +318,20 @@ impl<'a, State, S> ClientSession<'a, State, S>
         ClientSession {
             state: state,
             sender: sender,
+            window_update_strategy: None,
+        }
+    }
+
+    /// Creates a new `ClientSession` associated to the given state, which uses the given
+    /// `WindowUpdateStrategy` to decide how the flow control windows should be updated.
+    pub fn with_window_update_strategy(state: &'a mut State,
+                                       sender: &'a mut S,
+                                       window_update_strategy: &'a mut WindowUpdateStrategy)
+                                       -> ClientSession<'a, State, S> {
+        ClientSession {
+            state: state,
+            sender: sender,
+            window_update_strategy: Some(window_update_strategy),
         }
     }
 }
@@ -342,6 +358,7 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
         };
         // Now let the stream handle the data chunk
         stream.new_data_chunk(data);
+
         Ok(())
     }
 
@@ -406,6 +423,79 @@ impl<'a, State, S> Session for ClientSession<'a, State, S>
 
     fn on_pong(&mut self, _ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
         debug!("Received a PING ack");
+        Ok(())
+    }
+
+    fn on_connection_in_window_decrease(&mut self, conn: &mut HttpConnection) -> HttpResult<()> {
+        // The default reaction to the inbound window decreasing is to ask the window update
+        // strategy what should be done; if the window should be increased, emit the
+        // appropriate window update frame.
+
+        let new = conn.in_window_size();
+        let conn_update = match self.window_update_strategy.as_mut() {
+            Some(strategy) => {
+                strategy.on_connection_window(new)
+            }
+            None => {
+                NoFlowControlStrategy::new().on_connection_window(new)
+            }
+        };
+        if let WindowUpdateAction::Increment(delta) = conn_update {
+            try!(conn.increase_connection_window_size(delta));
+            try!(conn.sender(self.sender).send_connection_window_update(delta));
+        }
+
+        Ok(())
+    }
+
+    fn on_stream_in_window_decrease(&mut self,
+                                    stream_id: StreamId,
+                                    size: u32,
+                                    conn: &mut HttpConnection)
+                                    -> HttpResult<()> {
+        // TODO: Get rid of the assert.
+        debug_assert!(size <= 0x7fffffff);
+        let size: i32 = size as i32;
+
+        if let Some(e) = self.state.get_entry_mut(stream_id) {
+            if e.inbound_window().can_accept(size) {
+                // First do the actual window update...
+                let old = *e.inbound_window();
+                e.inbound_window_mut().try_decrease(size)
+                                      .ok()
+                                      .expect("Already checked that no overflow can happen");
+                let new = *e.inbound_window();
+                trace!("Stream window update: stream_id={:?}, old={:?}, new={:?}",
+                       stream_id,
+                       old,
+                       new);
+
+                // Now, check if the window update strategy mandates an increase in the window
+                // size.
+                let stream_update = match self.window_update_strategy.as_mut() {
+                    Some(mut strategy) => {
+                        strategy.on_stream_window(stream_id, new)
+                    }
+                    None => {
+                        NoFlowControlStrategy::new().on_stream_window(stream_id, new)
+                    }
+                };
+                if let WindowUpdateAction::Increment(delta) = stream_update {
+                    if let Err(_) = e.inbound_window_mut().try_increase(delta) {
+                        // TODO: Should we perhaps propagate this error upward?
+                        warn!("Misbehaving WindowUpdateStrategy would overflow the window size");
+                    } else {
+                        try!(conn.sender(self.sender).send_stream_window_update(stream_id, delta));
+                    }
+                }
+            } else {
+                // This would violate the flow control for the stream.
+                let err = ErrorCode::FlowControlError;
+                e.stream_mut().on_stream_error(err);
+                try!(conn.sender(self.sender).rst_stream(stream_id, err));
+            }
+        }
+
         Ok(())
     }
 }

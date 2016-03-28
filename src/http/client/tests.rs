@@ -2,13 +2,15 @@
 
 use super::{ClientSession, write_preface, RequestStream};
 
-use http::{Header, ErrorCode, HttpError};
+use http::{Header, ErrorCode, HttpError, WindowSize, StreamId};
 use http::tests::common::{TestStream, build_mock_client_conn, build_mock_http_conn,
                           MockReceiveFrame, MockSendFrame};
 use http::frame::{SettingsFrame, DataFrame, Frame, RawFrame};
 use http::connection::{HttpFrame, SendStatus};
-use http::session::{Session, SessionState, Stream, DefaultSessionState};
+use http::connection::{set_connection_windows};
+use http::session::{Session, SessionState, Stream, DefaultSessionState, StreamState};
 use http::session::Client as ClientMarker;
+use http::flow_control::{WindowUpdateStrategy, WindowUpdateAction};
 
 /// Tests that a client connection is correctly initialized, by reading the
 /// server preface (i.e. a settings frame) as the first frame of the connection.
@@ -284,4 +286,139 @@ fn test_write_preface() {
     let frame: SettingsFrame = Frame::from_raw(&raw).unwrap();
     // ...which was not an ack, but our own settings.
     assert!(!frame.is_ack());
+}
+
+/// An implementation of the `WindowUpdateStrategy` trait that never takes any action.
+struct NoActionStrategy;
+
+impl WindowUpdateStrategy for NoActionStrategy {
+    fn on_connection_window(&mut self, _: WindowSize) -> WindowUpdateAction {
+        WindowUpdateAction::NoAction
+    }
+
+    fn on_stream_window(&mut self,
+                        _: StreamId,
+                        _: WindowSize)
+                        -> WindowUpdateAction {
+        WindowUpdateAction::NoAction
+    }
+}
+
+/// Tests that the `ClientSession` correctly updates the state
+#[test]
+fn test_session_window_decrease_state_update_valid() {
+    let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+    // Prepare a stream in the state of the session, which will receive an update
+    let stream_id = state.insert_outgoing(TestStream::new());
+    let mut conn = build_mock_http_conn();
+    let mut sender = MockSendFrame::new();
+
+    let decrease = 50;
+    let res = {
+        let mut no_action = NoActionStrategy;
+        let mut session = ClientSession::with_window_update_strategy(&mut state,
+                                                                     &mut sender,
+                                                                     &mut no_action);
+        session.on_stream_in_window_decrease(stream_id, decrease, &mut conn)
+    };
+
+    assert!(res.is_ok());
+    let entry = state.get_entry_ref(stream_id).unwrap();
+    assert_eq!(entry.inbound_window().size(),
+               0xffff_i32 - decrease as i32);
+    assert_eq!(entry.stream_ref().state(), StreamState::Open);
+}
+
+#[test]
+fn test_session_window_decrease_state_update_window_too_small() {
+    let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+    // Prepare a stream in the state of the session, which will receive an update
+    let stream_id = state.insert_outgoing(TestStream::new());
+    let mut conn = build_mock_http_conn();
+    let mut sender = MockSendFrame::new();
+
+    let decrease = 0xffff + 1;
+    let res = {
+        let mut no_action = NoActionStrategy;
+        let mut session = ClientSession::with_window_update_strategy(&mut state,
+                                                                     &mut sender,
+                                                                     &mut no_action);
+        session.on_stream_in_window_decrease(stream_id, decrease, &mut conn)
+    };
+
+    // The window wasn't large enough to accomodate the update => RST_STREAM
+    assert!(res.is_ok());
+    match HttpFrame::from_raw(&sender.sent.remove(0)).expect("RST_STREAM frame") {
+        HttpFrame::RstStreamFrame(ref frame) => {
+            assert_eq!(frame.get_stream_id(), stream_id);
+        }
+        _ => panic!("Expected an RST_STREAM frame"),
+    };
+    // The stream got closed too.
+    assert_eq!(state.get_stream_ref(stream_id).unwrap().state(), StreamState::Closed);
+}
+
+#[test]
+fn test_session_flow_control_disabled_by_default_stream() {
+    let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+    // Prepare a stream in the state of the session, which will receive an update
+    let stream_id = state.insert_outgoing(TestStream::new());
+    let mut conn = build_mock_http_conn();
+    let mut sender = MockSendFrame::new();
+
+    let decrease = 50;
+    let res = {
+        let mut session = ClientSession::new(&mut state,
+                                             &mut sender);
+        session.on_stream_in_window_decrease(stream_id, decrease, &mut conn)
+    };
+
+    assert!(res.is_ok());
+    // The window got updated immediately.
+    let entry = state.get_entry_ref(stream_id).unwrap();
+    assert_eq!(entry.inbound_window().size(),
+               0xffff_i32);
+    assert_eq!(entry.stream_ref().state(), StreamState::Open);
+    // The window update frame is there
+    match HttpFrame::from_raw(&sender.sent.remove(0)).expect("WINDOW_UPDATE frame") {
+        HttpFrame::WindowUpdateFrame(ref frame) => {
+            assert_eq!(frame.get_stream_id(), stream_id);
+            assert_eq!(frame.increment(), decrease);
+        }
+        _ => panic!("Expected a WINDOW_UPDATE frame"),
+    };
+}
+
+#[test]
+fn test_session_flow_control_disabled_by_default_connection() {
+    let mut state = DefaultSessionState::<ClientMarker, TestStream>::new();
+    // Prepare a stream in the state of the session, which will receive an update
+    let mut conn = build_mock_http_conn();
+    let mut sender = MockSendFrame::new();
+
+    let decrease = 50;
+    let res = {
+        let mut session = ClientSession::new(&mut state,
+                                             &mut sender);
+        let (new_in_window, old_out_window) = {
+            let mut window = conn.in_window_size();
+            window.try_decrease(decrease).unwrap();
+            (window, conn.out_window_size())
+        };
+        set_connection_windows(&mut conn, new_in_window, old_out_window);
+        // Sanity check: the in window is less than the default
+        assert_eq!(conn.in_window_size(), 0xffff_i32 - decrease);
+        session.on_connection_in_window_decrease(&mut conn)
+    };
+
+    assert!(res.is_ok());
+    // The window size got increased automatically by the delta...
+    assert_eq!(conn.in_window_size(), 0xffff_i32);
+    match HttpFrame::from_raw(&sender.sent.remove(0)).expect("WINDOW_UPDATE frame") {
+        HttpFrame::WindowUpdateFrame(ref frame) => {
+            assert_eq!(frame.get_stream_id(), 0);
+            assert_eq!(frame.increment(), decrease as u32);
+        }
+        _ => panic!("Expected a WINDOW_UPDATE frame"),
+    };
 }

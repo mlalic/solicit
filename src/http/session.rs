@@ -9,7 +9,8 @@ use std::error::Error;
 use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
-use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode, HttpError, ConnectionError};
+use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode, HttpError, ConnectionError,
+           DEFAULT_MAX_WINDOW_SIZE, WindowSize};
 use http::frame::{HttpSetting, PingFrame};
 use http::connection::HttpConnection;
 
@@ -142,6 +143,10 @@ impl<'a, S> Iterator for StreamIter<'a, S>
 /// information for a single HTTP/2 stream.
 pub struct Entry<S> where S: Stream {
     stream: S,
+    /// Tracks the size of the outbound flow control window
+    out_window: WindowSize,
+    /// Tracks the size of the inbound flow control window
+    in_window: WindowSize,
 }
 
 impl<S> Entry<S> where S: Stream {
@@ -149,6 +154,9 @@ impl<S> Entry<S> where S: Stream {
     pub fn new(stream: S) -> Entry<S> {
         Entry {
             stream: stream,
+            // TODO: Use the current initial window sizes indicated by the connection settings!
+            out_window: DEFAULT_MAX_WINDOW_SIZE,
+            in_window: DEFAULT_MAX_WINDOW_SIZE,
         }
     }
     /// Consumes the `Entry`, returning the underlying `Stream` instance
@@ -157,6 +165,10 @@ impl<S> Entry<S> where S: Stream {
     pub fn stream_ref(&self) -> &S { &self.stream }
     /// Returns a mutable reference to the `Stream`
     pub fn stream_mut(&mut self) -> &mut S { &mut self.stream }
+
+    pub fn outbound_window(&self) -> &WindowSize { &self.out_window }
+    pub fn inbound_window(&self) -> &WindowSize { &self.in_window }
+    pub fn inbound_window_mut(&mut self) -> &mut WindowSize { &mut self.in_window }
 }
 
 /// A trait defining a set of methods for accessing and influencing an HTTP/2 session's state.

@@ -622,6 +622,17 @@ impl HttpConnection {
     }
 }
 
+/// A helper method for tests that allows the window sizes of the given connection to be modified.
+/// Since this touches the internal state that isn't intended to be modified by clients directly,
+/// it is intended only as a helper for tests.
+#[cfg(test)]
+pub fn set_connection_windows(conn: &mut HttpConnection,
+                              in_window: WindowSize,
+                              out_window: WindowSize) {
+    conn.in_window_size = in_window;
+    conn.out_window_size = out_window;
+}
+
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;

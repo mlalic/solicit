@@ -18,13 +18,12 @@ pub enum WindowUpdateAction {
 /// control.
 pub trait WindowUpdateStrategy {
     /// Return the action that should be taken with respect to the connection-level flow control
-    /// window, depending on the given old and new window size.
+    /// window.
     fn on_connection_window(&mut self,
                             new: WindowSize)
                             -> WindowUpdateAction;
 
-    /// Return the action that should be taken with respect to a stream-level flow control window,
-    /// depending on the given old and new window size for the stream.
+    /// Return the action that should be taken with respect to a stream-level flow control window.
     fn on_stream_window(&mut self,
                         stream_id: StreamId,
                         new: WindowSize)
