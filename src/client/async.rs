@@ -237,6 +237,8 @@ enum WorkItem {
     /// Signals to the service that a client has disconnected. Helps it keep track of whether there
     /// are clients that would expect a response.
     ClientLeft,
+    /// Send a PING frame to the server
+    SendPing,
 }
 
 /// An internal struct encapsulating a service that lets multiple clients
@@ -427,7 +429,11 @@ impl ClientService {
                 debug!("Will queue some request data");
                 try!(self.conn.send_next_data(&mut self.send_handle));
                 Ok(())
-            }
+            },
+            WorkItem::SendPing => {
+                self.send_ping();
+                Ok(())
+            },
             WorkItem::NewClient => {
                 self.client_count += 1;
                 Ok(())
@@ -562,6 +568,11 @@ impl ClientService {
                 self.send_request(async_req);
             }
         }
+    }
+
+    /// Internal helper method to send a PING frame to the server
+    fn send_ping(&mut self) {
+        self.conn.send_ping(&mut self.send_handle).ok().unwrap();
     }
 }
 
@@ -759,5 +770,10 @@ impl Client {
                 body: Vec<u8>)
                 -> Option<Receiver<StaticResponse>> {
         self.request(b"POST", path, headers, Some(body))
+    }
+
+    /// Sends a PING to the server
+    pub fn ping(&self) -> Result<(), &'static str> {
+        self.sender.send(WorkItem::SendPing).map_err(|_| "Client not available")
     }
 }
