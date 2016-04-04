@@ -113,6 +113,6 @@ mod async {
         let connector = CleartextConnector::new("unknown.host.name.lcl");
         let client = Client::with_connector(connector);
 
-        assert!(client.is_none());
+        assert!(client.is_err());
     }
 }

@@ -5,10 +5,11 @@
 //! asynchronously.
 use std::collections::HashMap;
 
+use std::fmt;
+use std::io;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
-use std::io;
 
 use http::{StreamId, HttpError, Response, StaticResponse, Header, HttpResult, StaticHeader};
 use http::frame::{RawFrame, FrameIR};
@@ -16,7 +17,7 @@ use http::transport::TransportStream;
 use http::connection::{SendFrame, ReceiveFrame, HttpFrame, HttpConnection};
 use http::session::{SessionState, DefaultSessionState, DefaultStream, Stream};
 use http::session::Client as ClientMarker;
-use http::client::{ClientConnection, HttpConnect, ClientStream, RequestStream};
+use http::client::{ClientConnection, HttpConnect, HttpConnectError, ClientStream, RequestStream};
 
 /// A struct representing an asynchronously dispatched request. It is used
 /// internally be the `ClientService` and `Client` structs.
@@ -328,7 +329,7 @@ impl ClientService {
     ///
     /// If no HTTP/2 connection can be established to the given host on the
     /// given port, returns `None`.
-    pub fn new<S>(client_stream: ClientStream<S>) -> Option<Service<S>>
+    pub fn new<S>(client_stream: ClientStream<S>) -> Service<S>
         where S: TransportStream
     {
         let (tx, rx): (Sender<WorkItem>, Receiver<WorkItem>) = mpsc::channel();
@@ -362,7 +363,7 @@ impl ClientService {
 
         // Returns the handles to the channel sender/receiver, so that the client can use them to
         // perform the real IO somewhere.
-        Some(Service(service, tx, recv_frame, send_frame))
+        Service(service, tx, recv_frame, send_frame)
     }
 
     /// Performs one iteration of the service.
@@ -639,34 +640,26 @@ impl Client {
     /// the thread to exit.
     ///
     /// If the HTTP/2 connection cannot be initialized returns `None`.
-    pub fn with_connector<C, S>(connector: C) -> Option<Client>
-        where C: HttpConnect<Stream = S>,
-              S: TransportStream + Send + 'static
+    pub fn with_connector<C, S, E>(connector: C) -> Result<Client, ClientConnectError<E>>
+        where C: HttpConnect<Stream = S, Err = E>,
+              S: TransportStream + Send + 'static,
+              E: HttpConnectError + 'static
     {
         // Use the provided connector to establish a network connection...
-        let client_stream = match connector.connect().ok() {
-            Some(cs) => cs,
-            None => return None,
-        };
+        let client_stream = try!(connector.connect());
+
         // Keep a socket handle in order to shut it down once the service stops. This is required
         // because if the service decides to stop (due to all clients disconnecting) while the
         // socket is still open and the read thread waiting, it can happen that the read thread
         // (and as such the socket itself) ends up waiting indefinitely (or well, until the server
         // decides to close it), effectively leaking the socket and thread.
-        let mut sck = match client_stream.0.try_split() {
-            Ok(sck) => sck,
-            Err(_) => return None,
-        };
+        let mut sck = try!(client_stream.0.try_split());
 
-        let service = match ClientService::new(client_stream) {
-            Some(service) => service,
-            None => return None,
-        };
+        let service = ClientService::new(client_stream);
+
         let Service(mut service, rx, mut recv_frame, mut send_frame) = service;
 
-        if let Err(_) = rx.send(WorkItem::NewClient) {
-            return None;
-        }
+        rx.send(WorkItem::NewClient).expect("service is in scope and holds the receiver");
 
         // Keep a handle to the work queue to notify the service of newly read frames, making it so
         // that it never blocks on waiting for frames to read.
@@ -694,7 +687,7 @@ impl Client {
             debug!("Reader thread halting");
         });
 
-        Some(Client { sender: rx })
+        Ok(Client { sender: rx })
     }
 
     /// Issues a new request to the server.
@@ -759,5 +752,66 @@ impl Client {
                 body: Vec<u8>)
                 -> Option<Receiver<StaticResponse>> {
         self.request(b"POST", path, headers, Some(body))
+    }
+}
+
+/// Error that occur when creating/connecting a client
+#[derive(Debug)]
+pub enum ClientConnectError<E>
+    where E: HttpConnectError
+{
+    /// Some sort of io::Error
+    Io(io::Error),
+
+    /// Error from the http connector
+    HttpConnector(E),
+}
+
+impl<E> ::std::error::Error for ClientConnectError<E>
+    where E: HttpConnectError,
+{
+    fn cause(&self) -> Option<&::std::error::Error> {
+        match *self {
+            ClientConnectError::Io(ref err) => Some(err),
+            ClientConnectError::HttpConnector(ref err) => Some(err),
+        }
+    }
+
+    fn description(&self) -> &str {
+        match *self {
+            ClientConnectError::Io(ref err) => err.description(),
+            ClientConnectError::HttpConnector(ref err) => err.description(),
+        }
+    }
+}
+
+impl<E> fmt::Display for ClientConnectError<E>
+    where E: HttpConnectError
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ClientConnectError::Io(ref err) => {
+                write!(f, "I/O Error during connect: {}", err)
+            },
+            ClientConnectError::HttpConnector(ref err) => {
+                write!(f, "Error during HTTP connect: {}", err)
+            },
+        }
+    }
+}
+
+impl<E> From<E> for ClientConnectError<E>
+    where E: HttpConnectError
+{
+    fn from(err: E) -> Self {
+        ClientConnectError::HttpConnector(err)
+    }
+}
+
+impl<E> From<io::Error> for ClientConnectError<E>
+    where E: HttpConnectError
+{
+    fn from(err: io::Error) -> Self {
+        ClientConnectError::Io(err)
     }
 }
