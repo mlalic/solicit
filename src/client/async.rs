@@ -430,7 +430,7 @@ impl ClientService {
                 Ok(())
             }
             WorkItem::NewClient => {
-                self.client_count += 1;
+                self.on_new_client();
                 Ok(())
             }
             WorkItem::ClientLeft => {
@@ -442,6 +442,10 @@ impl ClientService {
                 }
             }
         }
+    }
+
+    fn on_new_client(&mut self) {
+        self.client_count += 1;
     }
 
     /// A private convenience method that performs the handling of the next received frame.
@@ -659,7 +663,7 @@ impl Client {
 
         let Service(mut service, rx, mut recv_frame, mut send_frame) = service;
 
-        rx.send(WorkItem::NewClient).expect("service is in scope and holds the receiver");
+        service.on_new_client();
 
         // Keep a handle to the work queue to notify the service of newly read frames, making it so
         // that it never blocks on waiting for frames to read.
