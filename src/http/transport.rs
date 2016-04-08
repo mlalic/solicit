@@ -192,7 +192,12 @@ mod tests {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();
                 ret
-            }
+            },
+            HttpFrame::PingFrame(frame) => {
+                let ret = serialize_frame(&frame);
+                sender.send_frame(frame).unwrap();
+                ret
+            },
             HttpFrame::GoawayFrame(frame) => {
                 let ret = serialize_frame(&frame);
                 sender.send_frame(frame).unwrap();

@@ -23,7 +23,7 @@ use http::{Header, StreamId, HttpError, HttpResult, HttpScheme, WindowSize,
 use http::priority::DataPrioritizer;
 use http::session::Session;
 use http::frame::{Frame, FrameIR, RawFrame, DataFrame, DataFlag, HeadersFrame, HeadersFlag,
-                  SettingsFrame, RstStreamFrame, GoawayFrame, WindowUpdateFrame};
+                  SettingsFrame, RstStreamFrame, PingFrame, GoawayFrame, WindowUpdateFrame};
 use hpack;
 
 /// An enum representing all frame variants that can be returned by an `HttpConnection` can handle.
@@ -38,6 +38,7 @@ pub enum HttpFrame<'a> {
     HeadersFrame(HeadersFrame<'a>),
     RstStreamFrame(RstStreamFrame),
     SettingsFrame(SettingsFrame),
+    PingFrame(PingFrame),
     GoawayFrame(GoawayFrame<'a>),
     WindowUpdateFrame(WindowUpdateFrame),
     UnknownFrame(RawFrame<'a>),
@@ -50,6 +51,7 @@ impl<'a> HttpFrame<'a> {
             0x1 => HttpFrame::HeadersFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x3 => HttpFrame::RstStreamFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x4 => HttpFrame::SettingsFrame(try!(HttpFrame::parse_frame(&raw_frame))),
+            0x6 => HttpFrame::PingFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x7 => HttpFrame::GoawayFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             0x8 => HttpFrame::WindowUpdateFrame(try!(HttpFrame::parse_frame(&raw_frame))),
             _ => HttpFrame::UnknownFrame(raw_frame.as_ref().into()),
@@ -209,6 +211,16 @@ impl<'a, S> HttpConnectionSender<'a, S>
     /// Sends a SETTINGS acknowledge frame to the peer.
     pub fn send_settings_ack(&mut self) -> HttpResult<()> {
         self.send_frame(SettingsFrame::new_ack())
+    }
+
+    /// Sends a PING ack
+    pub fn send_ping_ack(&mut self, bytes: u64) -> HttpResult<()> {
+        self.send_frame(PingFrame::new_ack(bytes))
+    }
+
+    /// Sends a PING request
+    pub fn send_ping(&mut self, bytes: u64) -> HttpResult<()> {
+        self.send_frame(PingFrame::with_data(bytes))
     }
 
     /// A helper function that inserts the frames required to send the given headers onto the
@@ -423,7 +435,11 @@ impl HttpConnection {
             HttpFrame::SettingsFrame(frame) => {
                 debug!("Settings frame received");
                 self.handle_settings_frame::<Sess>(frame, session)
-            }
+            },
+            HttpFrame::PingFrame(frame) => {
+                debug!("PING frame received");
+                self.handle_ping_frame(frame, session)
+            },
             HttpFrame::GoawayFrame(frame) => {
                 debug!("GOAWAY frame received");
                 session.on_goaway(frame.last_stream_id(),
@@ -494,6 +510,16 @@ impl HttpConnection {
         session.rst_stream(frame.get_stream_id(), frame.error_code(), self)
     }
 
+    /// Respond to a ping frame if it's not an ACK
+    fn handle_ping_frame<Sess: Session>(&mut self, frame: PingFrame, session: &mut Sess)
+            -> HttpResult<()> {
+        if frame.is_ack() {
+            session.on_pong(&frame, self)
+        } else {
+            session.on_ping(&frame, self)
+        }
+    }
+
     /// Private helper method that handles a received `SettingsFrame`.
     fn handle_settings_frame<Sess: Session>(&mut self,
                                             frame: SettingsFrame,
@@ -562,6 +588,7 @@ mod tests {
             HttpFrame::SettingsFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::RstStreamFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::HeadersFrame(frame) => conn.sender(sender).send_frame(frame),
+            HttpFrame::PingFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::GoawayFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::WindowUpdateFrame(frame) => conn.sender(sender).send_frame(frame),
             HttpFrame::UnknownFrame(_) => Ok(()),

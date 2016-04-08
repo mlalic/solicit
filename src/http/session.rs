@@ -10,7 +10,7 @@ use std::io::Read;
 use std::io::Cursor;
 use std::iter::FromIterator;
 use http::{StreamId, OwnedHeader, Header, HttpResult, ErrorCode, HttpError, ConnectionError};
-use http::frame::HttpSetting;
+use http::frame::{HttpSetting, PingFrame};
 use http::connection::HttpConnection;
 
 /// A trait that defines the interface between an `HttpConnection` and the higher-levels that use
@@ -51,6 +51,13 @@ pub trait Session {
                     settings: Vec<HttpSetting>,
                     conn: &mut HttpConnection)
                     -> HttpResult<()>;
+
+    /// Notifies the `Session` that a PING request has been received. The session itself is
+    /// responsible for replying with an ACK.
+    fn on_ping(&mut self, ping: &PingFrame, conn: &mut HttpConnection) -> HttpResult<()>;
+
+    /// Notifies the `Session` that a PING acknowledgement has been received.
+    fn on_pong(&mut self, ping: &PingFrame, conn: &mut HttpConnection) -> HttpResult<()>;
 
     /// Notifies the `Session` that the peer has sent a GOAWAY frame, indicating that the
     /// connection is terminated.

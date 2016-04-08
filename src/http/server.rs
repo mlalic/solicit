@@ -2,7 +2,7 @@
 //! HTTP/2 connection.
 
 use http::{StreamId, Header, HttpResult, HttpScheme, ErrorCode};
-use http::frame::HttpSetting;
+use http::frame::{HttpSetting, PingFrame};
 use http::connection::{SendFrame, ReceiveFrame, HttpConnection, EndStream, SendStatus};
 use http::session::{Session, SessionState, Stream, DefaultStream, DefaultSessionState};
 use http::session::Server as ServerMarker;
@@ -120,6 +120,16 @@ impl<'a, State, F, S> Session for ServerSession<'a, State, F, S>
                     -> HttpResult<()> {
         debug!("Sending a SETTINGS ack");
         conn.sender(self.sender).send_settings_ack()
+    }
+
+    fn on_ping(&mut self, ping: &PingFrame, conn: &mut HttpConnection) -> HttpResult<()> {
+        debug!("Sending a PING ack");
+        conn.sender(self.sender).send_ping_ack(ping.opaque_data())
+    }
+
+    fn on_pong(&mut self, _ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
+        debug!("Received a PING ack");
+        Ok(())
     }
 }
 

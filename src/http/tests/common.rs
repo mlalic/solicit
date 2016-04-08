@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::io::{Cursor, Read, Write};
 
 use http::{HttpResult, HttpScheme, StreamId, Header, OwnedHeader, ErrorCode};
-use http::frame::{RawFrame, FrameIR, FrameHeader, pack_header, HttpSetting};
+use http::frame::{RawFrame, FrameIR, FrameHeader, pack_header, HttpSetting, PingFrame};
 use http::session::{Session, DefaultSessionState, SessionState, Stream, StreamState,
                     StreamDataChunk, StreamDataError};
 use http::session::Client as ClientMarker;
@@ -167,6 +167,7 @@ pub fn build_stub_from_frames(frames: &Vec<HttpFrame>) -> Vec<u8> {
             HttpFrame::HeadersFrame(ref frame) => serialize_frame(frame),
             HttpFrame::RstStreamFrame(ref frame) => serialize_frame(frame),
             HttpFrame::SettingsFrame(ref frame) => serialize_frame(frame),
+            HttpFrame::PingFrame(ref frame) => serialize_frame(frame),
             HttpFrame::GoawayFrame(ref frame) => serialize_frame(frame),
             HttpFrame::WindowUpdateFrame(ref frame) => serialize_frame(frame),
             HttpFrame::UnknownFrame(ref frame) => serialize_frame(frame),
@@ -332,6 +333,14 @@ impl Session for TestSession {
                  _: &mut HttpConnection)
                  -> HttpResult<()> {
         self.goaways.push(error_code);
+        Ok(())
+    }
+
+    fn on_ping(&mut self, _ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
+        Ok(())
+    }
+
+    fn on_pong(&mut self, _ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
         Ok(())
     }
 }
