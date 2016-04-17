@@ -490,7 +490,7 @@ impl Stream for DefaultStream {
 
         self.headers = match self.headers.take() {
             Some(mut x) => {
-                x.extend(new_headers.collect::<Vec<Header<'static, 'static>>>());
+                x.extend(new_headers);
                 Some(x)
             }
             None => Some(new_headers.collect()),
