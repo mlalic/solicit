@@ -248,6 +248,10 @@ pub struct TestSession {
     pub rst_streams: Vec<StreamId>,
     /// All the goaway error codes received.
     pub goaways: Vec<ErrorCode>,
+    /// All the ping data received
+    pub pings: Vec<u64>,
+    /// All the ping ack data received
+    pub pongs: Vec<u64>,
 }
 
 impl TestSession {
@@ -262,6 +266,8 @@ impl TestSession {
             curr_chunk: 0,
             rst_streams: Vec::new(),
             goaways: Vec::new(),
+            pings: Vec::new(),
+            pongs: Vec::new(),
         }
     }
 
@@ -277,6 +283,8 @@ impl TestSession {
             curr_chunk: 0,
             rst_streams: Vec::new(),
             goaways: Vec::new(),
+            pings: Vec::new(),
+            pongs: Vec::new(),
         }
     }
 }
@@ -336,11 +344,13 @@ impl Session for TestSession {
         Ok(())
     }
 
-    fn on_ping(&mut self, _ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
+    fn on_ping(&mut self, ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
+        self.pings.push(ping.opaque_data());
         Ok(())
     }
 
-    fn on_pong(&mut self, _ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
+    fn on_pong(&mut self, ping: &PingFrame, _conn: &mut HttpConnection) -> HttpResult<()> {
+        self.pongs.push(ping.opaque_data());
         Ok(())
     }
 }

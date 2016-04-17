@@ -569,7 +569,7 @@ mod tests {
     use http::tests::common::{build_mock_http_conn, StubDataPrioritizer, TestSession,
                               MockReceiveFrame, MockSendFrame};
     use http::frame::{Frame, DataFrame, HeadersFrame, RstStreamFrame, GoawayFrame, SettingsFrame,
-                      pack_header, RawFrame, FrameIR};
+                      PingFrame, pack_header, RawFrame, FrameIR};
     use http::{HttpResult, HttpScheme, Header, OwnedHeader, ErrorCode};
     use hpack;
 
@@ -1015,5 +1015,33 @@ mod tests {
             let mut frame_provider = MockReceiveFrame::new(frames);
             assert!(conn.expect_settings(&mut frame_provider, &mut TestSession::new()).is_err());
         }
+    }
+
+    /// Tests that the session is appropriately notified when a PING frame is received.
+    #[test]
+    fn test_on_ping() {
+        let frames = vec![HttpFrame::PingFrame(PingFrame::new())];
+        let mut conn = HttpConnection::new(HttpScheme::Http);
+        let mut session = TestSession::new();
+        let mut frame_provider = MockReceiveFrame::new(frames);
+
+        conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+
+        assert_eq!(session.pings, vec![0]);
+        assert_eq!(session.pongs, vec![]);
+    }
+
+    /// Tests that the session is appropriately notified when a PING ack frame is received.
+    #[test]
+    fn test_on_pong() {
+        let frames = vec![HttpFrame::PingFrame(PingFrame::new_ack(123))];
+        let mut conn = HttpConnection::new(HttpScheme::Http);
+        let mut session = TestSession::new();
+        let mut frame_provider = MockReceiveFrame::new(frames);
+
+        conn.handle_next_frame(&mut frame_provider, &mut session).unwrap();
+
+        assert_eq!(session.pongs, vec![123]);
+        assert_eq!(session.pings, vec![]);
     }
 }
