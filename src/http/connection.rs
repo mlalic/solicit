@@ -274,7 +274,7 @@ impl<'a, S> HttpConnectionSender<'a, S>
         }
         // Adjust the flow control window...
         try!(self.conn.decrease_out_window(frame.payload_len()));
-        trace!("New OUT WINDOW size = {}", self.conn.out_window_size());
+        trace!("New OUT WINDOW size = {:?}", self.conn.out_window_size());
         // ...and now send it out.
         self.send_frame(frame)
     }
@@ -352,13 +352,14 @@ impl HttpConnection {
 
     /// Returns the current size of the inbound flow control window (i.e. the number of octets that
     /// the connection will accept and the peer will send at most, unless the window is updated).
-    pub fn in_window_size(&self) -> i32 {
-        self.in_window_size.size()
+    pub fn in_window_size(&self) -> WindowSize {
+        self.in_window_size
     }
+
     /// Returns the current size of the outbound flow control window (i.e. the number of octets
     /// that can be sent on the connection to the peer without violating flow control).
-    pub fn out_window_size(&self) -> i32 {
-        self.out_window_size.size()
+    pub fn out_window_size(&self) -> WindowSize {
+        self.out_window_size
     }
 
     /// The method processes the next frame provided by the given `ReceiveFrame` instance, expecting
@@ -472,7 +473,7 @@ impl HttpConnection {
                                         session: &mut Sess)
                                         -> HttpResult<()> {
         try!(self.decrease_in_window(frame.payload_len()));
-        trace!("New IN WINDOW size = {}", self.in_window_size());
+        trace!("New IN WINDOW size = {:?}", self.in_window_size());
         try!(session.new_data_chunk(frame.get_stream_id(), &frame.data, self));
         // TODO(mlalic): Should the connection separately signal the decrease in the flow control
         //               window? For now, it is expected that the data callback is enough, as the
