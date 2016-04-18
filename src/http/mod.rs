@@ -553,6 +553,12 @@ impl Into<i32> for WindowSize {
     }
 }
 
+impl PartialEq<i32> for WindowSize {
+    fn eq(&self, rhs: &i32) -> bool {
+        self.size() == *rhs
+    }
+}
+
 pub const DEFAULT_MAX_WINDOW_SIZE: WindowSize = WindowSize(0xffff);
 
 /// An enum representing the two possible HTTP schemes.
