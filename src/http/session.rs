@@ -131,6 +131,9 @@ pub trait SessionState {
     /// Returns an iterator over the streams currently found in the session.
     fn iter(&mut self) -> StreamIter<Self::Stream>;
 
+    /// The number of streams tracked by this state object
+    fn len(&self) -> usize;
+
     /// Returns all streams that are closed and tracked by the session state.
     ///
     /// The streams are moved out of the session state.
@@ -289,6 +292,12 @@ impl<T, S> SessionState for DefaultSessionState<T, S>
     #[inline]
     fn iter(&mut self) -> StreamIter<S> {
         StreamIter(Box::new(self.streams.iter_mut()))
+    }
+
+    /// Number of currently active streams
+    #[inline]
+    fn len(&self) -> usize {
+        self.streams.len()
     }
 }
 
