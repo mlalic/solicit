@@ -24,6 +24,7 @@ use http::priority::DataPrioritizer;
 use http::session::Session;
 use http::frame::{Frame, FrameIR, RawFrame, DataFrame, DataFlag, HeadersFrame, HeadersFlag,
                   SettingsFrame, RstStreamFrame, PingFrame, GoawayFrame, WindowUpdateFrame};
+use http::ErrorCode;
 use hpack;
 
 /// An enum representing all frame variants that can be returned by an `HttpConnection` can handle.
@@ -206,6 +207,11 @@ impl<'a, S> HttpConnectionSender<'a, S>
     #[inline]
     fn send_frame<F: FrameIR>(&mut self, frame: F) -> HttpResult<()> {
         self.sender.send_frame(frame)
+    }
+
+    /// Send a RST_STREAM frame for the given frame id
+    pub fn rst_stream(&mut self, id: StreamId, code: ErrorCode) -> HttpResult<()> {
+        self.send_frame(RstStreamFrame::new(id, code))
     }
 
     /// Sends a SETTINGS acknowledge frame to the peer.
