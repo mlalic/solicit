@@ -160,13 +160,14 @@ using the `solicit::htp` API -- see:
 extern crate solicit;
 
 use solicit::client::Client;
+use solicit::http::Header;
 use solicit::http::client::CleartextConnector;
 use std::thread;
 use std::str;
 
 fn main() {
   // Connect to a server that supports HTTP/2
-  let connector = CleartextConnector::new(host: "http2bin.org");
+  let connector = CleartextConnector::new("http2bin.org");
   let client = Client::with_connector(connector).unwrap();
 
   // Issue 5 requests from 5 different threads concurrently and wait for all
@@ -174,7 +175,7 @@ fn main() {
   let threads: Vec<_> = (0..5).map(|i| {
       let this = client.clone();
       thread::spawn(move || {
-          let resp = this.get(b"/get", &[(b"x-thread".to_vec(), vec![b'0' + i])]).unwrap();
+          let resp = this.get(b"/get", &[Header::new(b"x-thread".to_vec(), vec![b'0' + i])]).unwrap();
           let response = resp.recv().unwrap();
 
           println!("Thread {} got response ... {}", i, response.status_code().ok().unwrap());
