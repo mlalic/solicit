@@ -21,7 +21,6 @@ before_script:
       export PATH=$HOME/.local/bin:$PATH
 
 script:
-  - cargo test --features="live_tests"
   - cargo test --features="tls"
   - travis-cargo --only stable doc -- --no-deps --features="tls"
 
@@ -29,7 +28,7 @@ sudo: false
 
 after_success:
   - travis-cargo --only stable doc-upload
-  - travis-cargo --only stable coveralls --no-sudo -- --features="tls live_tests"
+  - travis-cargo --only stable coveralls --no-sudo -- --features="tls"
 
 env:
   global:
