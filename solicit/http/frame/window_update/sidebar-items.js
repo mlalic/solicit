@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["WINDOW_UPDATE_FRAME_LEN","The minimum size for the `WINDOW_UPDATE` frame payload."],["WINDOW_UPDATE_FRAME_TYPE","The frame type of the `WINDOW_UPDATE` frame."]],"struct":[["WindowUpdateFrame","The struct represents the `WINDOW_UPDATE` HTTP/2 frame."]]});

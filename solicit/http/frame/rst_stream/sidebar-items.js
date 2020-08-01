@@ -1,0 +1,1 @@
+initSidebarItems({"constant":[["RST_STREAM_FRAME_LEN","The total allowed size for the `RST_STREAM` frame payload."],["RST_STREAM_FRAME_TYPE","The frame type of the `RST_STREAM` frame."]],"struct":[["RstStreamFrame","The struct represents the `RST_STREAM` HTTP/2 frame."]]});
